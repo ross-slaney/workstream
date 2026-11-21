@@ -32,7 +32,7 @@ Once, by an owner of the subscription who is also a tenant administrator, signed
 ./scripts/setup-azure.sh
 ```
 
-It makes the app registration `workstream-github-production` and gives its service principal Contributor on the subscription, the right to assign exactly the three roles above, and Microsoft Graph `Group.ReadWrite.All` for the SQL administrators group. It stores the credential as the `AZURE_CREDENTIALS` secret on the GitHub environment `production`. It is safe to run again.
+For each of the GitHub environments `production` and `staging` it makes an app registration (`workstream-github-production`, `workstream-github-staging`) and gives its service principal Contributor on the subscription, the right to assign exactly the three roles above, and Microsoft Graph `Group.ReadWrite.All` for the SQL administrators groups. It stores each credential as that environment's `AZURE_CREDENTIALS` secret. It is safe to run again.
 
 Then set, on the GitHub environment `production`:
 
@@ -42,7 +42,7 @@ Then set, on the GitHub environment `production`:
 | `MODEL_ENDPOINT` | variable | The Foundry resource's Anthropic endpoint, `https://<resource>.services.ai.azure.com/anthropic`. |
 | `MODEL_KEY` | secret | The Foundry resource's key. |
 
-Without the two model values the product deploys and agents say models are not set up.
+Without the two model values the product deploys and agents say models are not set up. The `staging` environment takes the same two model values, and `ADMINISTRATOR_PASSWORD` as a secret.
 
 ## Releasing
 
@@ -53,6 +53,17 @@ Publishing the GitHub release `vX.Y.Z` runs `release.yml` (the `release` skill d
 3. **Desktops' image.** When `desktop/` changed since the previous release, or the gallery is empty, the job makes a Debian 13 machine in a group of its own, runs `desktop/image/bake.sh` on it, captures it into the gallery as version `X.Y.Z`, keeps the three newest versions and deletes the builder. New desktops use the newest version; running and stopped desktops keep the disk they have.
 
 To deploy a release again, run the workflow by hand with its tag. If a release fails, fix the cause and re-run its jobs; a fix to the workflow or the Bicep needs a new tag, because the workflow runs from the tag's commit.
+
+## Staging
+
+Production signs in by emailed code, so trying a change there needs a real inbox. Staging is a second copy for that: its own database, its own two apps and its own desktops (`workstream-staging`, `workstream-staging-desktops`) on production's shared foundation, signing in with an email and a password and sending no email. It is the same `main.bicep` with `stage=staging`.
+
+```bash
+gh workflow run staging.yml -f action=deploy -f ref=main     # or a branch, a tag, a commit
+gh workflow run staging.yml -f action=remove
+```
+
+The run's summary gives its two addresses. Its administrator is `admin@workstream.test` with the password in the `staging` environment's `ADMINISTRATOR_PASSWORD` secret. Remove it when you are done: while it exists it costs what its two apps and its database cost, and its desktops count against the same cores.
 
 ## Models
 

@@ -3,25 +3,25 @@
 # Run from your own terminal, signed in with `az login` as an Owner of the subscription and a tenant admin, and
 # with `gh auth login` on the repository. Safe to run again: it only adds what is missing.
 #
-# For the GitHub environment `production` it makes the app registration `workstream-github-production` and
-# its service principal, and gives the principal, at subscription scope:
+# For each GitHub environment (production, staging) it makes the app registration `workstream-github-<env>`
+# and its service principal, and gives the principal, at subscription scope:
 #   - Contributor: every resource the Bicep declares, whatever types it adds later, and the builder machine
 #     the desktops' image is baked on;
 #   - Role Based Access Control Administrator, conditioned to assign only the three roles the Bicep gives the
 #     runtime identity: AcrPull (registry-access.bicep), Virtual Machine Contributor (desktops.bicep,
 #     desktop-access.bicep) and Reader (desktop-access.bicep);
-#   - Microsoft Graph Group.ReadWrite.All, for the `workstream-sql-admins` group (data.bicep).
+#   - Microsoft Graph Group.ReadWrite.All, for each copy's `…-sql-admins` group (data.bicep).
 # It stores the principal's credential as the environment's AZURE_CREDENTIALS secret when the environment has none.
 #
 # Nothing here depends on what the Bicep deploys, so a change to infra never needs this run again.
 #
 #   PREFIX  app registration name prefix (default workstream-github)
-#   ENVS    environments to set up (default "production")
+#   ENVS    environments to set up (default "production staging")
 #   REPO    GitHub repository for the secrets (default agenetix/workstream); "none" stores no secret
 set -euo pipefail
 
 PREFIX=${PREFIX:-workstream-github}
-ENVS=${ENVS:-production}
+ENVS=${ENVS:-production staging}
 REPO=${REPO:-agenetix/workstream}
 
 subscription=$(az account show --query id -o tsv)

@@ -17,6 +17,10 @@ Asking to release, ship, cut a version or deploy authorizes the commit, push, PR
 - Never retag, move or delete a published tag. If a release is bad, deploy the previous one again and publish a patch.
 - The green `Checks` run on the merge commit is the evidence that it works. If it is red, find the cause and fix it first.
 
+## Before a release that changes the desktop or the infrastructure
+
+Try it on staging first: `gh workflow run staging.yml -f action=deploy -f ref=main`, sign in at the address in the run's summary with a password, start a task and watch its desktop. Remove staging afterwards with `-f action=remove`. Production signs in by emailed code, so it cannot be tried without a real inbox.
+
 ## 1. Establish the release
 
 ```bash

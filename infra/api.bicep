@@ -15,12 +15,15 @@ param release string = ''
 param publicOrigin string
 @description('The origin the web app is served from: the only origin CORS allows, and the sign-in redirect.')
 param webOrigin string
-@description('The Communication Services resource email is sent with (foundation.bicep).')
-param communicationName string
-@description('The address every email comes from.')
-param sender string
+@description('Email: the Communication Services resource it is sent with (foundation.bicep), as { group, name, sender }. Empty sends none: sign-in then needs passwordSignIn, and an invitation is a link to pass on.')
+param communication object = {}
+@description('Sign in with an email and a password beside the emailed code. On for a stage, off in production (api/Workstream.cs PasswordSignIn).')
+param passwordSignIn bool = false
 @description('The one address that reaches /admin; empty leaves nobody as administrator.')
 param administratorEmail string = ''
+@description('The administrator\'s password, for a stage; empty (production, always) sets none.')
+@secure()
+param administratorPassword string = ''
 @description('The resource group desktops are made in (desktops.bicep).')
 param desktopsGroup string
 param desktopsSubnetId string
@@ -32,8 +35,13 @@ param modelEndpoint string = ''
 param modelKey string = ''
 
 var models = !empty(modelEndpoint) && !empty(modelKey)
+var email = !empty(communication)
+var administrator = passwordSignIn && !empty(administratorEmail) && !empty(administratorPassword)
 
-resource communication 'Microsoft.Communication/communicationServices@2023-04-01' existing = { name: communicationName }
+resource emailService 'Microsoft.Communication/communicationServices@2023-04-01' existing = if (email) {
+  scope: resourceGroup(communication.?group ?? resourceGroup().name)
+  name: communication.?name ?? 'none'
+}
 
 resource app 'Microsoft.App/containerApps@2025-01-01' = {
   name: name
@@ -44,7 +52,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: concat([{ name: 'acs', value: communication.listKeys().primaryConnectionString }], models ? [{ name: 'model-key', value: modelKey }] : [])
+      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [])
       registries: [{ server: registryHost, identity: identityId }]
       ingress: {
         external: true
@@ -66,12 +74,10 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'SOURCE_COMMIT_SHA', value: sourceSha }
           { name: 'WORKSTREAM_RELEASE', value: release }
           { name: 'CONNECTION_STRING', value: 'Server=tcp:${serverHost},1433;Database=Workstream;Authentication=Active Directory Managed Identity;User Id=${clientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;Command Timeout=300;' }
-          { name: 'SqlOS__EmailOtp__AzureCommunicationServicesConnectionString', secretRef: 'acs' }
-          { name: 'SqlOS__EmailOtp__FromAddress', value: sender }
           // The identity the API signs in to Azure as, for the database and for making desktops.
           { name: 'AZURE_CLIENT_ID', value: clientId }
-          // Sign-in is by emailed code; the administrator is the one address that reaches /admin.
-          { name: 'Workstream__Auth__PasswordSignIn', value: 'false' }
+          // Production signs in by emailed code; the administrator is the one address that reaches /admin.
+          { name: 'Workstream__Auth__PasswordSignIn', value: passwordSignIn ? 'true' : 'false' }
           { name: 'Workstream__Administrator__Email', value: administratorEmail }
           // There is no separate worker: this process runs the jobs.
           { name: 'Workstream__Jobs__InProcess', value: 'true' }
@@ -82,7 +88,12 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'Workstream__Desktops__Azure__Location', value: location }
           { name: 'Workstream__Desktops__Azure__SubnetId', value: desktopsSubnetId }
           { name: 'Workstream__Desktops__Azure__ImageId', value: desktopImageId }
-        ], models ? [
+        ], email ? [
+          { name: 'SqlOS__EmailOtp__AzureCommunicationServicesConnectionString', secretRef: 'acs' }
+          { name: 'SqlOS__EmailOtp__FromAddress', value: communication.sender }
+        ] : [], administrator ? [
+          { name: 'Workstream__Administrator__Password', secretRef: 'administrator-password' }
+        ] : [], models ? [
           { name: 'Workstream__Model__Endpoint', value: modelEndpoint }
           { name: 'Workstream__Model__Key', secretRef: 'model-key' }
         ] : [])

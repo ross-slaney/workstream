@@ -1,0 +1,157 @@
+name: Deploy the web app and the API
+description: >-
+  Builds both images for a commit, deploys infra/main.bicep (production, or a stage such as staging on
+  production's shared foundation), and checks that both origins serve that exact commit. Expects azure/login
+  and a checkout of the revision being deployed.
+inputs:
+  stage:
+    description: Empty for production; a name such as staging for a second copy.
+    default: ''
+  sha:
+    description: The exact 40-character commit being deployed.
+    required: true
+  tag:
+    description: The images' tag, vX.Y.Z for a release or staging-<sha> for a stage.
+    required: true
+  release-tag:
+    description: Validated release tag, production only.
+    default: ''
+  administrator-email:
+    description: The one address that reaches /admin; empty leaves nobody as administrator.
+    default: ''
+  administrator-password:
+    description: A stage only. The administrator's password, where sign-in takes one.
+    default: ''
+  model-endpoint:
+    description: The Foundry resource's Anthropic endpoint; without it and the key, agents say models are not set up.
+    default: ''
+  model-key:
+    default: ''
+outputs:
+  origin:
+    description: Where the web app answers.
+    value: ${{ steps.foundation.outputs.origin }}
+  api-origin:
+    description: Where the API answers.
+    value: ${{ steps.foundation.outputs.api-origin }}
+runs:
+  using: composite
+  steps:
+    - name: Check the CI identity
+      shell: bash
+      env:
+        ADMINISTRATOR_EMAIL: ${{ inputs.administrator-email }}
+        MODEL_ENDPOINT: ${{ inputs.model-endpoint }}
+      run: |
+        sub=$(az account show --query id -o tsv)
+        oid=$(az account get-access-token --query accessToken -o tsv | cut -d. -f2 | tr '_-' '/+' | { b=$(cat); while [ $(( ${#b} % 4 )) -ne 0 ]; do b="$b="; done; echo "$b"; } | base64 -d | jq -r .oid)
+        if [ -z "$(az role assignment list --scope "/subscriptions/$sub" --query "[?principalId=='$oid'].id" -o tsv)" ]; then
+          echo "::error::This CI identity has no role on subscription $sub. A subscription owner runs scripts/setup-azure.sh once (infra/README.md, \"Setting up a subscription\"), then re-run this job."
+          exit 1
+        fi
+        [[ "$ADMINISTRATOR_EMAIL" == *@* ]] || echo "::warning::No administrator address is set: nobody is the system administrator, so nobody reaches /admin."
+        [ -n "$MODEL_ENDPOINT" ] || echo "::warning::No model endpoint is set: agents will say models are not set up (infra/README.md, \"Models\")."
+
+    # The images need the registry, and the web image needs the API's address, which is under the container
+    # apps environment's own domain. Both come from foundation.bicep, deployed here by itself on a fresh
+    # installation and again, with everything else, by main.bicep below. A stage stands on production's.
+    - name: Find the registry and the environment's domain
+      id: foundation
+      shell: bash
+      env:
+        STAGE: ${{ inputs.stage }}
+        GROUP: workstream
+        LOCATION: eastus2
+      run: |
+        set -euo pipefail
+        [[ -z "$STAGE" || "$STAGE" =~ ^[a-z][a-z0-9]{1,15}$ ]] || { echo "::error::A stage is a short lowercase name"; exit 1; }
+        name="workstream${STAGE:+-$STAGE}"
+        for group in "$name" "$name-desktops"; do
+          if [ "$(az group exists -n "$group")" = true ] && [ "$(az group show -n "$group" --query tags.managedBy -o tsv)" != bicep ]; then
+            echo "::error::Refusing to modify $group: not tagged managedBy=bicep"; exit 1
+          fi
+        done
+        find() {
+          registry=""; domain=""
+          # `az acr list -g` fails, rather than listing nothing, when the group does not exist yet.
+          if [ "$(az group exists -n "$GROUP")" = true ]; then
+            registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)
+            domain=$(az resource show -g "$GROUP" -n workstream-env --resource-type Microsoft.App/managedEnvironments --query "properties.provisioningState == 'Succeeded' && properties.defaultDomain || ''" -o tsv 2>/dev/null || true)
+          fi
+        }
+        find
+        if [ -z "$registry" ] || [ -z "$domain" ]; then
+          [ -z "$STAGE" ] || { echo "::error::Production's foundation is not deployed yet; a stage stands on it. Publish a release first."; exit 1; }
+          # A container apps environment inside a virtual network needs this provider registered first.
+          # Without it the environment waits forever, and no deployment registers it by itself.
+          az provider register -n Microsoft.ContainerService --wait
+          az group create -n "$GROUP" -l "$LOCATION" --tags project=workstream environment=production managedBy=bicep -o none
+          az deployment group create -g "$GROUP" -n foundation -f infra/foundation.bicep -o none --only-show-errors
+          find
+        fi
+        {
+          echo "name=$name"
+          echo "registry=$registry"
+          echo "origin=https://$name-web.$domain"
+          echo "api-origin=https://$name-api.$domain"
+        } >> "$GITHUB_OUTPUT"
+
+    # Two images per deploy: the API and the web app, which has the API's origin inlined into its bundle.
+    # Deploying the same tag again (a rollback) reuses its images.
+    - uses: ./.github/actions/build-api-image
+      id: api
+      with:
+        registry: ${{ steps.foundation.outputs.registry }}
+        tag: ${{ inputs.tag }}
+    - uses: ./.github/actions/build-web-image
+      id: web
+      with:
+        registry: ${{ steps.foundation.outputs.registry }}
+        tag: ${{ inputs.tag }}
+        api-url: ${{ steps.foundation.outputs.api-origin }}
+
+    - name: Deploy infra/main.bicep
+      shell: bash
+      env:
+        STAGE: ${{ inputs.stage }}
+        NAME: ${{ steps.foundation.outputs.name }}
+        SHA: ${{ inputs.sha }}
+        RELEASE_TAG: ${{ inputs.release-tag }}
+        IMAGE: ${{ steps.api.outputs.image }}
+        WEB_IMAGE: ${{ steps.web.outputs.image }}
+        ADMINISTRATOR_EMAIL: ${{ inputs.administrator-email }}
+        ADMINISTRATOR_PASSWORD: ${{ inputs.stage != '' && inputs.administrator-password || '' }}
+        MODEL_ENDPOINT: ${{ inputs.model-endpoint }}
+        MODEL_KEY: ${{ inputs.model-key }}
+      run: |
+        # Once more on failure: a fresh installation's SQL administrators group (data.bicep) cannot take its
+        # members in the same second Entra makes it, and the deployment is idempotent.
+        for attempt in 1 2; do
+          az deployment sub create -l eastus2 -n "$NAME" -f infra/main.bicep -o none --only-show-errors \
+            -p stage="$STAGE" image="$IMAGE" webImage="$WEB_IMAGE" sourceSha="$SHA" releaseTag="$RELEASE_TAG" \
+               administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
+               modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" && break
+          [ "$attempt" = 1 ] || exit 1
+          echo "::warning::The deployment failed once; deploying again."
+        done
+
+    - name: Deployment timings
+      if: always() && steps.foundation.outputs.name != ''
+      shell: bash
+      env:
+        NAME: ${{ steps.foundation.outputs.name }}
+      run: |
+        az deployment operation sub list -n "$NAME" \
+          --query "[?properties.targetResource].{resource: properties.targetResource.resourceName, state: properties.provisioningState, duration: properties.duration, finished: properties.timestamp}" \
+          -o table || true
+
+    - name: Verify the exact revision on both origins
+      shell: bash
+      env:
+        SHA: ${{ inputs.sha }}
+        ORIGIN: ${{ steps.foundation.outputs.origin }}
+        API: ${{ steps.foundation.outputs.api-origin }}
+      run: |
+        scripts/verify-deployment.sh api "$API" "$SHA" 15
+        scripts/verify-deployment.sh web "$ORIGIN" "$SHA" 5
+        echo "### Deployed [$ORIGIN]($ORIGIN) and [$API]($API) at \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"

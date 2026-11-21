@@ -196,10 +196,8 @@ resource desktopImage 'Microsoft.Compute/galleries/images@2024-03-03' = {
   }
 }
 
+// main.bicep finds everything here by name, so a stage can stand on this foundation without deploying it.
 output registryName string = registry.name
-output environmentId string = environment.id
 output defaultDomain string = environment.properties.defaultDomain
-output desktopsSubnetId string = '${network.id}/subnets/desktops'
 output desktopImageId string = desktopImage.id
 output communicationName string = communication.name
-output sender string = 'DoNotReply@${emailDomain.properties.mailFromSenderDomain}'

@@ -1,0 +1,87 @@
+name: Staging
+
+# A second copy of the product to try a change on before a release: its own database, its own two apps and
+# its own desktops, on production's shared foundation (infra/main.bicep `stage`). It signs in with an email
+# and a password, so nobody needs an inbox, and sends no email. Started and removed by hand; nothing else
+# runs it. Remove it when you are done: it costs what its two apps and its database cost while it exists.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Deploy staging, or remove it
+        type: choice
+        options: [deploy, remove]
+        default: deploy
+      ref:
+        description: Branch, tag or commit to deploy
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workstream-staging
+  cancel-in-progress: false
+
+env:
+  NAME: workstream-staging
+
+jobs:
+  deploy:
+    name: Web + API (Bicep)
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - uses: ./.github/actions/deploy
+        with:
+          stage: staging
+          sha: ${{ steps.commit.outputs.sha }}
+          tag: staging-${{ steps.commit.outputs.sha }}
+          # The administrator here is a made-up address with a password (the secret ADMINISTRATOR_PASSWORD).
+          administrator-email: ${{ vars.ADMINISTRATOR_EMAIL || 'admin@workstream.test' }}
+          administrator-password: ${{ secrets.ADMINISTRATOR_PASSWORD }}
+          model-endpoint: ${{ vars.MODEL_ENDPOINT }}
+          model-key: ${{ secrets.MODEL_KEY }}
+
+  remove:
+    name: Remove staging
+    if: inputs.action == 'remove'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: staging
+    steps:
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Remove its desktops, its apps and database, and what it was allowed
+        run: |
+          set -euo pipefail
+          for group in "$NAME" "$NAME-desktops"; do
+            if [ "$(az group exists -n "$group")" = true ] && [ "$(az group show -n "$group" --query tags.managedBy -o tsv)" != bicep ]; then
+              echo "::error::Refusing to delete $group: not tagged managedBy=bicep"; exit 1
+            fi
+          done
+          # The runtime identity's roles outside its own groups (the registry, the desktops' subnet, the
+          # gallery) go first: a role left on a deleted identity stays behind as an unknown principal.
+          principal=$(az identity show -g "$NAME" -n "$NAME-runtime" --query principalId -o tsv 2>/dev/null || true)
+          if [ -n "$principal" ]; then
+            az role assignment list --all --assignee "$principal" --query "[].id" -o tsv | xargs -r -n 1 az role assignment delete --ids
+          fi
+          for group in "$NAME-desktops" "$NAME"; do
+            if [ "$(az group exists -n "$group")" = true ]; then az group delete -n "$group" --yes; fi
+          done
+          # The database's administrators group lives in Entra, outside any resource group.
+          az ad group delete --group "$NAME-sql-admins" 2>/dev/null || true
+          echo "### Staging removed" >> "$GITHUB_STEP_SUMMARY"
