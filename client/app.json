@@ -2,7 +2,7 @@
   "expo": {
     "name": "Workstream",
     "slug": "workstream",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "scheme": "workstream",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -10,7 +10,9 @@
       "bundler": "metro",
       "output": "server"
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router"
+    ],
     "experiments": {
       "typedRoutes": false
     }
