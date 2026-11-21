@@ -9,6 +9,7 @@ import { useT } from "@/lib/i18n";
 import type { DesktopSize, Environment, EnvironmentSetup } from "@/lib/workstream/api";
 import { SettingsPage } from "../page";
 import type { EnvironmentDraft, EnvironmentsScreenProps } from "./props";
+import { sameRepository } from "./repository";
 
 /** The page, the same on every surface: the list, and the editor over it. */
 export function EnvironmentsPage(p: EnvironmentsScreenProps) {
@@ -127,8 +128,34 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
           <span className="ml-2 font-normal text-muted-foreground">{t("environments.editor.advancedHint")}</span>
         </summary>
         <div className="flex flex-col gap-4 border-t border-border px-4 py-4">
+          {p.repositories && p.repositories.length > 0 ? (
+            <SelectField
+              label={t("environments.editor.repositoryPick")}
+              value={p.repositories.find((repository) => sameRepository(repository.url, draft.repositoryUrl))?.url ?? ""}
+              onChangeValue={(url) => {
+                const picked = p.repositories?.find((repository) => repository.url === url);
+                // A repository picked brings its default branch, unless one is already written.
+                set(picked ? { repositoryUrl: picked.url, repositoryBranch: draft.repositoryBranch || picked.defaultBranch } : { repositoryUrl: "", repositoryBranch: "" });
+              }}
+              options={[
+                { value: "", label: t("environments.editor.repositoryPickNone") },
+                ...p.repositories.map((repository) => ({
+                  value: repository.url,
+                  label: repository.private ? t("environments.editor.repositoryPickPrivate", { name: repository.fullName }) : repository.fullName,
+                })),
+              ]}
+            />
+          ) : null}
           <div className="grid gap-3 md:grid-cols-[1fr_180px]">
-            <TextField label={t("environments.editor.repository")} placeholder={t("environments.editor.repositoryPlaceholder")} hint={t("environments.editor.repositoryHint")} value={draft.repositoryUrl} onChangeText={(repositoryUrl) => set({ repositoryUrl })} inputMode="url" spellCheck={false} />
+            <TextField
+              label={t("environments.editor.repository")}
+              placeholder={t("environments.editor.repositoryPlaceholder")}
+              hint={p.repositories ? t("environments.editor.repositoryHintConnected") : t("environments.editor.repositoryHint")}
+              value={draft.repositoryUrl}
+              onChangeText={(repositoryUrl) => set({ repositoryUrl })}
+              inputMode="url"
+              spellCheck={false}
+            />
             <TextField label={t("environments.editor.branch")} placeholder={t("environments.editor.branchPlaceholder")} value={draft.repositoryBranch} onChangeText={(repositoryBranch) => set({ repositoryBranch })} spellCheck={false} />
           </div>
           <TextArea label={t("environments.editor.setupScript")} hint={t("environments.editor.setupScriptHint")} placeholder={t("environments.editor.setupScriptPlaceholder")} value={draft.setupScript} onChangeText={(setupScript) => set({ setupScript })} rows={6} code />

@@ -16,6 +16,7 @@ This document defines who can do what to what. It is written in SqlOS terms firs
 | Agent | The program on the desktop that does the work. It is built on the Claude Agent SDK and calls models only through Workstream. |
 | Message | One entry in a task's conversation, written by a person or by the agent. |
 | Share | One task given to a person outside its team: to watch it, to write to its agent too, or to use its desktop as well, for a while or until it is taken back. |
+| GitHub connection | A team's link to one installation of Workstream's GitHub App on a GitHub account or organization. The team's desktops get short-lived tokens for their repositories through it. |
 
 ## Principals: who
 
@@ -61,10 +62,10 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | Permission | Node | Allows |
 | --- | --- | --- |
 | `ADMIN_VIEW` | root | The system administrator's dashboard, and changing a team's limits. |
-| `TEAM_VIEW` | team | See the team, its people and its limits. |
+| `TEAM_VIEW` | team | See the team, its people, its limits, and its GitHub connection with the repositories it reaches. |
 | `TEAM_VIEW_USAGE` | team | See what the team used this month. |
 | `TEAM_MANAGE_MEMBERS` | team | Invite, remove and change people. |
-| `TEAM_MANAGE_SETTINGS` | team | Rename the team. |
+| `TEAM_MANAGE_SETTINGS` | team | Rename the team; connect and disconnect GitHub. |
 | `TEAM_CREATE_ENVIRONMENT` | team | Add an environment. |
 | `TEAM_CREATE_TASK` | team | Start a task. |
 | `ENVIRONMENT_VIEW` | environment | See an environment and start tasks from it. Variable values are never returned. |
@@ -73,7 +74,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_PROMPT` | task | Write to the agent and interrupt it. |
 | `TASK_DRIVE` | task | Use the desktop's mouse, keyboard and clipboard. Without it the relay drops what the browser would send them. |
 | `TASK_MANAGE` | task | Rename, stop, start and delete it; share it, see who it is shared with, and take a share back. |
-| `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model. |
+| `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model, and get a GitHub token for its environment's repository. |
 | `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
 | `TASK_NOTIFY` | task | The notifier's own: read what the agent last said and email the task's people about it. |
@@ -164,6 +165,7 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `ModelUsage` | Tokens and cost of each model call. | Usage. |
 | `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
 | `TaskWatchers` | When each person last had a task's desktop on screen, one row a person a task. Removed with the task. | A fact about what someone did, like `Tasks.CreatedBy`, and never a permission: whether they may watch is `TASK_VIEW`. It is read only to keep from emailing someone about the task they are looking at. |
+| `GitHubConnections` | A team's GitHub connection: the installation's id, the GitHub account it is on, who connected it (a principal id, a fact) and when. One a team at most. | Configuration of the team, like its limits. It relates a team to an account on GitHub, which is not a principal, and grants nobody anything: who may change it is `TEAM_MANAGE_SETTINGS` on the team, and who may use it is a desktop holding `TASK_RUN_AGENT` on a task in the team. A table of its own rather than columns on `Teams`, because GitHub names an installation when it is removed and that lookup needs an index, which on the protected `Teams` table SqlOS would copy under every ancestor. |
 
 `Tasks.CreatedBy` records who started a task. It grants nothing.
 
@@ -204,7 +206,7 @@ Cloning a repository and running a setup script can take minutes on every new de
 
 1. Something asks for it: the environment is added with a setup, or its setup inputs change; someone presses "Prepare again" (`POST /api/environments/{id}/setup`, `ENVIRONMENT_EDIT`); or a task starts and finds no save it can use (it is not asked again for settings whose last attempt failed), or finds one older than a week (the task uses the old one, and the new one is made behind it).
 2. The operator (`ENVIRONMENT_OPERATE_SETUP` on the environment) makes a machine when the limits allow (`Workstream:Desktops:Saves`: one preparing at once, four hours of preparing a day, 45 minutes at most each). The machine is told the API's address and a new key for the environment's preparing account, which holds `environment_setup` on the environment and nothing else. Its time is a `DesktopRun` with the purpose `prepare`.
-3. The machine's agent reads its setup (`GET /api/desktop/setup`, found by its page of environments with `ENVIRONMENT_RUN_SETUP`), which says it is preparing and carries no task and no model. It clones the repository, runs the setup script, and says how it is going (`POST /api/desktop/setup`). Before it says it is done it removes everything of the preparing from the disk: the variables, the git token, the logs and the browser's profile. It leaves one file saying when and at which commit it was prepared.
+3. The machine's agent reads its setup (`GET /api/desktop/setup`, found by its page of environments with `ENVIRONMENT_RUN_SETUP`), which says it is preparing and carries no task and no model. It clones the repository, runs the setup script, and says how it is going (`POST /api/desktop/setup`). Before it says it is done it removes everything of the preparing from the disk: the variables, the logs and the browser's profile; git keeps no token, since it asks for one each time (a preparing desktop gets one for its environment's repository from the team's GitHub connection while its attempt lasts). It leaves one file saying when and at which commit it was prepared.
 4. Only when the script exits 0, the operator stops the machine, saves its disk as a snapshot, removes the machine, ends the key, and removes the save it replaces: an environment keeps one. A failed attempt keeps nothing, and its machine is removed.
 5. A save is used only for the setup inputs it was made from and the desktops' image version it was made on (`Workstream:Desktops:Azure:ImageId`). A task whose environment has such a save gets a machine made from it; its run's source is `save`, its agent pulls the branch's newer commits and does not run the setup script, and its first line says where it started from. Any other task starts from the image and does the setup itself, as before.
 
@@ -252,6 +254,25 @@ The email is one of two SqlOS templates the API writes at every start (`task.fin
 
 Stopping releases the machine but keeps its disk; starting brings the same desktop back, and its agent starts again what it had left running and reopens what was open (architecture.md, "The agent"). A desktop nobody has watched or written to for a while, whose agent is idle, is stopped by the operator. Deleting a task deletes the machine, the conversation and the node.
 
+### Connect GitHub
+
+A team connects GitHub so its desktops can clone private repositories, push branches and open pull requests, without anyone pasting a personal token. It is a GitHub App, Workstream's own, installed on the team's GitHub account or organization; the app's settings (`Workstream:GitHub`) are empty until the owner makes it (infra/README.md, "GitHub"), and the team's page then says GitHub is not set up.
+
+1. An administrator presses Connect GitHub on the team's page. The API checks `TEAM_MANAGE_SETTINGS` on the team and answers with the app's installation address on GitHub, carrying a state it signed: the team and the person, good for an hour (`POST /api/teams/{id}/github/install`).
+2. On GitHub they pick the account and the repositories, install, and authorize the app. GitHub sends the browser to the API's callback (`/api/github/callback`) with the state, the installation's id and a code for the person who installed it. The callback decides nothing, because the browser carries no person's token there: it hands all of it to the web app's `/github` page.
+3. The web app posts it as the person signed in there (`POST /api/github/connect`). The API checks that the state is one it signed for this same person, that they still hold `TEAM_MANAGE_SETTINGS` on the team, and that GitHub, asked with the person's own GitHub token from the code, lists that installation among the ones their account reaches. The installation id in the address proves nothing by itself: anyone can type another account's. The person's GitHub token answers that one question and is kept nowhere.
+4. The team's row in `GitHubConnections` is written. Connecting again replaces it.
+
+Everyone on the team sees the connection and the repositories it reaches (`TEAM_VIEW`), read from GitHub as the installation each time; an environment's repository can be picked from them. An administrator disconnects it (`TEAM_MANAGE_SETTINGS`), which deletes the row: the app stays installed on GitHub, where whoever owns the account removes it, because another team may be connected to the same installation. When the app is removed on GitHub, its webhook (where a secret is set) disconnects every team that was connected to that installation.
+
+### A desktop's GitHub token
+
+The desktop asks the API for a token with its key (`GET /api/desktop/github/token`). The API finds the task the desktop holds `TASK_RUN_AGENT` on, the repository of the task's environment, and the team's connection. When the repository is on github.com, on the connection's account, the API asks GitHub, as the app, for an installation token for that one repository with three permissions: contents and pull requests to write, metadata to read. GitHub makes it good for one hour. It is handed straight to the desktop and stored nowhere; the desktop asks again whenever git or gh needs one. Anything else (no repository, another account's repository, no connection, a spare, the desktop of a deleted task) gets no token.
+
+The token goes with the desktop, not with a person. Someone a task is shared with who may write to its agent (`task_prompter`) or use its desktop (`task_driver`) can have work pushed to that one repository, as the team's people can, while the share lasts; a `task_watcher` only watches. Sharing a task whose environment has a repository is sharing that much.
+
+On the desktop, git's credential helper and the wrapper around gh ask for the token (`desktop/agent/github.mjs`), so cloning, pushing and `gh pr create` work. A `GITHUB_TOKEN` or `GH_TOKEN` an environment's variables already hold is used as before, without asking. The agent is told to finish project work on a branch of its own and a pull request, never on the default branch.
+
 ### Usage and limits
 
 A team has a model allowance for the calendar month and a limit on desktops running at once. People on the team see what was used. A system administrator sees every running desktop and can change a team's limits. Payments are not built; the numbers that a bill would be made from are.
@@ -262,6 +283,8 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 - **The desktop is a principal, and its task is a grant.** The agent's key identifies one service account. The account holds `task_desktop` on the one task it works on, so a key taken from a desktop reaches that task and nothing else, and stops working when the task is deleted. The key carries no task: the API finds the task by the grant, which is why a spare can become a task's desktop without being told anything new.
 - **Sharing is additive, a grant on the task.** The team keeps its one grant on the team and sees every task; a person outside it is given one task, by a role on that task's node, with SqlOS's `EffectiveTo` as the end. Nothing a share grants reaches the team node, so the team's lists cost what they did.
 - **The API is the only way into a desktop.** Desktops have no inbound access from the internet or from each other. The relay authorizes every stream.
+- **A GitHub connection is a row, and its tokens are minted, not kept.** Which installation a team uses is configuration, not access: nobody is granted on it. A desktop's token is made for one repository, for an hour, at the moment it is asked for, so nothing in the database or on a desktop's disk is worth stealing, and a stolen token is worth one repository for less than an hour.
+- **An installation is the person's to name only if GitHub says their account reaches it.** The installation id GitHub puts in the address can be changed by anyone, so the connection is made only after the person's own GitHub account is asked which installations it can reach, and only by the signed-in person the state was signed for.
 - **All inference goes through the gateway.** The Foundry key never leaves the API. Usage is recorded where it is spent.
 - **The command line signs in through the browser with SqlOS's device flow, not with an API key and not with a loopback redirect.** SqlOS has a client for exactly this (`SeedCliClient`: public, no secret, the device and refresh grants, an allow-list of scopes and one audience), and its headless flow has the device steps (`/headless/device/resolve`, `approve`, `deny`), so the approval is one more page of the web app over the sign-in it already has. The token is the person's own session, so the command line has the person's grants as they are now, and loses them when the person does. An API key in SqlOS is a machine client bound to a service account, a principal of its own: to act as the person it would need grants copied from theirs on every team and kept in step with their memberships, a stored copy of access that the rules forbid. Authorization code with PKCE on a loopback address would also work in SqlOS, but it needs a free local port and a browser on the same machine, and the web app's sign-in would have to finish another client's request; the device flow needs neither, so it also works over SSH, in a container or on a dev VM. A scope of its own (`workstream.start`) keeps the command line to reading and starting tasks: a token taken from a laptop cannot stop, delete, rename or write to a task, change a team, or open a desktop.
 - **The agent is Workstream's own, on the Claude Agent SDK.** Anthropic's terms for hosting Claude Code itself require each end user to bring their own credential; products built on the Agent SDK use the developer's API key or cloud provider. Claude Code is not wired to Workstream's inference.

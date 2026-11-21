@@ -8,6 +8,7 @@ using Workstream.Api;
 using SqlOS.Email.Interfaces;
 using Workstream.Api.Desktops;
 using Workstream.Api.Email;
+using Workstream.Api.GitHub;
 using Workstream.Api.Model;
 
 namespace Workstream.Tests;
@@ -17,8 +18,8 @@ namespace Workstream.Tests;
 /// real AppHost (apphost/AppHost.cs) through Aspire.Hosting.Testing, as a throwaway container on a port of its
 /// own, without the api and web resources. The API runs here, in the test process, with the same
 /// <c>AddWorkstreamApi</c>/<c>MapWorkstreamApi</c> as Program.cs, so coverage sees it. Three things are played
-/// instead of real: the desktops (<see cref="FakeDesktops"/>), the model (<see cref="FakeModel"/>) and the mail
-/// provider (<see cref="TestMail"/>). No job
+/// instead of real: the desktops (<see cref="FakeDesktops"/>), the model (<see cref="FakeModel"/>), the mail
+/// provider (<see cref="TestMail"/>) and GitHub (<see cref="FakeGitHub"/>). No job
 /// server runs: a test calls the job it wants (<see cref="Jobs"/>). Tests isolate themselves by signing up
 /// new people, each with a team of their own.
 /// </summary>
@@ -38,6 +39,7 @@ public static class Stack
     public static readonly FakeDesktops Desktops = new();
     public static readonly FakeModel Model = new();
     public static readonly TestMail Mail = new();
+    public static readonly FakeGitHub GitHub = new();
 
     static DistributedApplication? aspire;
     static WebApplication? api;
@@ -120,6 +122,15 @@ public static class Stack
         // The model: Foundry is played in this process, under the gateway's own client.
         builder.Configuration["Workstream:Model:Endpoint"] = "http://foundry.test/anthropic";
         builder.Configuration["Workstream:Model:Key"] = ModelKey;
+        // Workstream's GitHub App: GitHub is played in this process, under the API's own GitHub client.
+        builder.Configuration["Workstream:GitHub:AppId"] = FakeGitHub.AppId;
+        builder.Configuration["Workstream:GitHub:AppSlug"] = FakeGitHub.AppSlug;
+        builder.Configuration["Workstream:GitHub:ClientId"] = FakeGitHub.ClientId;
+        builder.Configuration["Workstream:GitHub:ClientSecret"] = FakeGitHub.ClientSecret;
+        builder.Configuration["Workstream:GitHub:PrivateKey"] = GitHub.PrivateKeyPem;
+        builder.Configuration["Workstream:GitHub:WebhookSecret"] = FakeGitHub.WebhookSecret;
+        builder.Configuration["Workstream:GitHub:ApiUrl"] = FakeGitHub.Api;
+        builder.Configuration["Workstream:GitHub:WebUrl"] = FakeGitHub.Web;
         // Every journey invites from this one address; SqlOS's hourly caps are for the public.
         builder.Configuration["SqlOS:Invitations:MaxInvitationsPerIpPerHour"] = "100000";
         builder.AddWorkstreamApi();
@@ -127,6 +138,7 @@ public static class Stack
         builder.Services.AddHttpClient(ModelGateway.ClientName).ConfigurePrimaryHttpMessageHandler(() => Model);
         // Email as if it were set up: SqlOS renders every message from its stored template and hands it here.
         builder.Services.AddSingleton<ISqlOSEmailSender>(Mail);
+        builder.Services.AddHttpClient(GitHubApp.ClientName).ConfigurePrimaryHttpMessageHandler(() => GitHub);
         var app = builder.Build();
         app.MapWorkstreamApi();
         return app;

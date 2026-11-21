@@ -110,6 +110,8 @@ export function TeamPage(p: TeamScreenProps) {
         <p className="text-[13px] text-muted-foreground">{t("team.adminOnly")}</p>
       )}
 
+      <GitHubSection {...p} admin={admin} />
+
       <Section title={t("team.email.title")}>
         <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
           <input
@@ -163,5 +165,98 @@ export function TeamPage(p: TeamScreenProps) {
         </Dialog>
       ) : null}
     </SettingsPage>
+  );
+}
+
+const shortDate = (at: string) => new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+/** The team's GitHub connection: what it is connected to and what it reaches, or connecting it. */
+function GitHubSection(p: TeamScreenProps & { admin: boolean }) {
+  const t = useT("settings");
+  const common = useT("common");
+  const [disconnecting, setDisconnecting] = useState(false);
+  const github = p.github.kind === "ready" ? p.github.value : null;
+
+  return (
+    <Section title={t("team.github.title")}>
+      {!github ? (
+        <ReadState read={p.github} onRetry={p.onRetryGitHub} />
+      ) : !github.available ? (
+        <p className="text-[13px] text-muted-foreground">{t("team.github.notSetUp")}</p>
+      ) : !github.connected ? (
+        <div className="flex flex-col items-start gap-3 rounded-lg border border-border bg-card px-4 py-4">
+          <p className="max-w-[620px] text-sm text-muted-foreground">{t("team.github.body")}</p>
+          {p.admin ? (
+            <Button tone="primary" label={t("team.github.connect")} busy={p.busy} onClick={p.onConnectGitHub} />
+          ) : (
+            <p className="text-[13px] text-muted-foreground">{t("team.github.adminOnly")}</p>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-sm font-medium text-foreground">{t("team.github.connectedTo", { account: github.account ?? "" })}</span>
+              <span className="truncate text-[13px] text-muted-foreground">
+                {github.accountType === "Organization" ? t("team.github.organization") : t("team.github.personal")}
+                {github.connectedAt
+                  ? ` · ${github.connectedByName ? t("team.github.connectedBy", { name: github.connectedByName, date: shortDate(github.connectedAt) }) : t("team.github.connectedOn", { date: shortDate(github.connectedAt) })}`
+                  : null}
+              </span>
+            </div>
+            {p.admin && github.manageUrl ? (
+              <a
+                href={github.manageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t("team.github.manage")}
+              </a>
+            ) : null}
+            {p.admin ? <Button size="small" tone="quiet" label={t("team.github.disconnect")} onClick={() => setDisconnecting(true)} /> : null}
+          </div>
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <h3 className="text-[13px] font-medium text-muted-foreground">{t("team.github.repositories")}</h3>
+            {!p.githubRepositories || p.githubRepositories.kind !== "ready" ? (
+              p.githubRepositories ? <ReadState read={p.githubRepositories} onRetry={p.onRetryGitHub} /> : null
+            ) : p.githubRepositories.value.length === 0 ? (
+              <p className="text-[13px] text-muted-foreground">{t("team.github.noRepositories")}</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {p.githubRepositories.value.map((repository) => (
+                  <li key={repository.fullName} className="flex items-center gap-2 text-sm text-foreground">
+                    <span className="min-w-0 truncate font-mono text-[13px]">{repository.fullName}</span>
+                    {repository.private ? <span className="text-[12px] text-muted-foreground">{t("team.github.private")}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {disconnecting && github ? (
+        <Dialog
+          title={t("team.github.disconnectTitle")}
+          onClose={() => setDisconnecting(false)}
+          footer={
+            <>
+              <Button label={common("actions.cancel")} onClick={() => setDisconnecting(false)} />
+              <Button
+                tone="danger"
+                label={t("team.github.disconnect")}
+                onClick={() => {
+                  p.onDisconnectGitHub();
+                  setDisconnecting(false);
+                }}
+              />
+            </>
+          }
+        >
+          <p className="text-sm text-muted-foreground">{t("team.github.disconnectBody", { account: github.account ?? "" })}</p>
+        </Dialog>
+      ) : null}
+    </Section>
   );
 }

@@ -166,13 +166,23 @@ async function exchangeForever() {
 
 const shellQuote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
 
-/** The environment's variables, for every shell on the desktop, and a token for git where one is given. */
+/** Where gh's wrapper is (shims/gh): first on the PATH of every shell and of the agent, so gh signs itself in. */
+const shims = path.join(root, "agent", "shims");
+
+/**
+ * The environment's variables, for every shell on the desktop, and git and gh set up for GitHub: git asks
+ * github.mjs for a token whenever it needs one, and gh asks it through its wrapper. The token is for the
+ * environment's repository, from the team's GitHub connection, or the GITHUB_TOKEN the environment was given.
+ */
 async function writeVariables(variables) {
-  const lines = Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`);
+  const lines = [`export PATH=${shellQuote(shims)}:"$PATH"`, ...Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`)];
   await writeFile(path.join(dir, "env.sh"), lines.join("\n") + "\n", { mode: 0o600 });
-  const token = variables.GITHUB_TOKEN ?? variables.GH_TOKEN;
-  if (token) {
-    await run("git", ["config", "--global", `url.https://x-access-token:${token}@github.com/.insteadOf`, "https://github.com/"]).catch((error) => log("git config failed:", error.message));
+  const config = (...args) => run("git", ["config", "--global", ...args]).catch((error) => log("git config failed:", error.message));
+  await config("--replace-all", "credential.https://github.com.helper", `!node ${path.join(root, "agent", "github.mjs")} credential`);
+  // Commits need an author. The person can set their own, and a repository's own setting wins.
+  if (!(await run("git", ["config", "--global", "user.name"]).then(() => true, () => false))) {
+    await config("user.name", "Workstream agent");
+    await config("user.email", "agent@workstream.invalid");
   }
 }
 
@@ -197,7 +207,7 @@ async function runSetupScript(script, folder, variables) {
 }
 
 const start = (command, args, variables) =>
-  spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, ...variables } }).on("error", (error) => log(`${command} did not start:`, error.message)).unref();
+  spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, PATH: `${shims}:${process.env.PATH}`, ...variables } }).on("error", (error) => log(`${command} did not start:`, error.message)).unref();
 
 /** Whether a program of this name is running in the session. */
 const running = (name) => run("pgrep", ["-x", name]).then(() => true, () => false);
@@ -264,7 +274,9 @@ async function prepareFiles(setup, saved) {
     if (!existsSync(target)) {
       say("activity", `Cloning ${setup.repository.url}`);
       const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
-      await run("git", args, { timeout: 15 * 60_000 }).catch((error) =>
+      // With the environment's variables, where a pasted GITHUB_TOKEN is, and never waiting on a prompt nobody sees.
+      const env = { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" };
+      await run("git", args, { timeout: 15 * 60_000, env }).catch((error) =>
         say("text", `I could not clone the repository: ${String(error.stderr || error.message).trim().split("\n").slice(-3).join(" ")}`));
     }
     if (existsSync(target)) workspace = target;
@@ -410,7 +422,7 @@ function runScript(script, folder, variables, onOutput) {
 /**
  * This machine prepares an environment: the repository cloned and the setup script run once, for a save
  * that tasks start from. Nothing of a task is ever here, and nothing of the preparing is left behind: before
- * it says it is done, the variables, the git token, the logs and the browser's profile are removed, and the
+ * it says it is done, the variables, the logs and the browser's profile are removed, and the
  * one file left in ~/.workstream says when and at which commit it was prepared.
  */
 async function prepareForSave(setup) {
@@ -428,7 +440,8 @@ async function prepareForSave(setup) {
     const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
     await report({ state: "running", output: `git clone ${setup.repository.url}` });
     try {
-      await run("git", args, { timeout: 15 * 60_000 });
+      // As on a task's desktop: the token comes from github.mjs, or a pasted GITHUB_TOKEN; nothing waits on a prompt.
+      await run("git", args, { timeout: 15 * 60_000, env: { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" } });
     } catch (error) {
       await report({ state: "failed", exit: null, output: tail(String(error.stderr || error.message).trim()) });
       return;
@@ -454,7 +467,7 @@ async function prepareForSave(setup) {
       return;
     }
   }
-  await clearForSave(setup.variables);
+  await clearForSave();
   await writeFile(preparedFile, JSON.stringify({ preparedAt: new Date().toISOString(), commit, branch }));
   await run("sync").catch(() => {});
   const bytes = usedBytes(await run("df", ["-B1", "--output=used", "/"]).then((result) => result.stdout, () => ""));
@@ -462,10 +475,12 @@ async function prepareForSave(setup) {
   log("Prepared. The machine is about to be stopped and its disk saved.");
 }
 
-/** Remove what is the preparing's and nobody's after it: everything in ~/.workstream, the git token, the shell's history. */
-async function clearForSave(variables) {
-  const token = variables.GITHUB_TOKEN ?? variables.GH_TOKEN;
-  if (token) await run("git", ["config", "--global", "--remove-section", `url.https://x-access-token:${token}@github.com/`]).catch(() => {});
+/**
+ * Remove what is the preparing's and nobody's after it: everything in ~/.workstream (the variables, the logs,
+ * the browser's profile) and the shell's history. Git keeps no token: it asks github.mjs for one each time,
+ * with the key of whichever machine it runs on.
+ */
+async function clearForSave() {
   for (const name of existsSync(dir) ? readdirSync(dir) : []) await rm(path.join(dir, name), { recursive: true, force: true });
   await rm(path.join(home, ".bash_history"), { force: true });
 }

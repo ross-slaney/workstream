@@ -36,8 +36,20 @@ param desktopImageId string
 param modelEndpoint string = ''
 @secure()
 param modelKey string = ''
+@description('Workstream\'s GitHub App (api/GitHub/GitHubApp.cs): its id, slug and OAuth client id. All of them and the two secrets below, or GitHub is not set up.')
+param github object = {}
+@secure()
+param githubClientSecret string = ''
+@description('The app\'s private key: its PEM, or the PEM in base64.')
+@secure()
+param githubPrivateKey string = ''
+@description('Optional: the app\'s webhook secret. Without it the webhook is not taken.')
+@secure()
+param githubWebhookSecret string = ''
 
 var models = !empty(modelEndpoint) && !empty(modelKey)
+var gitHubApp = !empty(github.?appId ?? '') && !empty(github.?appSlug ?? '') && !empty(github.?clientId ?? '') && !empty(githubClientSecret) && !empty(githubPrivateKey)
+var gitHubWebhook = gitHubApp && !empty(githubWebhookSecret)
 var email = !empty(communication)
 var administrator = passwordSignIn && !empty(administratorEmail) && !empty(administratorPassword)
 
@@ -55,7 +67,10 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [])
+      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [], gitHubApp ? [
+        { name: 'github-client-secret', value: githubClientSecret }
+        { name: 'github-private-key', value: githubPrivateKey }
+      ] : [], gitHubWebhook ? [{ name: 'github-webhook-secret', value: githubWebhookSecret }] : [])
       registries: [{ server: registryHost, identity: identityId }]
       ingress: {
         external: true
@@ -102,6 +117,14 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         ] : [], models ? [
           { name: 'Workstream__Model__Endpoint', value: modelEndpoint }
           { name: 'Workstream__Model__Key', secretRef: 'model-key' }
+        ] : [], gitHubApp ? [
+          { name: 'Workstream__GitHub__AppId', value: github.appId }
+          { name: 'Workstream__GitHub__AppSlug', value: github.appSlug }
+          { name: 'Workstream__GitHub__ClientId', value: github.clientId }
+          { name: 'Workstream__GitHub__ClientSecret', secretRef: 'github-client-secret' }
+          { name: 'Workstream__GitHub__PrivateKey', secretRef: 'github-private-key' }
+        ] : [], gitHubWebhook ? [
+          { name: 'Workstream__GitHub__WebhookSecret', secretRef: 'github-webhook-secret' }
         ] : [])
         probes: [
           { type: 'Startup', httpGet: { path: '/health', port: 8080 }, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 90 }

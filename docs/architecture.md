@@ -30,7 +30,7 @@ a person's browser
 3. The host says the machine is on. Its service (`desktop/start.sh`, then `desktop/session.sh`) starts three things at once: the agent (`desktop/agent/agent.mjs`), the display, and XFCE on it.
 4. The display answers. From this moment the person has a screen to watch, a few seconds before the agent has said anything, and the job's work is done.
 5. The agent reads what it is told from the machine's user data, and exchanges with the API about once a second from then on: it hands over what it said and did, and takes what people wrote. The first exchange turns the task `ready`.
-6. The agent reads its setup from the API with its key: the apps for the panel, the repository, the setup script, the variables and the instructions. It prepares the desktop where the person can watch: it clones the repository, shows the environment's apps on the panel, runs the setup script in a terminal window, and opens the browser and the editor.
+6. The agent reads its setup from the API with its key: the apps for the panel, the repository, the setup script, the variables and the instructions. It prepares the desktop where the person can watch: it sets git and gh up to ask the API for a GitHub token when they need one, clones the repository, shows the environment's apps on the panel, runs the setup script in a terminal window, and opens the browser and the editor.
 7. The person's browser reads the conversation twice a second while the desktop is starting, and every second and a half after. It shows each step as the task reports it (`step`: `machine`, `boot`, `agent`), and opens a WebSocket to the API for the display as soon as there is one.
 
 Each of those moments is kept with the run (`DesktopRun`: asked, on, display, ready), so how long a start takes is something the product knows and not something anyone has to guess. The system administrator's page shows the middle start of the last seven days, by what it started from.
@@ -55,7 +55,7 @@ A spare is a running machine nobody is using yet, so what it can cost is limited
 Cloning the repository and running the setup script is the slow part of a new desktop once it is up, and it is the same work for every task of an environment. So it is done once (`EnvironmentSetup`, the `PrepareAsync` and `SavePreparedAsync` jobs in `api/Desktops/DesktopJobs.cs`):
 
 - The operator makes a machine for the environment, told the API's address and a key for the environment's preparing account. Its agent sees from `GET /api/desktop/setup` that it is preparing (`prepare`), clones the repository and runs the setup script out of sight, and posts what the script writes to `POST /api/desktop/setup` every few seconds, which the environment's page shows. It never exchanges and never calls a model.
-- When the script exits 0 the agent removes everything in `~/.workstream` (the variables, the logs, the browser's profile), the git token and the shell's history, writes `~/.workstream/prepared.json` (when, and at which commit), and says it is done with the commit and how much is on the disk. The operator deallocates the machine, saves its disk (`IDesktopHost.SaveAsync`: a full snapshot on Azure, a committed image in Docker) and deletes the machine.
+- When the script exits 0 the agent removes everything in `~/.workstream` (the variables, the logs, the browser's profile) and the shell's history (git keeps no token: it asks the API for one each time, as the machine it runs on), writes `~/.workstream/prepared.json` (when, and at which commit), and says it is done with the commit and how much is on the disk. The operator deallocates the machine, saves its disk (`IDesktopHost.SaveAsync`: a full snapshot on Azure, a committed image in Docker) and deletes the machine.
 - A task's machine is made from the save while the save is for the environment's setup inputs (a fingerprint of the repository, branch, script, variables and apps) and for this release's image version. On Azure a disk is made from the snapshot with `createOption: Copy`, stating no security profile because it inherits Trusted Launch from the snapshot, and the machine attaches it (`createOption: Attach`). Making the snapshot took about 13 seconds when measured, and a machine made from one booted like one made from the image. The task's agent finds `prepared.json`, pulls the branch, skips the setup script, and says "Started from the setup prepared 2 days ago (main at a1b2c3d), 14 commits newer now."
 - Anything else starts from the image and does the setup itself, as before: an environment never prepared, a save out of date, a preparation that failed.
 
@@ -93,16 +93,23 @@ The harness calls models the way it calls Microsoft Foundry, at `…/api/model/a
 
 The prices are a table in `ModelOptions`, with the two things that make a call cost more than its plain rate: a cache write kept for an hour, and Haiku's higher rate for a prompt over 100,000 tokens. They are what Workstream pays; `Markup` is 1 until there is billing.
 
+## GitHub
+
+A team connects GitHub by installing Workstream's GitHub App on its account or organization ([the core model](core-model.md), "Connect GitHub"). The API holds the app's private key and signs, with it, the short JWT GitHub takes from an app (`api/GitHub/GitHubApp.cs`, RS256, nine minutes). With that it asks GitHub for an installation token whenever a desktop asks for one, for that desktop's repository alone, and hands it over without keeping it.
+
+On the desktop, git's credential helper for `https://github.com` is `desktop/agent/github.mjs`, and `gh` is a small wrapper first on the PATH (`desktop/agent/shims/gh`) that sets `GH_TOKEN` from the same script each time it runs. Each asks the API with the desktop's key, which it reads where the agent does (its user data, never its disk), so a token never runs out in the middle of a task and none is written down. A `GITHUB_TOKEN` an environment already has is used as it is. The agent is told to finish project work as a branch and a pull request, never on the default branch.
+
 ## What a desktop can and cannot do
 
 A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 
 - It holds one credential, its key. The key reaches `/api/desktop/*` and `/api/model/*` for its own task. It is not a person's token and opens no other route. The key is in the machine's user data, which Azure serves to that machine alone, and is never written to its disk: a copy of a desktop's disk carries nobody's key.
 - It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted.
+- It can ask for a GitHub token for its own environment's repository, when its team has connected GitHub: one repository, to push and open pull requests, for an hour. It never holds the app's key or anyone's own GitHub token. A leaked desktop key is also worth that repository's tokens until the task is deleted.
 - It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
 - It has no Azure identity.
 - A spare is a desktop with no task. Its key authenticates and nothing more until a task takes it, and it is never given to another team.
-- A machine preparing an environment holds a key that reads that environment's setup and says how it went, and nothing else: no task, no conversation, no model. Its disk is saved for the environment's tasks only after it has removed the variables, the git token, the logs and the browser's profile, and its key is in its user data, never on the disk. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
+- A machine preparing an environment holds a key that reads that environment's setup, gets a GitHub token for that environment's repository while its attempt lasts, and says how it went, and nothing else: no task, no conversation, no model. Its disk is saved for the environment's tasks only after it has removed the variables, the logs and the browser's profile, and its key is in its user data, never on the disk. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
 - An environment's variables are stored protected and are sent only to a desktop made from that environment. They are on that desktop in plain text, because the work needs them there: anyone on the team can read them by opening the desktop.
 
 ## What is kept where
@@ -110,7 +117,7 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | Kept in | What |
 | --- | --- |
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
-| The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars). |
+| The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |
 | The browser | The session's tokens, and which team was open last. |

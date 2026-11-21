@@ -178,3 +178,10 @@ jobs:
           # The agents' models (infra/README.md "Models").
           model-endpoint: ${{ vars.MODEL_ENDPOINT }}
           model-key: ${{ secrets.MODEL_KEY }}
+          # Workstream's GitHub App (infra/README.md "GitHub"); without it teams cannot connect GitHub.
+          github-app-id: ${{ vars.GH_APP_ID }}
+          github-app-slug: ${{ vars.GH_APP_SLUG }}
+          github-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          github-client-secret: ${{ secrets.GH_APP_CLIENT_SECRET }}
+          github-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          github-webhook-secret: ${{ secrets.GH_APP_WEBHOOK_SECRET }}
