@@ -19,7 +19,7 @@
     "steps": {
       "ask": {
         "title": "Say what you want done",
-        "body": "Write the task in plain words and choose the environment it starts from. A desktop is ready in about a minute."
+        "body": "Write the task in plain words and choose the environment it starts from. A desktop is ready in a minute or two."
       },
       "watch": {
         "title": "Watch it happen",
