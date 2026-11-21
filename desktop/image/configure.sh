@@ -51,6 +51,7 @@ cat > ~/.config/Code/User/settings.json <<'JSON'
   "workbench.welcomePage.walkthroughs.openOnInstall": false,
   "chat.disableAIFeatures": true,
   "chat.commandCenter.enabled": false,
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
   "workbench.tips.enabled": false,
   "window.restoreWindows": "none",
   "git.openRepositoryInParentFolders": "never"

@@ -52,12 +52,15 @@ public sealed class WorkstreamApp
     /// On in development and the tests, so nobody needs an inbox; off in production.
     /// </summary>
     public bool PasswordSignIn { get; }
-    /// <summary>The system administrator's address (<c>Workstream:Administrator:Email</c>): seeded into <c>system_admins</c> at start.</summary>
-    public string AdministratorEmail { get; }
+    /// <summary>
+    /// The system administrator's address (<c>Workstream:Administrator:Email</c>): the one member of
+    /// <c>system_admins</c>, kept so at every start. Null where none is set: then nobody reaches /admin.
+    /// </summary>
+    public string? AdministratorEmail { get; }
     /// <summary>The administrator's password, only where people sign in with one. Null in production.</summary>
     public string? AdministratorPassword { get; }
 
-    WorkstreamApp(string origin, string webOrigin, string? sender, string? emailConnectionString, bool passwordSignIn, string administratorEmail, string? administratorPassword)
+    WorkstreamApp(string origin, string webOrigin, string? sender, string? emailConnectionString, bool passwordSignIn, string? administratorEmail, string? administratorPassword)
     {
         Origin = origin;
         WebOrigin = webOrigin;
@@ -66,7 +69,7 @@ public sealed class WorkstreamApp
         EmailConnectionString = email ? emailConnectionString : null;
         PasswordSignIn = passwordSignIn;
         AdministratorEmail = administratorEmail;
-        AdministratorPassword = passwordSignIn && !string.IsNullOrEmpty(administratorPassword) ? administratorPassword : null;
+        AdministratorPassword = passwordSignIn && administratorEmail is not null && !string.IsNullOrEmpty(administratorPassword) ? administratorPassword : null;
         Resource = $"{origin}{ApiPath}";
         Issuer = $"{origin}/sqlos/auth";
         Scopes = ["openid", "profile", "email", "offline_access", ReadScope, WriteScope];
@@ -76,7 +79,7 @@ public sealed class WorkstreamApp
     {
         var origin = (configuration["PUBLIC_ORIGIN"] ?? "http://localhost:5280").TrimEnd('/');
         var webOrigin = (configuration["WEB_ORIGIN"] ?? "http://localhost:8091").TrimEnd('/');
-        var administrator = configuration["Workstream:Administrator:Email"] is { Length: > 0 } email ? email.Trim() : "admin@workstream.test";
+        var administrator = configuration["Workstream:Administrator:Email"] is { } email && email.Contains('@') ? email.Trim() : null;
         return new WorkstreamApp(origin, webOrigin,
             configuration["SqlOS:EmailOtp:FromAddress"], configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"],
             configuration.GetValue<bool>("Workstream:Auth:PasswordSignIn"), administrator, configuration["Workstream:Administrator:Password"]);

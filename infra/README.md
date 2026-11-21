@@ -38,7 +38,7 @@ Then set, on the GitHub environment `production`:
 
 | Name | Kind | What |
 | --- | --- | --- |
-| `ADMINISTRATOR_EMAIL` | variable | The one address that reaches `/admin`. They sign in by emailed code like everyone else. |
+| `ADMINISTRATOR_EMAIL` | variable | The one address that reaches `/admin`. They sign in by emailed code like everyone else. Changing it moves the role at the next deploy; without it nobody is the administrator. |
 | `MODEL_ENDPOINT` | variable | The Foundry resource's Anthropic endpoint, `https://<resource>.services.ai.azure.com/anthropic`. |
 | `MODEL_KEY` | secret | The Foundry resource's key. |
 

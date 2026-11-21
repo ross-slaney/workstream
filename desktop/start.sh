@@ -13,10 +13,12 @@ cd "$HOME" || exit 1
 
 # The display: an X server that is also the VNC server the API's relay connects to. It asks for no password
 # because the network admits only the API (infra/desktops.bicep), and the API authorizes every viewer.
-# Several people can watch at once, and the screen follows the size of whoever is watching.
+# Several people can watch at once. The screen keeps one size whoever is watching, because the agent works on
+# it whether or not anyone is; the web app fits it to the space it has. Four by three, because that space is
+# nearly square: the conversation takes the side of every screen.
 rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
-Xtigervnc :1 -geometry "${WORKSTREAM_SCREEN:-1600x900}" -depth 24 -rfbport 5900 -localhost=0 \
-  -SecurityTypes None -AlwaysShared -AcceptSetDesktopSize -desktop Workstream >"$HOME/.workstream/display.log" 2>&1 &
+Xtigervnc :1 -geometry "${WORKSTREAM_SCREEN:-1280x960}" -depth 24 -rfbport 5900 -localhost=0 \
+  -SecurityTypes None -AlwaysShared -desktop Workstream >"$HOME/.workstream/display.log" 2>&1 &
 for _ in $(seq 100); do [ -S /tmp/.X11-unix/X1 ] && break; sleep 0.1; done
 xset s off -dpms 2>/dev/null || true
 

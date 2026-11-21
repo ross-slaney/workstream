@@ -19,7 +19,8 @@ param webOrigin string
 param communicationName string
 @description('The address every email comes from.')
 param sender string
-param administratorEmail string
+@description('The one address that reaches /admin; empty leaves nobody as administrator.')
+param administratorEmail string = ''
 @description('The resource group desktops are made in (desktops.bicep).')
 param desktopsGroup string
 param desktopsSubnetId string

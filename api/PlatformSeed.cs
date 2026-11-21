@@ -10,8 +10,9 @@ namespace Workstream.Api;
 /// <summary>
 /// What the platform needs in the tree before anyone signs in, seeded on every start after SqlOS's bootstrap,
 /// idempotently: the <c>system_admins</c> group, granted <c>system_admin</c> on <c>root</c>; the one system
-/// administrator (<see cref="WorkstreamApp.AdministratorEmail"/>) in that group; and the desktop operator, the
-/// agent the background jobs act as, granted <c>desktop_operator</c> on <c>root</c>.
+/// administrator (<see cref="WorkstreamApp.AdministratorEmail"/>) as that group's only member, or nobody where
+/// no address is set; and the desktop operator, the agent the background jobs act as, granted
+/// <c>desktop_operator</c> on <c>root</c>.
 /// </summary>
 public static class PlatformSeed
 {
@@ -21,7 +22,6 @@ public static class PlatformSeed
     public const string SystemAdminsGroupId = "system_admins";
     public const string SystemAdminsSubjectId = "group::system_admins";
 
-    public const string AdministratorUserId = "usr_workstream_admin";
     public const string AdministratorName = "Workstream administrator";
 
     /// <summary>
@@ -31,7 +31,7 @@ public static class PlatformSeed
     public const string OperatorSubjectId = "agent::desktop-operator";
     public const string OperatorName = "Desktop operator";
 
-    public static async Task SeedAsync(WorkstreamDbContext db, DateTimeOffset now, string administratorEmail, CancellationToken ct)
+    public static async Task SeedAsync(WorkstreamDbContext db, DateTimeOffset now, string? administratorEmail, CancellationToken ct)
     {
         await db.ProvisionAgentSubjectAsync(OperatorSubjectId, OperatorName, agentType: "operator",
             description: "Starts, stops and deletes desktops.", cancellationToken: ct);
@@ -51,20 +51,29 @@ public static class PlatformSeed
 
         // The administrator is a person like any other, with a team of their own (IdentityProvisioning), who is
         // also in the system administrators' group. Someone who already signed up with the address is used as is.
-        var normalized = SqlOSAdminService.NormalizeEmail(administratorEmail);
-        var administratorId = await db.Set<SqlOSUserEmail>().Where(x => x.NormalizedEmail == normalized).Select(x => x.UserId).FirstOrDefaultAsync(ct);
-        if (administratorId is null)
+        string? administratorId = null;
+        if (administratorEmail is not null)
         {
-            administratorId = AdministratorUserId;
-            var at = now.UtcDateTime;
-            db.Add(new SqlOSUser { Id = administratorId, DisplayName = AdministratorName, DefaultEmail = administratorEmail, IsActive = true, CreatedAt = at, UpdatedAt = at });
-            db.Add(new SqlOSUserEmail
+            var normalized = SqlOSAdminService.NormalizeEmail(administratorEmail);
+            administratorId = await db.Set<SqlOSUserEmail>().Where(x => x.NormalizedEmail == normalized).Select(x => x.UserId).FirstOrDefaultAsync(ct);
+            if (administratorId is null)
             {
-                Id = $"email_{Guid.NewGuid():N}", UserId = administratorId, Email = administratorEmail, NormalizedEmail = normalized,
-                IsPrimary = true, IsVerified = true, VerifiedAt = at, CreatedAt = at,
-            });
+                administratorId = $"usr_{Guid.NewGuid():N}";
+                var at = now.UtcDateTime;
+                db.Add(new SqlOSUser { Id = administratorId, DisplayName = AdministratorName, DefaultEmail = administratorEmail, IsActive = true, CreatedAt = at, UpdatedAt = at });
+                db.Add(new SqlOSUserEmail
+                {
+                    Id = $"email_{Guid.NewGuid():N}", UserId = administratorId, Email = administratorEmail, NormalizedEmail = normalized,
+                    IsPrimary = true, IsVerified = true, VerifiedAt = at, CreatedAt = at,
+                });
+            }
         }
-        if (!await db.Set<SqlOSFgaUserGroupMembership>().AnyAsync(x => x.SubjectId == administratorId && x.UserGroupId == SystemAdminsGroupId, ct))
+
+        // The group is exactly the configured administrator: a changed address moves the role, and no address
+        // leaves the group empty. The setting is the state; the membership follows it.
+        var members = await db.Set<SqlOSFgaUserGroupMembership>().Where(x => x.UserGroupId == SystemAdminsGroupId).ToListAsync(ct);
+        db.RemoveRange(members.Where(x => x.SubjectId != administratorId));
+        if (administratorId is not null && members.All(x => x.SubjectId != administratorId))
         {
             db.Add(new SqlOSFgaUserGroupMembership { SubjectId = administratorId, UserGroupId = SystemAdminsGroupId });
         }
@@ -108,8 +117,8 @@ public sealed class PlatformSeedHostedService(IServiceProvider services, ILogger
         var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
         var app = scope.ServiceProvider.GetRequiredService<WorkstreamApp>();
         await PlatformSeed.SeedAsync(db, DateTimeOffset.UtcNow, app.AdministratorEmail, ct);
-        if (app.AdministratorPassword is { } password
-            && await PlatformSeed.SetAdministratorPasswordAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), app.AdministratorEmail, password, DateTimeOffset.UtcNow, ct))
+        if (app is { AdministratorEmail: { } administrator, AdministratorPassword: { } password }
+            && await PlatformSeed.SetAdministratorPasswordAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), administrator, password, DateTimeOffset.UtcNow, ct))
         {
             log.LogInformation("The system administrator's password was set from configuration.");
         }

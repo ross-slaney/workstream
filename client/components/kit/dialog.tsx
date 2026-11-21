@@ -26,7 +26,12 @@ export function Dialog({ title, onClose, children, footer, wide }: DialogProps) 
 
   useEffect(() => {
     const dialog = ref.current;
-    if (dialog && !dialog.open) dialog.showModal();
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+      // The browser puts focus on the first control, which is Close. A dialog is opened to fill something in,
+      // so its first field takes it; a dialog with no field leaves focus where the browser put it.
+      dialog.querySelector<HTMLElement>("textarea, select, input:not([type=hidden]):not([readonly])")?.focus();
+    }
     return () => dialog?.close();
   }, []);
 

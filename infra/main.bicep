@@ -17,8 +17,8 @@ param sourceSha string
 @description('Validated published release tag from release.yml.')
 param releaseTag string = ''
 param location string = 'eastus2'
-@description('The system administrator: the one address that reaches /admin, the GitHub variable ADMINISTRATOR_EMAIL. They sign in by emailed code like everyone else.')
-param administratorEmail string
+@description('The system administrator: the one address that reaches /admin, the GitHub variable ADMINISTRATOR_EMAIL. They sign in by emailed code like everyone else. Empty leaves nobody as administrator.')
+param administratorEmail string = ''
 @description('The agents\' models: the Foundry resource\'s Anthropic endpoint, e.g. https://<resource>.services.ai.azure.com/anthropic. The resource and its deployments are made by hand (README "Models"), never here; empty runs with agents that say models are not set up.')
 param modelEndpoint string = ''
 @secure()

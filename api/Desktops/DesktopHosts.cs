@@ -129,7 +129,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     public async Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct)
     {
         if (!Azure.Sizes.TryGetValue(spec.Size, out var vmSize)) throw new InvalidOperationException($"No machine size is configured for '{spec.Size}'.");
-        // The only two things a desktop is told. It reads the rest from the API with the key (desktop/boot.sh).
+        // The only two things a desktop is told. It reads the rest from the API with the key (desktop/agent/agent.mjs).
         var cloudConfig = $"""
             #cloud-config
             write_files:
@@ -182,6 +182,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                         {
                             ["primary"] = true,
                             ["deleteOption"] = "Delete",
+                            ["enableAcceleratedNetworking"] = true,
                             ["ipConfigurations"] = new JsonArray(new JsonObject
                             {
                                 ["name"] = "ip",

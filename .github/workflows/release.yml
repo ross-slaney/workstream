@@ -112,9 +112,11 @@ jobs:
             echo "::error::This CI identity has no role on subscription $sub. A subscription owner runs scripts/setup-azure.sh once (infra/README.md, \"Setting up a subscription\"), then re-run this job."
             exit 1
           fi
-          [[ "${ADMINISTRATOR_EMAIL:-}" == *@* ]] || { echo "::error::Set the production variable ADMINISTRATOR_EMAIL: the address that signs in to /admin"; exit 1; }
+          [[ "${ADMINISTRATOR_EMAIL:-}" == *@* ]] || echo "::warning::The production variable ADMINISTRATOR_EMAIL is not set: nobody is the system administrator, so nobody reaches /admin."
+          [ -n "${MODEL_ENDPOINT:-}" ] || echo "::warning::The production variable MODEL_ENDPOINT is not set: agents will say models are not set up (infra/README.md, \"Models\")."
         env:
           ADMINISTRATOR_EMAIL: ${{ vars.ADMINISTRATOR_EMAIL }}
+          MODEL_ENDPOINT: ${{ vars.MODEL_ENDPOINT }}
       # The images need the registry, and the web image needs the API's address, which is under the
       # container apps environment's own domain. Both come from foundation.bicep, deployed here by itself on
       # a fresh installation and again, with everything else, by main.bicep below.

@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using Workstream.Api;
 
 namespace Workstream.Tests;
@@ -53,6 +54,34 @@ public sealed class AdminJourneys
         Assert.AreEqual(team.ModelAllowanceUsd, (await ada.GetAsync<TeamDto>($"/api/teams/{team.Id}")).ModelAllowanceUsd);
         using var anonymous = new HttpClient { BaseAddress = Stack.Origin };
         await anonymous.GetAsync("/api/admin/overview").IsAsync(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
+    public async Task The_administrator_is_whoever_the_setting_names_and_nobody_when_it_names_no_one()
+    {
+        var (ada, _) = await Person.WithTeamAsync();
+        using var scope = Stack.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+        try
+        {
+            // A deploy with another address: the role moves to that person, who already has an account.
+            await PlatformSeed.SeedAsync(db, DateTimeOffset.UtcNow, ada.Email, CancellationToken.None);
+            Assert.IsTrue((await ada.GetAsync<MeDto>("/api/me")).SystemAdmin);
+            await ada.GetAsync("/api/admin/overview").IsAsync(HttpStatusCode.OK);
+            var before = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
+            await before.GetAsync("/api/admin/overview").IsAsync(HttpStatusCode.Forbidden);
+
+            // A deploy with no address: nobody is.
+            await PlatformSeed.SeedAsync(db, DateTimeOffset.UtcNow, null, CancellationToken.None);
+            await ada.GetAsync("/api/admin/overview").IsAsync(HttpStatusCode.Forbidden);
+            Assert.IsFalse((await ada.GetAsync<MeDto>("/api/me")).SystemAdmin);
+        }
+        finally
+        {
+            await PlatformSeed.SeedAsync(db, DateTimeOffset.UtcNow, Stack.AdministratorEmail, CancellationToken.None);
+        }
+        var again = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
+        await again.GetAsync("/api/admin/overview").IsAsync(HttpStatusCode.OK);
     }
 
     [TestMethod]
