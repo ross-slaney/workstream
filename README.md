@@ -2,7 +2,7 @@
 
 Workstream gives each task its own cloud desktop with an AI agent working on it. A person writes what they want done, a Linux desktop starts for that task, and the agent does the work there: it opens the browser, edits files in VS Code and runs commands in a terminal. The person watches the screen live in their browser, talks to the agent beside it, and takes the mouse whenever they want. Up to four tasks fit on one screen, side by side.
 
-A team shares its tasks and its environments. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent.
+A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent.
 
 Making a machine takes Azure from fifteen seconds to a minute. While someone is in a team's workspace, Workstream keeps one desktop running ahead of them, so the task they start begins on it at once.
 

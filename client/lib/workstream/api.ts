@@ -89,7 +89,27 @@ export type Task = {
 /** `mine` says the reader wrote it; a person's message with no name was typed at the desktop itself. */
 export type Message = { id: number; author: "person" | "agent"; authorName: string | null; mine: boolean; kind: "text" | "activity"; text: string; createdAt: string };
 
-export type Conversation = { messages: Message[]; task: Task };
+/** What the reader may do with a task: write to its agent, use its desktop's mouse and keyboard, and rename, stop, delete and share it. */
+export type TaskAccess = { prompt: boolean; drive: boolean; manage: boolean };
+
+export type Conversation = { messages: Message[]; task: Task; access: TaskAccess };
+
+/** What a task is shared to do: watch it, watch it and write to its agent, or use its desktop too. */
+export type ShareRole = "watcher" | "prompter" | "driver";
+
+/** How long a share lasts. */
+export type ShareLength = "hour" | "day" | "week" | "never";
+
+/** Someone outside the team a task is shared with. `until` is null when it lasts until it is taken back. */
+export type SharedPerson = { userId: string; name: string; email: string | null; role: ShareRole; until: string | null };
+
+/** A task shared with someone who has no account yet. `link` comes only with the answer to making it. */
+export type TaskInvitation = { id: string; email: string; role: ShareRole; until: string | null; expiresAt: string; link: string | null };
+
+export type TaskAccessList = { teamId: string; teamName: string; people: SharedPerson[]; invitations: TaskInvitation[] };
+
+/** What sharing made: a grant for someone with an account, or an invitation for someone without. `link` is what to send them. */
+export type TaskShared = { person: SharedPerson | null; invitation: TaskInvitation | null; link: string; emailed: boolean };
 
 export type RunningPoint = { at: string; running: number };
 
@@ -174,6 +194,15 @@ export const workstream = {
   interrupt: (taskId: string) => apiSend<void>("POST", `/api/tasks/${id(taskId)}/interrupt`),
   conversation: (taskId: string, after: number) => apiJson<Conversation>(`/api/tasks/${id(taskId)}/messages?after=${after}`),
   say: (taskId: string, text: string, key: string) => apiSend<Message>("POST", `/api/tasks/${id(taskId)}/messages`, { text, key }),
+
+  /** Tasks of other teams shared with the person. */
+  sharedTasks: () => apiJson<ListPage<Task>>("/api/shared-tasks"),
+  taskAccess: (taskId: string) => apiJson<TaskAccessList>(`/api/tasks/${id(taskId)}/access`),
+  shareTask: (taskId: string, email: string, role: ShareRole, expiresIn: ShareLength) =>
+    apiSend<TaskShared>("POST", `/api/tasks/${id(taskId)}/access`, { email, role, expiresIn }),
+  revokeShare: (taskId: string, userId: string) => apiSend<void>("DELETE", `/api/tasks/${id(taskId)}/access/people/${id(userId)}`),
+  withdrawTaskInvitation: (taskId: string, invitationId: string) => apiSend<void>("DELETE", `/api/tasks/${id(taskId)}/access/invitations/${id(invitationId)}`),
+  acceptTaskInvitation: (token: string) => apiSend<{ taskId: string }>("POST", "/api/task-invitations/accept", { token }),
 
   adminOverview: () => apiJson<AdminOverview>("/api/admin/overview"),
   setTeamLimits: (teamId: string, modelAllowanceUsd: number, maxRunningDesktops: number) =>

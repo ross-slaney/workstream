@@ -5,7 +5,9 @@ import { ApiError } from "@/lib/api/errors";
 import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { newId } from "@/lib/utils";
-import { workstream, type Message, type Task } from "@/lib/workstream/api";
+import { useOnlineRead } from "@/hooks/use-online-read";
+import { workstream, type Message, type Task, type TaskAccess, type TaskShared } from "@/lib/workstream/api";
+import { ShareDialog } from "@/src/workspace/share-dialog";
 import { TaskScreen, type ChatEntry } from "@/src/workspace/task-screen";
 
 /** How often an open screen reads its conversation, in milliseconds: sooner while the desktop is starting, when each step is news. */
@@ -17,13 +19,19 @@ type Unsent = { key: string; text: string; failed: boolean };
 /**
  * The controller for one screen. It reads the task's conversation every second and a half, and twice a second
  * while the desktop is starting (only what is new since the last message it has), sends what the person
- * writes, and does what they ask of the task. The view
+ * writes, and does what they ask of the task. Each read also says what the person may do with it, so a share
+ * that changes or ends shows on the screen at the next read; the team shares the task from here. The view
  * and the live desktop below it know nothing of the API.
  */
 export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const t = useT("workspace");
   const session = useSession();
   const [task, setTask] = useState<Task | null>(null);
+  const [access, setAccess] = useState<TaskAccess | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [shared, setShared] = useState<TaskShared | null>(null);
+  const shareAction = useAction();
+  const people = useOnlineRead(() => (sharing ? workstream.taskAccess(taskId) : Promise.resolve(null)), `access:${taskId}:${sharing}`);
   const [missing, setMissing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [unsent, setUnsent] = useState<Unsent[]>([]);
@@ -49,6 +57,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
     let starting = true;
     last.current = 0;
     setTask(null);
+    setAccess(null);
     setMissing(false);
     setMessages([]);
     setUnsent([]);
@@ -60,6 +69,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         if (!live) return;
         starting = conversation.task.state === "starting";
         setTask(conversation.task);
+        setAccess(conversation.access);
         take(conversation.messages);
       } catch (error) {
         // Gone: deleted here or by a teammate. Anything else is a read that will be tried again.
@@ -119,48 +129,83 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
       onChanged();
     });
 
+  const changeSharing = (run: () => Promise<void>) =>
+    void shareAction.run(async () => {
+      await run();
+      people.refresh();
+    });
+
   return (
-    <TaskScreen
-      task={task}
-      missing={missing}
-      entries={entries}
-      draft={draft}
-      onDraftChange={setDraft}
-      onSend={() => {
-        const text = draft.trim();
-        if (!text) return;
-        const key = newId();
-        setDraft("");
-        setUnsent((current) => [...current, { key, text, failed: false }]);
-        void send(key, text);
-      }}
-      onRetry={(key) => {
-        const entry = unsent.find((candidate) => candidate.key === key);
-        if (!entry) return;
-        setUnsent((current) => current.map((candidate) => (candidate.key === key ? { ...candidate, failed: false } : candidate)));
-        void send(key, entry.text);
-      }}
-      onInterrupt={() => act(() => workstream.interrupt(taskId))}
-      onStartDesktop={() => act(() => workstream.startDesktop(taskId))}
-      onStopDesktop={() => act(() => workstream.stopDesktop(taskId))}
-      onRename={(title) => act(() => workstream.renameTask(taskId, title))}
-      onDelete={() =>
-        void action.run(async () => {
-          await workstream.deleteTask(taskId);
-          onChanged();
-          onClose();
-        })
-      }
-      onClose={onClose}
-      busy={action.busy}
-      error={action.error}
-      // There is a screen to watch as soon as the display answers, which is before the agent has joined.
-      desktop={
-        task && (task.state === "ready" || (task.state === "starting" && task.step === "agent")) ? (
-          <DesktopStream taskId={taskId} label={t("desktop.label", { title: task.title })} onShape={setDesktopShape} />
-        ) : null
-      }
-      desktopShape={desktopShape}
-    />
+    <>
+      <TaskScreen
+        task={task}
+        access={access}
+        missing={missing}
+        entries={entries}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSend={() => {
+          const text = draft.trim();
+          if (!text) return;
+          const key = newId();
+          setDraft("");
+          setUnsent((current) => [...current, { key, text, failed: false }]);
+          void send(key, text);
+        }}
+        onRetry={(key) => {
+          const entry = unsent.find((candidate) => candidate.key === key);
+          if (!entry) return;
+          setUnsent((current) => current.map((candidate) => (candidate.key === key ? { ...candidate, failed: false } : candidate)));
+          void send(key, entry.text);
+        }}
+        onInterrupt={() => act(() => workstream.interrupt(taskId))}
+        onStartDesktop={() => act(() => workstream.startDesktop(taskId))}
+        onStopDesktop={() => act(() => workstream.stopDesktop(taskId))}
+        onRename={(title) => act(() => workstream.renameTask(taskId, title))}
+        onDelete={() =>
+          void action.run(async () => {
+            await workstream.deleteTask(taskId);
+            onChanged();
+            onClose();
+          })
+        }
+        onShare={() => {
+          shareAction.clearError();
+          setShared(null);
+          setSharing(true);
+        }}
+        onClose={onClose}
+        busy={action.busy}
+        error={action.error}
+        // There is a screen to watch as soon as the display answers, which is before the agent has joined.
+        desktop={
+          task && (task.state === "ready" || (task.state === "starting" && task.step === "agent")) ? (
+            <DesktopStream taskId={taskId} label={t("desktop.label", { title: task.title })} viewOnly={!(access?.drive ?? false)} onShape={setDesktopShape} />
+          ) : null
+        }
+        desktopShape={desktopShape}
+      />
+      {sharing && task ? (
+        <ShareDialog
+          title={task.title}
+          access={people.kind === "ready" ? (people.value ? { kind: "ready", value: people.value } : { kind: "loading" }) : people}
+          busy={shareAction.busy}
+          error={shareAction.error}
+          shared={shared}
+          onShare={(email, role, length) =>
+            changeSharing(async () => {
+              setShared(await workstream.shareTask(taskId, email, role, length));
+            })
+          }
+          onRevoke={(userId) => changeSharing(() => workstream.revokeShare(taskId, userId))}
+          onWithdraw={(invitationId) => changeSharing(() => workstream.withdrawTaskInvitation(taskId, invitationId))}
+          onRetry={people.reload}
+          onClose={() => {
+            setSharing(false);
+            setShared(null);
+          }}
+        />
+      ) : null}
+    </>
   );
 }

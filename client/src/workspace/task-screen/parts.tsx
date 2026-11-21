@@ -42,11 +42,13 @@ export function ScreenHeader(p: TaskScreenProps & { filled: boolean; onToggleFil
         {task?.title ?? " "}
       </h2>
       {task ? <StateBadge state={task.state} working={task.agentWorking} /> : null}
-      {task ? (
+      {task && p.access && !p.access.manage ? <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11.5px] font-medium text-muted-foreground">{t(p.access.drive ? "share.badge.driver" : p.access.prompt ? "share.badge.prompter" : "share.badge.watcher")}</span> : null}
+      {task && p.access?.manage ? (
         <div className="relative">
           <IconButton label={t("screens.more", { title: task.title })} aria-haspopup="menu" aria-expanded={menu} icon={<MoreHorizontal size={17} color={colors.mutedForeground} />} onClick={() => setMenu((open) => !open)} />
           {menu ? (
             <Menu onClose={() => setMenu(false)}>
+              <MenuItem label={t("share.open")} onSelect={p.onShare} />
               <MenuItem label={t("task.rename")} onSelect={() => setRenaming(true)} />
               {task.state === "ready" || task.state === "starting" ? <MenuItem label={t("task.stop")} onSelect={p.onStopDesktop} /> : null}
               {task.state === "stopped" || task.state === "failed" ? <MenuItem label={t("task.start")} onSelect={p.onStartDesktop} /> : null}
@@ -176,6 +178,8 @@ export function Chat(p: TaskScreenProps) {
     : task.state === "stopped" || task.state === "stopping" || task.state === "failed" ? t("chat.desktopStopped")
     : null;
   const working = task?.state === "ready" && task.agentWorking;
+  // Until the first read says otherwise, the box is there: the team, who write, is who opens most screens.
+  const prompts = p.access?.prompt ?? true;
 
   return (
     <section aria-label={t("chat.label")} className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
@@ -196,7 +200,7 @@ export function Chat(p: TaskScreenProps) {
         <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">
           <Spinner label={t("chat.working")} className="size-3" />
           <span className="flex-1">{t("chat.working")}</span>
-          <Button label={t("chat.stop")} size="small" tone="quiet" icon={<Square size={11} color={colors.foreground} fill={colors.foreground} />} onClick={p.onInterrupt} />
+          {prompts ? <Button label={t("chat.stop")} size="small" tone="quiet" icon={<Square size={11} color={colors.foreground} fill={colors.foreground} />} onClick={p.onInterrupt} /> : null}
         </div>
       ) : note ? (
         <p className="border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">{note}</p>
@@ -206,38 +210,42 @@ export function Chat(p: TaskScreenProps) {
           <ErrorNote message={p.error} />
         </div>
       ) : null}
-      <form
-        className="flex items-end gap-2 border-t border-border p-2.5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          p.onSend();
-        }}
-      >
-        <textarea
-          value={p.draft}
-          onChange={(event) => p.onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              p.onSend();
-            }
+      {prompts ? (
+        <form
+          className="flex items-end gap-2 border-t border-border p-2.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            p.onSend();
           }}
-          rows={Math.min(6, Math.max(1, p.draft.split("\n").length))}
-          placeholder={t("chat.placeholder")}
-          aria-label={t("chat.placeholder")}
-          disabled={!task || p.missing}
-          className="min-h-[38px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-[13.5px] leading-snug text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-        />
-        <button
-          type="submit"
-          aria-label={t("chat.send")}
-          title={t("chat.send")}
-          disabled={!p.draft.trim() || !task || p.missing}
-          className="inline-flex size-[38px] shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-40"
         >
-          <ArrowUp size={17} color={colors.primaryForeground} />
-        </button>
-      </form>
+          <textarea
+            value={p.draft}
+            onChange={(event) => p.onDraftChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                p.onSend();
+              }
+            }}
+            rows={Math.min(6, Math.max(1, p.draft.split("\n").length))}
+            placeholder={t("chat.placeholder")}
+            aria-label={t("chat.placeholder")}
+            disabled={!task || p.missing}
+            className="min-h-[38px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-[13.5px] leading-snug text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          />
+          <button
+            type="submit"
+            aria-label={t("chat.send")}
+            title={t("chat.send")}
+            disabled={!p.draft.trim() || !task || p.missing}
+            className="inline-flex size-[38px] shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-40"
+          >
+            <ArrowUp size={17} color={colors.primaryForeground} />
+          </button>
+        </form>
+      ) : (
+        <p className="border-t border-border px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground">{t("share.watchOnly")}</p>
+      )}
     </section>
   );
 }
@@ -278,6 +286,8 @@ function Entry({ entry, onRetry }: { entry: ChatEntry; onRetry: () => void }) {
 export function DesktopPane(p: TaskScreenProps) {
   const t = useT("workspace");
   const task = p.task;
+  // Only the team starts a desktop again.
+  const manages = p.access?.manage ?? false;
   if (p.missing) return <Stage title={t("task.missing")} />;
   if (!task) return <Stage busy title={t("desktop.connecting")} />;
   // One place for the picture, so it stays connected as a starting desktop becomes ready.
@@ -292,9 +302,15 @@ export function DesktopPane(p: TaskScreenProps) {
     case "deleting":
       return <Stage busy title={t("desktop.stopping.title")} body={t("desktop.stopping.body")} />;
     case "failed":
-      return <Stage title={t("desktop.failed.title")} body={task.failure ?? undefined} action={<StageButton label={t("desktop.failed.cta")} busy={p.busy} onClick={p.onStartDesktop} />} />;
+      return <Stage title={t("desktop.failed.title")} body={task.failure ?? undefined} action={manages ? <StageButton label={t("desktop.failed.cta")} busy={p.busy} onClick={p.onStartDesktop} /> : undefined} />;
     default:
-      return <Stage title={t("desktop.stopped.title")} body={t("desktop.stopped.body")} action={<StageButton label={t("desktop.stopped.cta")} busy={p.busy} onClick={p.onStartDesktop} />} />;
+      return (
+        <Stage
+          title={t("desktop.stopped.title")}
+          body={manages ? t("desktop.stopped.body") : t("share.stoppedBody")}
+          action={manages ? <StageButton label={t("desktop.stopped.cta")} busy={p.busy} onClick={p.onStartDesktop} /> : undefined}
+        />
+      );
   }
 }
 
