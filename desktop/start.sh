@@ -12,5 +12,8 @@ mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.workstream"
 chmod 700 "$XDG_RUNTIME_DIR"
 # A container cannot give programs a sandbox of their own; VS Code is told not to ask for one.
 if [ -f /.dockerenv ]; then export ELECTRON_DISABLE_SANDBOX=1; fi
+# Where the developer tools are (.NET's global tools, Java and the Android SDK), for every program started here.
+# shellcheck disable=SC1091
+[ -f /etc/profile.d/workstream-tools.sh ] && . /etc/profile.d/workstream-tools.sh
 cd "$HOME" || exit 1
 exec dbus-run-session -- /opt/workstream/session.sh

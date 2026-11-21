@@ -122,7 +122,12 @@ public static partial class Operations
             .OrderBy(x => x.Purpose == MachinePurpose.Task ? 0 : 1).ThenBy(x => x.Purpose).ToList();
         // Every machine has a disk, running or stopped, until its task is deleted or its spare is removed.
         var spares = await db.Spares.AsNoTracking().OrderBy(x => x.CreatedAt).ToListAsync(ct);
-        var disks = await db.Tasks.CountAsync(x => x.Host != null, ct) + spares.Count(x => x.Host is not null);
+        var taskDisks = await db.Tasks.AsNoTracking().Where(x => x.Host != null).GroupBy(x => x.Size)
+            .Select(g => new { Size = g.Key, Count = g.Count() }).ToListAsync(ct);
+        var disks = taskDisks.Sum(x => x.Count) + spares.Count(x => x.Host is not null);
+        // A disk costs what its size's disk costs (a large desktop's is twice the room).
+        var disksMonthlyUsd = taskDisks.Sum(x => x.Count * desktops.Prices.DiskOf(x.Size))
+            + spares.Where(x => x.Host is not null).Sum(x => desktops.Prices.DiskOf(x.Size));
 
         // How long a start takes, from what the runs wrote down as it happened.
         var weekAgo = now.AddDays(-7);
@@ -145,7 +150,7 @@ public static partial class Operations
             points,
             [.. running.Select(x => new RunningDesktop(x.Id, x.Title, x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.AgentWorking, x.StateChangedAt))],
             numbers,
-            new MachineCosts(costs, disks, disks * desktops.Prices.DiskMonthlyUsd,
+            new MachineCosts(costs, disks, disksMonthlyUsd,
                 [.. spares.Select(x => new SpareNow(x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.CreatedAt))]),
             starts));
     }

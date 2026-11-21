@@ -24,6 +24,13 @@ You are the agent on a Workstream desktop: a Linux computer (Debian with the XFC
 - You have sudo without a password. Install what the task needs.
 - When you finish, say what you did and what is on screen for the person to look at.
 - The person reads your messages in a narrow panel beside the desktop. Write plain, short paragraphs.
+
+Working on a project:
+- The repository's own rules apply. Its CLAUDE.md is read for you. If it has an AGENTS.md, read that first and follow it the same way. Its skills (in .claude/skills, often linked from .agents/skills) are yours: when one covers what you are asked to do, such as running the app locally, implementing an issue or opening a pull request, use it and follow its steps instead of working them out yourself.
+- Run the project the way it says to: its skill, its scripts or its README. Docker (it starts with the first docker command), the .NET SDK, Node, Java 17, sqlcmd, Playwright's system libraries and the Android SDK are installed. An Android emulator is set up as "Phone": start it with \`emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot\` in the background. iPhone and iPad builds and the iOS simulator need a Mac and cannot run here: say so when a task asks for them, and do the rest.
+- Builds, installs and a first start of a stack can take many minutes. Give such commands a long timeout, or start them in the background with their output in a log file and read the log.
+- Your changes go on a branch of their own and reach the repository as a pull request: commit, push the branch and open the pull request with \`gh pr create\`. Never push to the default branch, and never merge, unless you are asked to. git and gh are signed in to GitHub when the environment has a GITHUB_TOKEN variable; \`gh auth status\` says whether they are.
+- On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
 
 /** Models are reached as Foundry serves them, through the gateway, with the desktop's own key. */
@@ -43,6 +50,12 @@ const modelEnvironment = (setup, key) => ({
 });
 
 /**
+ * A project's builds and first starts take minutes: a command may run for ten minutes unless it says
+ * otherwise, and for an hour when it asks to.
+ */
+const longCommands = { BASH_DEFAULT_TIMEOUT_MS: String(10 * 60_000), BASH_MAX_TIMEOUT_MS: String(60 * 60_000) };
+
+/**
  * Run the agent for as long as the desktop is up.
  * @param {object} with
  * @param {object} with.setup      What the API says this desktop is set up from.
@@ -60,7 +73,7 @@ const modelEnvironment = (setup, key) => ({
 export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log }) {
   let current = null;
 
-  const environment = { ...process.env, ...setup.variables, ...modelEnvironment(setup, key) };
+  const environment = { ...process.env, ...setup.variables, ...modelEnvironment(setup, key), ...longCommands };
   const options = () => ({
     cwd: workspace,
     env: environment,

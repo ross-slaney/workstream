@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { gitHubToken, gitIdentity, withGitHub } from "./github.mjs";
 import { panelFor } from "./panel.mjs";
 import { told } from "./told.mjs";
 import { startWindow } from "./window.mjs";
@@ -148,13 +149,22 @@ async function exchangeForever() {
 
 const shellQuote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
 
-/** The environment's variables, for every shell on the desktop, and a token for git where one is given. */
+/**
+ * The environment's variables, for every shell on the desktop; and where a GitHub token is given, git signed
+ * in with it and committing as its account, and gh signed in by GH_TOKEN (github.mjs).
+ */
 async function writeVariables(variables) {
   const lines = Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`);
   await writeFile(path.join(dir, "env.sh"), lines.join("\n") + "\n", { mode: 0o600 });
-  const token = variables.GITHUB_TOKEN ?? variables.GH_TOKEN;
-  if (token) {
-    await run("git", ["config", "--global", `url.https://x-access-token:${token}@github.com/.insteadOf`, "https://github.com/"]).catch((error) => log("git config failed:", error.message));
+  const token = gitHubToken(variables);
+  if (!token) return;
+  const git = (...args) => run("git", ["config", "--global", ...args]).catch((error) => log("git config failed:", error.message));
+  await git(`url.https://x-access-token:${token}@github.com/.insteadOf`, "https://github.com/");
+  const hasEmail = await run("git", ["config", "--global", "user.email"]).then(() => true, () => false);
+  const identity = hasEmail ? null : await gitIdentity(variables);
+  if (identity) {
+    await git("user.name", identity.name);
+    await git("user.email", identity.email);
   }
 }
 
@@ -304,6 +314,8 @@ exchangeForever();
 const harnessLoading = import("./harness.mjs");
 harnessLoading.catch(() => {});
 const setup = await setupFromApi();
+// A GitHub token reaches every program under both of its names: the shells, the setup script and the agent.
+setup.variables = withGitHub(setup.variables ?? {});
 title = setup.title;
 startWindow({
   conversation,

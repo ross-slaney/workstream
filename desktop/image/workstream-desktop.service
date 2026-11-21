@@ -10,6 +10,8 @@ Group=work
 RuntimeDirectory=workstream
 RuntimeDirectoryMode=0700
 ExecStart=/opt/workstream/start.sh
+# A project's stack opens many files at once (a bundler, a database, an editor).
+LimitNOFILE=1048576
 Restart=always
 RestartSec=3
 
