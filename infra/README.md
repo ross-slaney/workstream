@@ -74,7 +74,15 @@ az group create -n workstream-ai -l eastus2
 az cognitiveservices account create -g workstream-ai -n <name> -l eastus2 --kind AIServices --sku S0 --custom-domain <name>
 ```
 
-Then one deployment per model, each named after its model: `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`. Deploying a Claude model asks for the organization's name, country and industry and accepts Anthropic's terms. `./scripts/dev-env.sh` reads the endpoint and key for local development; the same two values go in the `production` environment as `MODEL_ENDPOINT` and `MODEL_KEY`.
+Then one deployment per model, each named after its model: `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`. Deploying a Claude model asks for the organization's name, country and industry and accepts Anthropic's terms.
+
+Deploy **version 2** of each model, the one hosted on Azure, which is what the Foundry portal picks by default. Version 1 is hosted by Anthropic and bought through Azure Marketplace; on this subscription (pay-as-you-go, an individual billing account) that purchase is refused with "This purchase cannot be completed", and the deployment ends in `Failed`. A failed deployment has to be deleted before it can be made again. From the command line:
+
+```bash
+az rest --method put \
+  --url "https://management.azure.com/subscriptions/<subscription>/resourceGroups/workstream-ai/providers/Microsoft.CognitiveServices/accounts/<name>/deployments/claude-opus-5-5?api-version=2025-10-01-preview" \
+  --body '{"sku": {"name": "GlobalStandard", "capacity": 40}, "properties": {"model": {"format": "Anthropic", "name": "claude-opus-5-5", "version": "2"}, "modelProviderData": {"organizationName": "<organization>", "countryCode": "US", "industry": "technology"}}}'
+``` `./scripts/dev-env.sh` reads the endpoint and key for local development; the same two values go in the `production` environment as `MODEL_ENDPOINT` and `MODEL_KEY`.
 
 The deployment names are the defaults in `ModelOptions` (`api/Model/ModelGateway.cs`), with what each costs.
 
