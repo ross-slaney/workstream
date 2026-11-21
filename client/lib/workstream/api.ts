@@ -142,6 +142,11 @@ export const workstream = {
   deleteEnvironment: (environmentId: string) => apiSend<void>("DELETE", `/api/environments/${id(environmentId)}`),
 
   tasks: (teamId: string) => apiJson<ListPage<Task>>(`/api/teams/${id(teamId)}/tasks`),
+  /**
+   * Someone is in the team's workspace: the API keeps a desktop running for the task they may be about to
+   * start, so it starts at once. Nothing comes back, and whether one is made is the API's decision.
+   */
+  wantSpare: (teamId: string, environmentId?: string) => apiSend<void>("POST", `/api/teams/${id(teamId)}/spare`, { environmentId: environmentId ?? null }),
   startTask: (teamId: string, body: { id: string; environmentId: string; prompt: string; promptKey: string }) =>
     apiSend<Task>("POST", `/api/teams/${id(teamId)}/tasks`, body),
   renameTask: (taskId: string, title: string) => apiSend<Task>("PUT", `/api/tasks/${id(taskId)}`, { title }),

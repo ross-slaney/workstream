@@ -57,6 +57,12 @@ export function TeamShellController({ teamId, children }: { teamId: string; chil
 
   useEffect(() => rememberTeam(teamId), [teamId]);
 
+  // Being here, and opening the dialog for a new task, are when a task is likely: the API gets a desktop
+  // running ahead of it. Whether that worked is nothing the person needs to hear about.
+  useEffect(() => {
+    void workstream.wantSpare(teamId).catch(() => {});
+  }, [teamId, dialog === "task"]);
+
   const base = `/t/${encodeURIComponent(teamId)}`;
   const place: ShellPlace = pathname.endsWith("/environments") ? "environments" : pathname.endsWith("/team") ? "team" : pathname.endsWith("/usage") ? "usage" : "tasks";
   const open = useMemo(() => parseOpen(params.open), [params.open]);
