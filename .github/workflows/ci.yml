@@ -1,0 +1,82 @@
+name: Checks
+
+# Every pull request and every push to main: the web app's checks, the agent's tests, the API's journeys and
+# the infrastructure's templates. Nothing here deploys; production ships from a published release (release.yml).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  client:
+    name: Web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - working-directory: client
+        run: npm ci --no-audit --no-fund
+      # Types and tests.
+      - working-directory: client
+        run: npm run check
+      # The production export: every route renders on the server.
+      - working-directory: client
+        env:
+          EXPO_PUBLIC_API_URL: https://api.example.test
+        run: npm run export:web
+
+  agent:
+    name: Desktop agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/agent/package-lock.json
+      - working-directory: desktop/agent
+        run: npm ci --no-audit --no-fund
+      - working-directory: desktop/agent
+        run: npm test
+      - name: The image's scripts parse
+        run: for script in desktop/image/*.sh desktop/*.sh scripts/*.sh client/scripts/*.sh; do bash -n "$script"; done
+
+  api:
+    name: API journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build tests/Workstream.Tests -nologo
+      # The real AppHost's SQL Server in Docker, the API in the test process (tests/Workstream.Tests/Stack.cs).
+      - run: dotnet test tests/Workstream.Tests --no-build -nologo --logger "console;verbosity=normal"
+      - name: The API image builds
+        run: docker build -t workstream-api:check -f Dockerfile .
+
+  infra:
+    name: Infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: az bicep build --file infra/main.bicep --stdout > /dev/null
+      - run: az bicep build --file infra/foundation.bicep --stdout > /dev/null

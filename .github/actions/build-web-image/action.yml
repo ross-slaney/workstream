@@ -1,0 +1,75 @@
+name: Build the web image
+description: >-
+  Exports the web app on the runner (client/scripts/export-web.sh) with Metro's build cache carried between
+  runs, packages it with client/Dockerfile and pushes workstream-web:<tag> to the registry. A tag already in
+  the registry is not built again. Expects azure/login and a checkout of the revision being built.
+inputs:
+  registry:
+    description: The registry's name (not its login server).
+    required: true
+  tag:
+    description: Image tag, vX.Y.Z for a release.
+    required: true
+  api-url:
+    description: The API origin inlined into the bundle.
+    required: true
+  node-version:
+    default: '22'
+outputs:
+  image:
+    description: Full image reference in the registry.
+    value: ${{ steps.name.outputs.image }}
+runs:
+  using: composite
+  steps:
+    - id: name
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        az acr login -n "$REGISTRY" --output none
+        echo "image=$REGISTRY.azurecr.io/workstream-web:$TAG" >> "$GITHUB_OUTPUT"
+        if az acr repository show -n "$REGISTRY" --image "workstream-web:$TAG" -o none 2>/dev/null; then
+          echo "workstream-web:$TAG already built"; echo "built=true" >> "$GITHUB_OUTPUT"
+        fi
+    - if: steps.name.outputs.built != 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: client/package-lock.json
+    - if: steps.name.outputs.built != 'true'
+      shell: bash
+      working-directory: client
+      run: npm ci --no-audit --no-fund
+    # Metro's build cache (Expo's EXPO_METRO_CACHE_RESTORE_DIR / EXPO_METRO_CACHE_OUTPUT_DIR): a run
+    # restores the newest cache for this lock file, and saves only the entries it used.
+    - if: steps.name.outputs.built != 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/metro-cache
+        key: metro-web-${{ hashFiles('client/package-lock.json') }}-${{ github.sha }}
+        restore-keys: |
+          metro-web-${{ hashFiles('client/package-lock.json') }}-
+          metro-web-
+    - if: steps.name.outputs.built != 'true'
+      shell: bash
+      working-directory: client
+      env:
+        EXPO_PUBLIC_API_URL: ${{ inputs.api-url }}
+        EXPO_METRO_CACHE_RESTORE_DIR: ${{ runner.temp }}/metro-cache
+        EXPO_METRO_CACHE_OUTPUT_DIR: ${{ runner.temp }}/metro-out
+      run: |
+        mkdir -p "$EXPO_METRO_CACHE_RESTORE_DIR" "$EXPO_METRO_CACHE_OUTPUT_DIR"
+        npm run export:web
+        rm -rf "$EXPO_METRO_CACHE_RESTORE_DIR" && mv "$EXPO_METRO_CACHE_OUTPUT_DIR" "$EXPO_METRO_CACHE_RESTORE_DIR"
+    - if: steps.name.outputs.built != 'true'
+      shell: bash
+      working-directory: client
+      env:
+        IMAGE: ${{ steps.name.outputs.image }}
+        API_URL: ${{ inputs.api-url }}
+      run: |
+        docker build --platform linux/amd64 -t "$IMAGE" -f Dockerfile --build-arg "EXPO_PUBLIC_API_URL=$API_URL" .
+        docker push "$IMAGE"

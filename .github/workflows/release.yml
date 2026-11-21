@@ -1,0 +1,260 @@
+name: Release
+
+# Production ships only from a published GitHub release. Merging to main runs the checks and nothing else;
+# the `release` skill bumps the version, merges the version PR and publishes `vX.Y.Z`, and this workflow
+# takes that tag to production: both images built from the tag's commit, one Bicep deployment of the web app
+# and the API, then the desktops' image when `desktop/` changed since the previous release.
+#
+# Also runs by hand to deploy any release again (a rollback).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy (blank = the latest published release)
+        required: false
+      desktop-image:
+        description: Bake the desktops' image even if desktop/ is unchanged since the previous release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GROUP: workstream
+  LOCATION: eastus2
+
+jobs:
+  resolve:
+    name: Resolve the release
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.target.outputs.deploy }}
+      tag: ${{ steps.target.outputs.tag }}
+      sha: ${{ steps.target.outputs.sha }}
+      version: ${{ steps.target.outputs.version }}
+      desktop: ${{ steps.target.outputs.desktop }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - id: target
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${EVENT_TAG:-${INPUT_TAG:-}}"
+          if [ -z "$tag" ]; then
+            # `gh release view` with no tag is the latest release that is neither a draft nor a prerelease.
+            tag=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          fi
+          if [ -z "$tag" ]; then
+            echo "No published release yet; nothing to deploy."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          flags=$(gh release view "$tag" --json isDraft,isPrerelease -q '[.isDraft, .isPrerelease] | map(tostring) | join(" ")')
+          [ "$flags" = "false false" ] || { echo "::error::$tag is a draft or prerelease; only published releases deploy"; exit 1; }
+          sha=$(git rev-list -n 1 "refs/tags/$tag")
+          git merge-base --is-ancestor "$sha" origin/main \
+            || { echo "::error::$tag ($sha) is not on main; releases are cut from main only"; exit 1; }
+          version=$(git show "$sha:client/app.json" | jq -r .expo.version)
+          package=$(git show "$sha:client/package.json" | jq -r .version)
+          [ "$tag" = "v$version" ] \
+            || { echo "::error::Tag $tag does not match client/app.json expo.version $version; fix the version PR and publish a new tag"; exit 1; }
+          [ "$package" = "$version" ] \
+            || { echo "::error::client/package.json version $package does not match client/app.json $version"; exit 1; }
+          previous=$(git describe --tags --abbrev=0 --match 'v*' "$sha^" 2>/dev/null || true)
+          # The desktops' image is baked when what it is made from changed, and on the first release.
+          desktop=true
+          if [ -n "$previous" ] && git diff --quiet "$previous" "$sha" -- desktop/; then desktop=false; fi
+          echo "Deploying $tag ($sha); previous release: ${previous:-none}; desktop image: $desktop"
+          {
+            echo "deploy=true"
+            echo "tag=$tag"
+            echo "sha=$sha"
+            echo "version=$version"
+            echo "desktop=$desktop"
+          } >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Web + API (Bicep)
+    needs: resolve
+    if: needs.resolve.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    # A brand-new installation makes its network, its container apps environment and its SQL server first.
+    timeout-minutes: 90
+    environment: production
+    # One production deploy at a time.
+    concurrency:
+      group: workstream-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Check the CI identity
+        run: |
+          sub=$(az account show --query id -o tsv)
+          oid=$(az account get-access-token --query accessToken -o tsv | cut -d. -f2 | tr '_-' '/+' | { b=$(cat); while [ $(( ${#b} % 4 )) -ne 0 ]; do b="$b="; done; echo "$b"; } | base64 -d | jq -r .oid)
+          if [ -z "$(az role assignment list --scope "/subscriptions/$sub" --query "[?principalId=='$oid'].id" -o tsv)" ]; then
+            echo "::error::This CI identity has no role on subscription $sub. A subscription owner runs scripts/setup-azure.sh once (infra/README.md, \"Setting up a subscription\"), then re-run this job."
+            exit 1
+          fi
+          [[ "${ADMINISTRATOR_EMAIL:-}" == *@* ]] || { echo "::error::Set the production variable ADMINISTRATOR_EMAIL: the address that signs in to /admin"; exit 1; }
+        env:
+          ADMINISTRATOR_EMAIL: ${{ vars.ADMINISTRATOR_EMAIL }}
+      # The images need the registry, and the web image needs the API's address, which is under the
+      # container apps environment's own domain. Both come from foundation.bicep, deployed here by itself on
+      # a fresh installation and again, with everything else, by main.bicep below.
+      - name: Find the registry and the environment's domain
+        id: foundation
+        run: |
+          set -euo pipefail
+          registry=""; domain=""
+          # `az acr list -g` fails, rather than listing nothing, when the group does not exist yet.
+          if [ "$(az group exists -n "$GROUP")" = true ]; then
+            [ "$(az group show -n "$GROUP" --query tags.managedBy -o tsv)" = bicep ] || { echo "::error::Refusing to modify $GROUP: not tagged managedBy=bicep"; exit 1; }
+            registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)
+            domain=$(az containerapp env list -g "$GROUP" --query "[0].properties.defaultDomain" -o tsv --only-show-errors)
+          fi
+          if [ -z "$registry" ] || [ -z "$domain" ]; then
+            az group create -n "$GROUP" -l "$LOCATION" --tags project=workstream environment=production managedBy=bicep -o none
+            az deployment group create -g "$GROUP" -n foundation -f infra/foundation.bicep -o none --only-show-errors
+            registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)
+            domain=$(az containerapp env list -g "$GROUP" --query "[0].properties.defaultDomain" -o tsv --only-show-errors)
+          fi
+          {
+            echo "registry=$registry"
+            echo "origin=https://workstream-web.$domain"
+            echo "api-origin=https://workstream-api.$domain"
+          } >> "$GITHUB_OUTPUT"
+      # Two images per release: the API and the web app, which has the API's origin inlined into its bundle.
+      # Deploying an existing release again (a rollback) reuses its images.
+      - uses: ./.github/actions/build-api-image
+        id: api
+        with:
+          registry: ${{ steps.foundation.outputs.registry }}
+          tag: ${{ needs.resolve.outputs.tag }}
+      - uses: ./.github/actions/build-web-image
+        id: web
+        with:
+          registry: ${{ steps.foundation.outputs.registry }}
+          tag: ${{ needs.resolve.outputs.tag }}
+          api-url: ${{ steps.foundation.outputs.api-origin }}
+      - name: Deploy infra/main.bicep
+        env:
+          SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          IMAGE: ${{ steps.api.outputs.image }}
+          WEB_IMAGE: ${{ steps.web.outputs.image }}
+          ADMINISTRATOR_EMAIL: ${{ vars.ADMINISTRATOR_EMAIL }}
+          # The agents' models (infra/README.md "Models"): without the endpoint and key, agents say models are not set up.
+          MODEL_ENDPOINT: ${{ vars.MODEL_ENDPOINT }}
+          MODEL_KEY: ${{ secrets.MODEL_KEY }}
+        run: |
+          # Once more on failure: a fresh installation's SQL administrators group (data.bicep) cannot take its
+          # members in the same second Entra makes it, and the deployment is idempotent.
+          for attempt in 1 2; do
+            az deployment sub create -l "$LOCATION" -n workstream -f infra/main.bicep -o none --only-show-errors \
+              -p image="$IMAGE" webImage="$WEB_IMAGE" sourceSha="$SHA" releaseTag="$RELEASE_TAG" location="$LOCATION" \
+                 administratorEmail="$ADMINISTRATOR_EMAIL" modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" && break
+            [ "$attempt" = 1 ] || exit 1
+            echo "::warning::The deployment failed once; deploying again."
+          done
+      - name: Deployment timings
+        if: always()
+        run: |
+          az deployment operation sub list -n workstream \
+            --query "[?properties.targetResource].{resource: properties.targetResource.resourceName, state: properties.provisioningState, duration: properties.duration, finished: properties.timestamp}" \
+            -o table || true
+      - name: Verify the exact revision on both origins
+        env:
+          SHA: ${{ needs.resolve.outputs.sha }}
+          ORIGIN: ${{ steps.foundation.outputs.origin }}
+          API: ${{ steps.foundation.outputs.api-origin }}
+        run: |
+          scripts/verify-deployment.sh api "$API" "$SHA" 15
+          scripts/verify-deployment.sh web "$ORIGIN" "$SHA" 5
+          echo "### Deployed [$ORIGIN]($ORIGIN) and [$API]($API) at \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+  desktop-image:
+    name: Desktops' image
+    needs: [resolve, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: production
+    concurrency:
+      group: workstream-desktop-image
+      cancel-in-progress: false
+    env:
+      BUILDER: workstream-image-${{ github.run_id }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SHA: ${{ needs.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      # Baked when desktop/ changed since the previous release, when the gallery has no image yet, or when
+      # asked; never twice for one release.
+      - name: Decide whether to bake
+        id: decide
+        env:
+          CHANGED: ${{ needs.resolve.outputs.desktop }}
+          ASKED: ${{ inputs.desktop-image }}
+        run: |
+          set -euo pipefail
+          have=$(az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop --query "[].name" -o tsv)
+          if grep -qx "$VERSION" <<<"$have"; then
+            echo "Image $VERSION is already in the gallery."; echo "bake=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$have" ] || [ "$CHANGED" = true ] || [ "$ASKED" = true ]; then
+            echo "bake=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop/ is unchanged since the previous release: desktops keep the image they have."; echo "bake=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the image on a new machine
+        if: steps.decide.outputs.bake == 'true'
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          az group create -n "$BUILDER" -l "$LOCATION" --tags project=workstream purpose=image-build -o none
+          az vm create -g "$BUILDER" -n builder --image Debian:debian-13:13-gen2:latest --size Standard_D4as_v7 \
+            --admin-username builder --authentication-type password --admin-password "$(openssl rand -hex 20)Aa1-" \
+            --public-ip-sku Standard --nsg-rule NONE --os-disk-size-gb 64 --storage-sku Premium_LRS \
+            --security-type TrustedLaunch -o none
+          # The script's output comes back when it ends (its last 4 KB); it prints the last line only if every step ran.
+          az vm run-command invoke -g "$BUILDER" -n builder --command-id RunShellScript --scripts @desktop/image/bake.sh \
+            --parameters "$TOKEN" "$GITHUB_REPOSITORY" "$SHA" --query "value[0].message" -o tsv | tee build.log
+          grep -q "WORKSTREAM IMAGE OK $SHA" build.log
+      - name: Publish it and keep the three newest
+        if: steps.decide.outputs.bake == 'true'
+        run: |
+          set -euo pipefail
+          az vm deallocate -g "$BUILDER" -n builder -o none
+          az vm generalize -g "$BUILDER" -n builder -o none
+          az sig image-version create -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop \
+            --gallery-image-version "$VERSION" --virtual-machine "$(az vm show -g "$BUILDER" -n builder --query id -o tsv)" \
+            --replica-count 1 --storage-account-type Standard_LRS -o none
+          az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop \
+            --query "sort_by([], &publishingProfile.publishedDate)[].name" -o tsv | head -n -3 \
+            | xargs -r -I{} az sig image-version delete -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop --gallery-image-version {}
+          echo "### Desktops' image \`$VERSION\` published" >> "$GITHUB_STEP_SUMMARY"
+      - name: Delete the builder
+        if: always() && steps.decide.outputs.bake == 'true'
+        run: az group delete -n "$BUILDER" --yes --no-wait

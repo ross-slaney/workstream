@@ -1,0 +1,36 @@
+name: Build the API image
+description: >-
+  Builds the API (the root Dockerfile) and pushes workstream-api:<tag> to the registry. A tag already in the
+  registry is not built again. Expects azure/login and a checkout of the revision being built.
+inputs:
+  registry:
+    description: The registry's name (not its login server).
+    required: true
+  tag:
+    description: Image tag, vX.Y.Z for a release.
+    required: true
+outputs:
+  image:
+    description: Full image reference in the registry.
+    value: ${{ steps.name.outputs.image }}
+runs:
+  using: composite
+  steps:
+    - id: name
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        az acr login -n "$REGISTRY" --output none
+        echo "image=$REGISTRY.azurecr.io/workstream-api:$TAG" >> "$GITHUB_OUTPUT"
+        if az acr repository show -n "$REGISTRY" --image "workstream-api:$TAG" -o none 2>/dev/null; then
+          echo "workstream-api:$TAG already built"; echo "built=true" >> "$GITHUB_OUTPUT"
+        fi
+    - if: steps.name.outputs.built != 'true'
+      shell: bash
+      env:
+        IMAGE: ${{ steps.name.outputs.image }}
+      run: |
+        docker build --platform linux/amd64 -t "$IMAGE" -f Dockerfile .
+        docker push "$IMAGE"
