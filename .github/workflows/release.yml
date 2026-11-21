@@ -132,6 +132,9 @@ jobs:
             domain=$(az resource show -g "$GROUP" -n workstream-env --resource-type Microsoft.App/managedEnvironments --query properties.defaultDomain -o tsv 2>/dev/null || true)
           fi
           if [ -z "$registry" ] || [ -z "$domain" ]; then
+            # A container apps environment inside a virtual network needs this provider registered first.
+            # Without it the environment waits forever, and no deployment registers it by itself.
+            az provider register -n Microsoft.ContainerService --wait
             az group create -n "$GROUP" -l "$LOCATION" --tags project=workstream environment=production managedBy=bicep -o none
             az deployment group create -g "$GROUP" -n foundation -f infra/foundation.bicep -o none --only-show-errors
             registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)

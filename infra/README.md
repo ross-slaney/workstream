@@ -94,6 +94,8 @@ A running desktop is its machine: a Standard desktop (`Standard_D4as_v7`, 4 core
 
 ## Limits to know
 
+- **A provider.** A container apps environment inside a virtual network needs the `Microsoft.ContainerService` resource provider registered on the subscription. Without it the environment sits in `Waiting` and never finishes. `release.yml` registers it before a fresh installation's first deployment.
+
 - **Cores.** A new subscription has 10 cores in a region. Two Standard desktops use 8; baking an image uses 4 while it runs. More desktops at once needs a quota request in the Azure portal.
 - **Email.** The domain Azure manages sends a few dozen emails an hour and may land in spam. A domain of our own replaces it.
 - **Model throughput.** A Foundry deployment has a tokens-a-minute limit. An agent that reaches it waits and tries again.
