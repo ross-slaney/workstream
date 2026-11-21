@@ -46,6 +46,18 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     public string CreatedBy { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    /// <summary>
+    /// A fingerprint of everything a prepared setup depends on: the repository, the branch, the setup script,
+    /// the variables with their values, and the apps. A saved setup is used only while this is what it was
+    /// made from (<see cref="EnvironmentSetup"/>). Written by whoever changes the environment, who can read
+    /// the variables; null on an environment not changed since this existed, until it is first needed.
+    /// </summary>
+    public string? SetupInputs { get; private set; }
+
+    /// <summary>Whether there is anything to prepare: a repository to clone, or a script to run.</summary>
+    public bool HasSetup => RepositoryUrl is not null || SetupScript is not null;
+
+    public void KeepSetupInputs(string fingerprint) => SetupInputs = fingerprint;
 
     public static WorkEnvironment Add(string id, Team team, EnvironmentSettings settings, string createdBy, DateTimeOffset now)
     {

@@ -21,6 +21,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<TaskMessage> TaskMessages => Set<TaskMessage>();
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
     public DbSet<Spare> Spares => Set<Spare>();
+    public DbSet<EnvironmentSetup> Setups => Set<EnvironmentSetup>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
 
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
@@ -58,6 +59,8 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             environment.Property(x => x.RepositoryUrl).HasMaxLength(500);
             environment.Property(x => x.RepositoryBranch).HasMaxLength(200);
             environment.Property(x => x.CreatedBy).HasMaxLength(450);
+            environment.Property(x => x.SetupInputs).HasMaxLength(64);
+            environment.Ignore(x => x.HasSetup);
         });
 
         model.Entity<WorkTask>(task =>
@@ -126,9 +129,33 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             spare.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
             spare.Property(x => x.Host).HasMaxLength(100);
             spare.Property(x => x.Address).HasMaxLength(100);
+            spare.Property(x => x.Save).HasMaxLength(100);
             // A team has one spare at most: two people opening the workspace at once make one.
             spare.HasIndex(x => x.TeamId).IsUnique();
             spare.HasOne<Team>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        model.Entity<EnvironmentSetup>(setup =>
+        {
+            setup.ToTable("EnvironmentSetups");
+            setup.HasKey(x => x.EnvironmentId);
+            setup.Property(x => x.EnvironmentId).HasMaxLength(36);
+            setup.Property(x => x.TeamId).HasMaxLength(100);
+            setup.Property(x => x.Save).HasMaxLength(100);
+            setup.Property(x => x.SaveInputs).HasMaxLength(64);
+            setup.Property(x => x.SaveImage).HasMaxLength(40);
+            setup.Property(x => x.SaveCommit).HasMaxLength(64);
+            setup.Property(x => x.SaveCommitPending).HasMaxLength(64);
+            setup.Property(x => x.RunId).HasMaxLength(36);
+            setup.Property(x => x.RunHost).HasMaxLength(100);
+            setup.Property(x => x.RunInputs).HasMaxLength(64);
+            setup.Property(x => x.RunImage).HasMaxLength(40);
+            setup.Property(x => x.Output).HasMaxLength(EnvironmentSetup.MaxOutputLength);
+            setup.Property(x => x.Failure).HasMaxLength(500);
+            setup.Property(x => x.FailedInputs).HasMaxLength(64);
+            setup.Ignore(x => x.IsPreparing);
+            // It goes with its environment.
+            setup.HasOne<WorkEnvironment>().WithOne().HasForeignKey<EnvironmentSetup>(x => x.EnvironmentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         model.Entity<ModelUsage>(usage =>

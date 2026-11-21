@@ -148,6 +148,35 @@ public sealed class DesktopOptions
 
     public SpareOptions Spares { get; set; } = new();
 
+    public SaveOptions Saves { get; set; } = new();
+
+    /// <summary>
+    /// Saved setups: an environment's setup done once on a machine of its own, whose disk tasks then start
+    /// from (<see cref="EnvironmentSetup"/>). A preparing machine runs for nobody's task and a save is kept on
+    /// storage, so every number here is a limit on what those can cost.
+    /// </summary>
+    public sealed class SaveOptions
+    {
+        public bool Enabled { get; set; } = true;
+        /// <summary>Machines preparing at once, over every team.</summary>
+        public int AtOnce { get; set; } = 1;
+        /// <summary>A setup that has not ended this long after its machine was asked for has failed.</summary>
+        public int MaxMinutes { get; set; } = 45;
+        /// <summary>A save older than this is made again when a task next starts from it. The task itself uses the old one.</summary>
+        public int RefreshDays { get; set; } = 7;
+        /// <summary>A save nothing has started from for this long is removed, and made again on next use.</summary>
+        public int UnusedDays { get; set; } = 30;
+        /// <summary>Hours of preparing in any 24 hours, over every team. Past it, what is wanted waits.</summary>
+        public double HoursPerDay { get; set; } = 4;
+    }
+
+    /// <summary>
+    /// What a saved setup is only good for: desktops of this version of the image. On Azure it is the version
+    /// this deployment was made with; locally it is the image's name, which does not change when the image is
+    /// built again, so a local save is prepared again by hand.
+    /// </summary>
+    public string ImageVersion => Host.Equals("azure", StringComparison.OrdinalIgnoreCase) ? Azure.ImageId.Split('/')[^1] : Docker.Image;
+
     /// <summary>
     /// Spares: a desktop kept running for a team while someone is in its workspace, so their next task starts
     /// at once (<see cref="Spare"/>). Each is a running machine nobody is using yet, so every number here is a
@@ -181,6 +210,10 @@ public sealed class DesktopOptions
         };
         /// <summary>A Standard SSD of 64 GiB (E6), which every desktop has.</summary>
         public decimal DiskMonthlyUsd { get; set; } = 4.80m;
+        /// <summary>A saved setup, for each gigabyte on it, a month: a full snapshot on standard storage.</summary>
+        public decimal SaveGbMonthlyUsd { get; set; } = 0.05m;
+
+        public decimal SaveMonthlyOf(long bytes) => Math.Round(bytes / 1_073_741_824m * SaveGbMonthlyUsd, 2);
 
         public decimal HourOf(string size) => HourlyUsd.GetValueOrDefault(size, HourlyUsd.GetValueOrDefault(DesktopSizes.Standard));
     }
