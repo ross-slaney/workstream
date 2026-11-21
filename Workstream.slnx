@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/api/">
+    <Project Path="api/Workstream.Api.csproj" />
+  </Folder>
+  <Folder Name="/apphost/">
+    <Project Path="apphost/Workstream.AppHost.csproj" />
+  </Folder>
+</Solution>

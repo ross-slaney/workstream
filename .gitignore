@@ -1,0 +1,24 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+coverage/
+TestResults/
+
+# Node / Expo
+node_modules/
+client/dist/
+client/.expo/
+client/expo-env.d.ts
+client/debug-files/
+*.tsbuildinfo
+
+# Local settings and secrets
+.env
+.env.local
+apphost/.aspire/
+
+# OS and editors
+.DS_Store
+.idea/
