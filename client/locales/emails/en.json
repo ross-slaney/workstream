@@ -1,0 +1,24 @@
+{
+  "layout": {
+    "brand": "Workstream",
+    "why": "You get this email because you started this task or wrote in it.",
+    "turnOff": "Turn these emails off",
+    "turnOffText": "Turn these emails off on your team's page: {settingsLink}"
+  },
+  "finished": {
+    "displayName": "A task is finished",
+    "subject": "Finished: {title}",
+    "heading": "The agent finished {title}",
+    "intro": "The agent in {team} stopped working and said:",
+    "button": "Open the task",
+    "buttonText": "Open the task: {link}"
+  },
+  "needsYou": {
+    "displayName": "A task needs you",
+    "subject": "Needs you: {title}",
+    "heading": "The agent has a question about {title}",
+    "intro": "The agent in {team} is waiting for an answer:",
+    "button": "Answer the agent",
+    "buttonText": "Answer the agent: {link}"
+  }
+}

@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Workstream.Api;
+using SqlOS.Email.Interfaces;
 using Workstream.Api.Desktops;
+using Workstream.Api.Email;
 using Workstream.Api.Model;
 
 namespace Workstream.Tests;
@@ -14,8 +16,9 @@ namespace Workstream.Tests;
 /// The stack the journeys run against, started once per test run. SQL Server and the database come from the
 /// real AppHost (apphost/AppHost.cs) through Aspire.Hosting.Testing, as a throwaway container on a port of its
 /// own, without the api and web resources. The API runs here, in the test process, with the same
-/// <c>AddWorkstreamApi</c>/<c>MapWorkstreamApi</c> as Program.cs, so coverage sees it. Two things are played
-/// instead of real: the desktops (<see cref="FakeDesktops"/>) and the model (<see cref="FakeModel"/>). No job
+/// <c>AddWorkstreamApi</c>/<c>MapWorkstreamApi</c> as Program.cs, so coverage sees it. Three things are played
+/// instead of real: the desktops (<see cref="FakeDesktops"/>), the model (<see cref="FakeModel"/>) and the mail
+/// provider (<see cref="TestMail"/>). No job
 /// server runs: a test calls the job it wants (<see cref="Jobs"/>). Tests isolate themselves by signing up
 /// new people, each with a team of their own.
 /// </summary>
@@ -34,6 +37,7 @@ public static class Stack
 
     public static readonly FakeDesktops Desktops = new();
     public static readonly FakeModel Model = new();
+    public static readonly TestMail Mail = new();
 
     static DistributedApplication? aspire;
     static WebApplication? api;
@@ -42,6 +46,9 @@ public static class Stack
 
     /// <summary>The background jobs, run when a test asks: starting, stopping and deleting desktops, and the sweep.</summary>
     public static DesktopJobs Jobs => Services.GetRequiredService<DesktopJobs>();
+
+    /// <summary>The job that emails a task's people when the agent's turn ends, with the played provider.</summary>
+    public static TaskEmails Emails => Services.GetRequiredService<TaskEmails>();
 
     [AssemblyInitialize]
     public static async Task StartAsync(TestContext context)
@@ -115,6 +122,8 @@ public static class Stack
         builder.AddWorkstreamApi();
         builder.Services.AddSingleton<IDesktopHost>(Desktops);
         builder.Services.AddHttpClient(ModelGateway.ClientName).ConfigurePrimaryHttpMessageHandler(() => Model);
+        // Email as if it were set up: SqlOS renders every message from its stored template and hands it here.
+        builder.Services.AddSingleton<ISqlOSEmailSender>(Mail);
         var app = builder.Build();
         app.MapWorkstreamApi();
         return app;
