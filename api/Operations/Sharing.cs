@@ -57,7 +57,12 @@ public static partial class Operations
 
     static string InvitationLink(WorkstreamApp app, string token) => $"{app.WebOrigin}{WorkstreamApp.SharePath}?token={Uri.EscapeDataString(token)}";
 
-    static TaskInvitationDto ToDto(TaskInvitation x, string? link = null) => new(x.Id, x.Email, TaskShareRoles.NameOf(x.Role), x.AccessUntil, x.ExpiresAt, link);
+    static TaskInvitationDto ToDto(TaskInvitation x, string? link = null) => new(x.Id, x.Email, TaskShareRoles.NameOf(x.Role), Utc(x.AccessUntil), Utc(x.ExpiresAt), link);
+
+    /// <summary>Times are kept in UTC and read back without a kind: say so, so the browser does not read them as its own.</summary>
+    static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+    static DateTime? Utc(DateTime? value) => value is { } at ? Utc(at) : null;
 
     /// <summary>The task-sharing grants a person holds on a task, current or ended.</summary>
     static Task<List<SqlOSFgaGrant>> ShareGrantsAsync(WorkstreamDbContext db, string userId, string node, CancellationToken ct) =>
@@ -97,7 +102,7 @@ public static partial class Operations
             .ToListAsync(ct);
         var names = await TeamNamesAsync(db, [task.TeamId], ct);
         return Outcome<TaskAccessList>.Ok(new TaskAccessList(task.TeamId, names.GetValueOrDefault(task.TeamId, "Team"),
-            [.. people.Select(x => new SharedPerson(x.SubjectId, x.DisplayName, x.DefaultEmail, TaskShareRoles.NameOf(x.RoleId), x.EffectiveTo))],
+            [.. people.Select(x => new SharedPerson(x.SubjectId, x.DisplayName, x.DefaultEmail, TaskShareRoles.NameOf(x.RoleId), Utc(x.EffectiveTo)))],
             [.. invitations.Select(x => ToDto(x))]));
     }
 
