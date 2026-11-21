@@ -1,0 +1,13 @@
+[Unit]
+Description=Workstream desktop: grow the file system to the machine's disk
+# Beside the desktop, not before it: the display does not wait for the disk to grow.
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/workstream/image/grow-disk.sh
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

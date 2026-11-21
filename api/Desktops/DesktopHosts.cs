@@ -139,6 +139,17 @@ public sealed class DesktopOptions
             [DesktopSizes.Standard] = "Standard_D4as_v7",
             [DesktopSizes.Large] = "Standard_D8as_v7",
         };
+        /// <summary>
+        /// Each size's disk, in GiB: at least the image's 64. A large desktop is for a whole project's stack (its
+        /// containers, packages and builds), so it has twice the room. A machine grows its file system to its disk
+        /// when it boots (desktop/image/configure.sh). Priced in <see cref="PriceOptions.DiskMonthlyUsd"/>.
+        /// </summary>
+        public Dictionary<string, int> DiskSizesGb { get; set; } = new()
+        {
+            [DesktopSizes.Small] = 64,
+            [DesktopSizes.Standard] = 64,
+            [DesktopSizes.Large] = 128,
+        };
     }
 
     public sealed class DockerOptions
@@ -209,14 +220,21 @@ public sealed class DesktopOptions
             [DesktopSizes.Standard] = 0.182m,
             [DesktopSizes.Large] = 0.364m,
         };
-        /// <summary>A Standard SSD of 64 GiB (E6), which every desktop has.</summary>
-        public decimal DiskMonthlyUsd { get; set; } = 4.80m;
+        /// <summary>Each size's disk by the month: a Standard SSD of 64 GiB (E6) or 128 GiB (E10), as <see cref="AzureOptions.DiskSizesGb"/> sets it.</summary>
+        public Dictionary<string, decimal> DiskMonthlyUsd { get; set; } = new()
+        {
+            [DesktopSizes.Small] = 4.80m,
+            [DesktopSizes.Standard] = 4.80m,
+            [DesktopSizes.Large] = 9.60m,
+        };
         /// <summary>A saved setup, for each gigabyte on it, a month: a full snapshot on standard storage.</summary>
         public decimal SaveGbMonthlyUsd { get; set; } = 0.05m;
 
         public decimal SaveMonthlyOf(long bytes) => Math.Round(bytes / 1_073_741_824m * SaveGbMonthlyUsd, 2);
 
         public decimal HourOf(string size) => HourlyUsd.GetValueOrDefault(size, HourlyUsd.GetValueOrDefault(DesktopSizes.Standard));
+
+        public decimal DiskOf(string size) => DiskMonthlyUsd.GetValueOrDefault(size, DiskMonthlyUsd.GetValueOrDefault(DesktopSizes.Standard));
     }
 }
 
@@ -313,6 +331,8 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                         {
                             ["createOption"] = "FromImage",
                             ["deleteOption"] = "Delete",
+                            // Each size's own disk (DiskSizesGb), at least the image's; the machine grows into it (desktop/image/grow-disk.sh).
+                            ["diskSizeGB"] = Azure.DiskSizesGb.GetValueOrDefault(spec.Size, 64),
                             ["managedDisk"] = new JsonObject { ["storageAccountType"] = DiskType },
                         },
                     }

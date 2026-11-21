@@ -49,9 +49,13 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   rm -rf /home/work/.workstream/* /home/work/.cache/sessions /tmp/.X1-lock /tmp/.X11-unix/X1
 
   # What a desktop cannot do without.
-  command -v Xtigervnc chromium code node docker dotnet gh xdotool > /dev/null
+  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof > /dev/null
   test -d /opt/workstream/agent/node_modules/@anthropic-ai/claude-agent-sdk
-  systemctl is-enabled workstream-desktop.service > /dev/null
+  systemctl is-enabled workstream-desktop.service workstream-grow-disk.service > /dev/null
+  sudo -u work -H dotnet dev-certs https --check
+  # The Android emulator, with the processor's virtualization open to the desktop's person (it boots on Intel sizes only).
+  test -d /home/work/.android/avd/Phone.avd
+  sudo -u work /opt/android-sdk/emulator/emulator -accel-check
   test -f /home/work/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 } > "$log" 2>&1
 

@@ -87,6 +87,22 @@ The first time the agent runs on a machine that has just started, which it knows
 
 The API sends two kinds of email through Azure Communication Services: SqlOS's own (sign-in codes, invitations) and the email to a task's people when the agent's turn ends (`api/Email/TaskEmails.cs`, [the core model](core-model.md#hear-when-a-task-is-finished-or-needs-you)). The task emails are SqlOS templates that code owns: the API writes them into SqlOS's store at every start, with every word from `client/locales/emails/en.json`, which the API carries inside it. They are sent by a Hangfire job a few seconds after a turn ends. Where `SqlOS:EmailOtp:FromAddress` and its connection string are not set, nothing is sent.
 
+## A project's whole stack on a desktop
+
+A team's real project usually runs as several programs at once: a database in a container, an API, a bundler, a browser driving it. The image has what such a stack needs (`desktop/image/install.sh`): Docker Engine, the .NET 10 SDK (Aspire 9 and later is a NuGet package of the project, with no workload), Node 22, sqlcmd, Playwright's system libraries (the browsers themselves are the project's own version), Java 17, and the Android SDK with an emulator set up as `Phone`. The ASP.NET Core development certificate is made and trusted for the desktop's person, and the limits a big project reaches (watched files, open files) are raised.
+
+| Size | Machine | Disk |
+| --- | --- | --- |
+| Small | 2 cores, 8 GB (`Standard_D2as_v7`) | 64 GB |
+| Standard | 4 cores, 16 GB (`Standard_D4as_v7`) | 64 GB |
+| Large | 8 cores, 32 GB (`Standard_D8as_v7`) | 128 GB |
+
+The disk of each size is a setting (`Workstream:Desktops:Azure:DiskSizesGb`) priced beside the machines (`DesktopOptions.Prices`). The image is 64 GB, so a machine with a larger disk grows its file system to it when it first boots (`image/grow-disk.sh`). A project with a database, an API and a web bundler wants Large.
+
+The Android emulator needs an Intel machine. Every Dasv7 size exposes AMD's virtualization (`/dev/kvm` opens and `emulator -accel-check` passes, which the bake checks), but the emulator's virtual machine stops as soon as it starts ("QEMU main loop exits abnormally with code 1"), on a desktop and on a plain Debian machine alike. On an Intel `Standard_D4s_v6` the same emulator and system image boot in about a minute. So Android builds work on every size, and the emulator would work if a size were an Intel one (`Workstream:Desktops:Azure:Sizes`). The agent is told which, from the processor it finds (`agent/instructions.mjs`). iPhone and iPad builds and the iOS simulator need macOS and Apple's tools, which no Linux desktop can run. The agent is told so and does the rest of a task.
+
+The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, and deliver changes on a branch of their own as a pull request opened with `gh`. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
+
 ## Models
 
 The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.

@@ -4,12 +4,13 @@
 // harness would replace this file and nothing else.
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
 import { noteBackground, noteFile } from "./restore.mjs";
-import { projectWork } from "./instructions.mjs";
+import { projectTools, projectWork } from "./instructions.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,17 @@ You are the agent on a Workstream desktop: a Linux computer (Debian with the XFC
 - When you finish, say what you did and what is on screen for the person to look at.
 - The person reads your messages in a narrow panel beside the desktop. Write plain, short paragraphs.
 - When this desktop is stopped and started again, Workstream reruns the commands you left running in the background and reopens the browser's pages and VS Code.
+
 `.trim();
+
+/** The processor's maker, from /proc/cpuinfo: the Android emulator starts only on Intel's (instructions.mjs). */
+function processorVendor() {
+  try {
+    return /vendor_id\s*:\s*(\S+)/.exec(readFileSync("/proc/cpuinfo", "utf8"))?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Models are reached as Foundry serves them, through the gateway, with the desktop's own key. */
 const modelEnvironment = (setup, key) => ({
@@ -44,6 +55,12 @@ const modelEnvironment = (setup, key) => ({
   DISABLE_AUTOUPDATER: "1",
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
 });
+
+/**
+ * A project's builds and first starts take minutes: a command may run for ten minutes unless it says
+ * otherwise, and for an hour when it asks to.
+ */
+const longCommands = { BASH_DEFAULT_TIMEOUT_MS: String(10 * 60_000), BASH_MAX_TIMEOUT_MS: String(60 * 60_000) };
 
 /**
  * Run the agent for as long as the desktop is up.
@@ -65,7 +82,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
   let current = null;
 
   // gh's wrapper first on the PATH (shims/gh), so the agent's gh signs itself in.
-  const environment = { ...process.env, PATH: `${path.join(here, "shims")}:${process.env.PATH}`, ...setup.variables, ...modelEnvironment(setup, key) };
+  const environment = { ...process.env, PATH: `${path.join(here, "shims")}:${process.env.PATH}`, ...setup.variables, ...modelEnvironment(setup, key), ...longCommands };
   const options = () => ({
     cwd: workspace,
     env: environment,
@@ -76,7 +93,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: [onThisDesktop(workspace), restored, projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
+      append: [onThisDesktop(workspace), projectTools(processorVendor()), restored, projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
     },
     // The repository's own instructions and skills (CLAUDE.md, .claude/skills) apply, as they would on a laptop.
     settingSources: ["user", "project", "local"],

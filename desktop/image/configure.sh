@@ -10,6 +10,8 @@ id work >/dev/null 2>&1 || useradd --create-home --shell /bin/bash work
 echo "work ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/work
 chmod 0440 /etc/sudoers.d/work
 getent group docker >/dev/null && usermod -aG docker work
+# The emulator runs on the processor's virtualization, which /dev/kvm opens to this group.
+getent group kvm >/dev/null && usermod -aG kvm work
 
 # Chromium: no first-run questions, one profile shared by the person and the agent's browser tools (which
 # attach on port 9222, open to this desktop only), and no sandbox of its own inside a container, which has
@@ -106,12 +108,42 @@ done
 git config --global init.defaultBranch main
 EOF
 
+# A project's own tools, ready for the person: the ASP.NET Core development certificate (which an Aspire
+# dashboard or any https://localhost serves), trusted by the browser and by .NET; and a phone for the Android
+# emulator. The SDK is theirs, so Gradle can add what a project asks for.
+[ -d /opt/android-sdk ] && chown -R work:work /opt/android-sdk
+sudo -u work bash <<'EOF'
+set -euo pipefail
+. /etc/profile.d/workstream-tools.sh
+if command -v dotnet >/dev/null; then
+  dotnet dev-certs https --trust >/dev/null 2>&1 || dotnet dev-certs https >/dev/null
+fi
+if [ -d /opt/android-sdk/system-images ]; then
+  echo no | avdmanager create avd --force -n Phone -k "system-images;android-36;google_apis;x86_64" -d pixel_7 >/dev/null
+fi
+EOF
+
 # On a machine, the desktop starts at boot. A container has no service manager and runs start.sh itself.
 # Docker does not start at boot: it would read its programs off a new machine's slow disk just when the
 # desktop is reading its own. Its socket is there instead, and the first `docker` command starts it.
 if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   install -m 0644 "$ROOT/image/workstream-desktop.service" /etc/systemd/system/workstream-desktop.service
   systemctl enable workstream-desktop.service
+  # A machine's disk can be larger than the image's (api/Desktops/DesktopHosts.cs, DiskSizesGb). Nothing
+  # provisions a desktop, so it grows its own file system to its disk when it first boots.
+  chmod +x "$ROOT/image/grow-disk.sh"
+  install -m 0644 "$ROOT/image/workstream-grow-disk.service" /etc/systemd/system/workstream-grow-disk.service
+  systemctl enable workstream-grow-disk.service
+  # A project's stack watches many files (Metro, dotnet watch, VS Code) and keeps many open.
+  cat > /etc/sysctl.d/90-workstream.conf <<'CONF'
+fs.inotify.max_user_watches = 1048576
+fs.inotify.max_user_instances = 8192
+vm.max_map_count = 262144
+CONF
+  # Containers' logs are kept small, on a disk they share with the work.
+  if [ -d /etc/docker ]; then
+    echo '{ "log-driver": "local", "log-opts": { "max-size": "20m", "max-file": "3" } }' > /etc/docker/daemon.json
+  fi
   if systemctl cat docker.socket >/dev/null 2>&1; then
     systemctl disable docker.service containerd.service
     systemctl enable docker.socket
