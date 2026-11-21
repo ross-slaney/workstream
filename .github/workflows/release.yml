@@ -129,13 +129,13 @@ jobs:
           if [ "$(az group exists -n "$GROUP")" = true ]; then
             [ "$(az group show -n "$GROUP" --query tags.managedBy -o tsv)" = bicep ] || { echo "::error::Refusing to modify $GROUP: not tagged managedBy=bicep"; exit 1; }
             registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)
-            domain=$(az containerapp env list -g "$GROUP" --query "[0].properties.defaultDomain" -o tsv --only-show-errors)
+            domain=$(az resource show -g "$GROUP" -n workstream-env --resource-type Microsoft.App/managedEnvironments --query properties.defaultDomain -o tsv 2>/dev/null || true)
           fi
           if [ -z "$registry" ] || [ -z "$domain" ]; then
             az group create -n "$GROUP" -l "$LOCATION" --tags project=workstream environment=production managedBy=bicep -o none
             az deployment group create -g "$GROUP" -n foundation -f infra/foundation.bicep -o none --only-show-errors
             registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)
-            domain=$(az containerapp env list -g "$GROUP" --query "[0].properties.defaultDomain" -o tsv --only-show-errors)
+            domain=$(az resource show -g "$GROUP" -n workstream-env --resource-type Microsoft.App/managedEnvironments --query properties.defaultDomain -o tsv 2>/dev/null || true)
           fi
           {
             echo "registry=$registry"
