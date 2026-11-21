@@ -10,8 +10,13 @@ using Workstream.Api.Domain;
 
 namespace Workstream.Api.Desktops;
 
-/// <summary>What a machine is made with. The key and the API's address are the only two things it is told; it asks the API for the rest.</summary>
-public sealed record DesktopSpec(string Name, string TaskId, string TeamId, string Size, string ApiUrl, string Key)
+/// <summary>
+/// What a machine is made with. The key and the API's address are the only two things it is told; it asks the
+/// API for the rest. <see cref="DesktopId"/> is the task's id for a machine made for a task and the spare's own
+/// for a spare; <see cref="Purpose"/> is one of <see cref="MachinePurpose"/>, and is written on the machine so
+/// a person looking at the host can tell them apart.
+/// </summary>
+public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task)
 {
     /// <summary>
     /// What the desktop is told, as its agent reads it (desktop/agent/told.mjs): on a machine this is its user
@@ -129,6 +134,45 @@ public sealed class DesktopOptions
     {
         public string Image { get; set; } = "workstream-desktop:local";
     }
+
+    public SpareOptions Spares { get; set; } = new();
+
+    /// <summary>
+    /// Spares: a desktop kept running for a team while someone is in its workspace, so their next task starts
+    /// at once (<see cref="Spare"/>). Each is a running machine nobody is using yet, so every number here is a
+    /// limit on what that can cost.
+    /// </summary>
+    public sealed class SpareOptions
+    {
+        public bool Enabled { get; set; } = true;
+        /// <summary>Spares running at once, over every team. A team has one at most.</summary>
+        public int Max { get; set; } = 2;
+        /// <summary>A spare nobody on the team has wanted for this long is removed.</summary>
+        public int IdleMinutes { get; set; } = 15;
+        /// <summary>Hours of spare time in any 24 hours, over every team. Past it no spare is made until some has aged out.</summary>
+        public double HoursPerDay { get; set; } = 6;
+    }
+
+    /// <summary>
+    /// What Workstream pays for the desktops: Azure's list prices in West US 3, in dollars, in one place. A
+    /// running machine by the hour and by size; a machine's disk by the month, which is all a stopped desktop
+    /// costs. What the desktops cost is the runs' hours times these (<see cref="DesktopRun"/>).
+    /// </summary>
+    public PriceOptions Prices { get; set; } = new();
+
+    public sealed class PriceOptions
+    {
+        public Dictionary<string, decimal> HourlyUsd { get; set; } = new()
+        {
+            [DesktopSizes.Small] = 0.091m,
+            [DesktopSizes.Standard] = 0.182m,
+            [DesktopSizes.Large] = 0.364m,
+        };
+        /// <summary>A Standard SSD of 64 GiB (E6), which every desktop has.</summary>
+        public decimal DiskMonthlyUsd { get; set; } = 4.80m;
+
+        public decimal HourOf(string size) => HourlyUsd.GetValueOrDefault(size, HourlyUsd.GetValueOrDefault(DesktopSizes.Standard));
+    }
 }
 
 public static class DesktopHosting
@@ -154,8 +198,11 @@ public static class DesktopHosting
         return builder;
     }
 
-    /// <summary>The machine's name for a task: short, and the same every time, so a retry finds what an earlier try made.</summary>
-    public static string NameFor(string taskId) => "ws-" + Guid.Parse(taskId).ToString("N")[..16];
+    /// <summary>
+    /// The machine's name for a desktop, from the task's id or the spare's: short, and the same every time, so
+    /// a retry finds what an earlier try made.
+    /// </summary>
+    public static string NameFor(string desktopId) => "ws-" + Guid.Parse(desktopId).ToString("N")[..16];
 }
 
 /// <summary>An environment with no way to run desktops: the tests' default, and a deployment that forgot to configure one.</summary>
@@ -200,7 +247,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         var body = new JsonObject
         {
             ["location"] = Azure.Location,
-            ["tags"] = new JsonObject { ["project"] = "workstream", ["task"] = spec.TaskId, ["team"] = spec.TeamId },
+            ["tags"] = new JsonObject { ["project"] = "workstream", ["desktop"] = spec.DesktopId, ["team"] = spec.TeamId, ["purpose"] = spec.Purpose },
             ["properties"] = new JsonObject
             {
                 ["hardwareProfile"] = new JsonObject { ["vmSize"] = vmSize },
@@ -409,7 +456,7 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
         await RunAsync(
         [
             "run", "-d", "--name", spec.Name, "--hostname", "desktop", "--shm-size", "1g",
-            "--label", "workstream.task=" + spec.TaskId,
+            "--label", "workstream.desktop=" + spec.DesktopId, "--label", "workstream.purpose=" + spec.Purpose,
             "-p", $"127.0.0.1::{options.DisplayPort}",
             "-e", "WORKSTREAM_API=" + spec.ApiUrl, "-e", "WORKSTREAM_KEY=" + spec.Key,
             options.Docker.Image,
@@ -437,7 +484,7 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
 
     public async Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct)
     {
-        var names = (await RunAsync(["ps", "-a", "--filter", "label=workstream.task", "--format", "{{.Names}}"], ct))
+        var names = (await RunAsync(["ps", "-a", "--filter", "label=workstream.desktop", "--format", "{{.Names}}"], ct))
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var machines = new List<HostedMachine>();
         foreach (var name in names)

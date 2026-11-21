@@ -4,7 +4,7 @@ import { Dialog } from "@/components/kit/dialog";
 import { TextField } from "@/components/kit/field";
 import { ErrorNote, ReadState } from "@/components/kit/status";
 import type { AdminOverview, RunningDesktop, TeamNumbers } from "@/lib/workstream/api";
-import { dollars, hours } from "../format";
+import { dollars, hours, seconds, since } from "../format";
 import { RunningChart } from "../running-chart";
 import type { AdminScreenProps } from "./props";
 
@@ -67,6 +67,88 @@ export function ChartCard({ overview }: { overview: AdminOverview }) {
   return (
     <Card title="Desktops running, last 24 hours" note={`Peak ${peak}`}>
       <RunningChart points={overview.running} />
+    </Card>
+  );
+}
+
+const cell = "px-3 py-2 text-sm text-foreground";
+const head = "px-3 py-2 text-left text-[12.5px] font-medium text-muted-foreground";
+
+const PURPOSE: Record<string, string> = { task: "Tasks' desktops", spare: "Spares" };
+
+/**
+ * What the desktops cost Workstream: the hours machines ran this month, by what they ran for, at each size's
+ * price; the disks kept, which is all a stopped desktop costs; and the spares running now. Narrow enough for
+ * a phone, so both surfaces draw it the same.
+ */
+export function CostsCard({ overview, now }: { overview: AdminOverview; now: number }) {
+  const { thisMonth, disks, disksMonthlyUsd, spares } = overview.machines;
+  const total = thisMonth.reduce((sum, line) => sum + line.usd, 0);
+  return (
+    <Card title="What the desktops cost" note="This month, at Azure's list prices">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b border-border">
+            <th scope="col" className={head}>Machines running</th>
+            <th scope="col" className={`${head} text-right`}>Hours</th>
+            <th scope="col" className={`${head} text-right`}>Cost</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {thisMonth.map((line) => (
+            <tr key={line.purpose}>
+              <td className={cell}>{PURPOSE[line.purpose] ?? line.purpose}</td>
+              <td className={`${cell} text-right tabular-nums`}>{hours(line.hours)}</td>
+              <td className={`${cell} text-right tabular-nums`}>{dollars(line.usd)}</td>
+            </tr>
+          ))}
+          <tr>
+            <td className={`${cell} font-medium`}>All machines</td>
+            <td className={cell} />
+            <td className={`${cell} text-right font-medium tabular-nums`}>{dollars(total)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="text-[13px] text-muted-foreground">
+        {disks === 0 ? "No disk is kept." : `${disks} ${disks === 1 ? "disk is" : "disks are"} kept, one for each desktop whether it runs or not: ${dollars(disksMonthlyUsd)} a month at this many.`}{" "}
+        {spares.length === 0
+          ? "No spare is running."
+          : `Spares running now: ${spares.map((spare) => `${spare.teamName} (${spare.size}, ${spare.state}, ${since(spare.since, now)})`).join("; ")}.`}
+      </p>
+    </Card>
+  );
+}
+
+const SOURCE: Record<string, string> = { image: "A new machine", spare: "A spare", stopped: "Its own machine, stopped" };
+
+/** How long a start took, from when each step was written down as it happened: the middle start of the last seven days, by what it started from. */
+export function StartsCard({ overview }: { overview: AdminOverview }) {
+  return (
+    <Card title="How long a start takes" note="Last 7 days, the middle start">
+      {overview.starts.length === 0 ? (
+        <p className="py-2 text-sm text-muted-foreground">No desktop has started in the last seven days.</p>
+      ) : (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-border">
+              <th scope="col" className={head}>Started from</th>
+              <th scope="col" className={`${head} text-right`}>Starts</th>
+              <th scope="col" className={`${head} text-right`}>Screen</th>
+              <th scope="col" className={`${head} text-right`}>Agent</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {overview.starts.map((line) => (
+              <tr key={line.source}>
+                <td className={cell}>{SOURCE[line.source] ?? line.source}</td>
+                <td className={`${cell} text-right tabular-nums`}>{line.starts}</td>
+                <td className={`${cell} text-right tabular-nums`}>{seconds(line.screenSeconds)}</td>
+                <td className={`${cell} text-right tabular-nums`}>{seconds(line.agentSeconds)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Card>
   );
 }

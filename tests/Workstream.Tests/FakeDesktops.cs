@@ -16,7 +16,7 @@ public sealed class FakeDesktops : IDesktopHost
     public ConcurrentDictionary<string, DesktopSpec> Made { get; } = new();
     public ConcurrentDictionary<string, bool> Running { get; } = new();
     public ConcurrentBag<string> Deleted { get; } = [];
-    /// <summary>Task ids whose machine cannot be made: the host refuses, as Azure does out of quota.</summary>
+    /// <summary>Desktops (by the task's id, or the spare's) whose machine cannot be made: the host refuses, as Azure does out of quota.</summary>
     public ConcurrentDictionary<string, bool> Refuse { get; } = new();
     /// <summary>Machines the host has taken the request for and has not turned on yet.</summary>
     public ConcurrentDictionary<string, bool> NotOn { get; } = new();
@@ -29,7 +29,7 @@ public sealed class FakeDesktops : IDesktopHost
 
     public Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct)
     {
-        if (Refuse.ContainsKey(spec.TaskId)) throw new InvalidOperationException("No capacity.");
+        if (Refuse.ContainsKey(spec.DesktopId)) throw new InvalidOperationException("No capacity.");
         Made[spec.Name] = spec;
         Running[spec.Name] = true;
         return Task.FromResult(new DesktopPlace(spec.Name, Display.Address));
@@ -67,8 +67,8 @@ public sealed class FakeDesktops : IDesktopHost
     public Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<HostedMachine>>(Running.Keys.Select(name => new HostedMachine(name, MadeAt.GetValueOrDefault(name, DateTimeOffset.UtcNow))).ToList());
 
-    /// <summary>What the desktop for this task was made with.</summary>
-    public DesktopSpec For(string taskId) => Made.Values.Single(spec => spec.TaskId == taskId);
+    /// <summary>What the machine for this desktop (a task's id, or a spare's) was made with.</summary>
+    public DesktopSpec For(string desktopId) => Made.Values.Single(spec => spec.DesktopId == desktopId);
 }
 
 /// <summary>

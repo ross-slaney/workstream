@@ -103,6 +103,9 @@ public static class Stack
         // The desktops are played here; a desktop is told this API's address.
         builder.Configuration["Workstream:Desktops:Host"] = "none";
         builder.Configuration["Workstream:Desktops:ApiUrl"] = Origin.GetLeftPart(UriPartial.Authority);
+        // Room for every spare a journey makes; the journeys about the limits lower them.
+        builder.Configuration["Workstream:Desktops:Spares:Max"] = "1000";
+        builder.Configuration["Workstream:Desktops:Spares:HoursPerDay"] = "100000";
         // The model: Foundry is played in this process, under the gateway's own client.
         builder.Configuration["Workstream:Model:Endpoint"] = "http://foundry.test/anthropic";
         builder.Configuration["Workstream:Model:Key"] = ModelKey;

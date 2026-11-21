@@ -11,6 +11,8 @@
 //   --prompt "…"  what to ask the agent (default: a small task that needs the browser)
 //   --wait 600    seconds to wait for the desktop to be ready (default 600)
 //   --starts 5    instead of the journey: start that many tasks one after another and time each one
+//   --spare 45    with --starts: before each start, say someone is in the workspace and wait that many seconds,
+//                 as a person does while they write what they want, so the task starts on the team's spare
 //
 // Prints one line per step with how long it took. Exits 1 at the first step that fails.
 //
@@ -266,6 +268,11 @@ console.log("\nEvery step worked.");
 
 /** Start one task and time, from the request, when its screen can be watched and when its agent begins. */
 async function timeOneStart() {
+  if (args.spare) {
+    const wanted = await person.call("POST", `/api/teams/${team.id}/spare`, {});
+    if (wanted.status !== 204) fail(`asking for a spare answered ${wanted.status}: ${JSON.stringify(wanted.body).slice(0, 300)}`);
+    await sleep(Number(args.spare === "true" ? 45 : args.spare) * 1000);
+  }
   const id = randomUUID();
   const began = Date.now();
   const seconds = () => Math.round((Date.now() - began) / 100) / 10;

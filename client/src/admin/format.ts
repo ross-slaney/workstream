@@ -4,6 +4,9 @@ export const dollars = (value: number) => value.toLocaleString("en-US", { style:
 
 export const hours = (value: number) => `${(Math.round(value * 10) / 10).toLocaleString("en-US")} h`;
 
+/** Seconds a start took; a dash when none got that far. */
+export const seconds = (value: number | null) => (value === null ? "–" : `${(Math.round(value * 10) / 10).toLocaleString("en-US")} s`);
+
 /** How long ago, in the two largest units that say it. */
 export function since(from: string, now: number): string {
   const minutes = Math.max(0, Math.floor((now - new Date(from).getTime()) / 60_000));

@@ -36,13 +36,15 @@ public static class WorkstreamAuthorization
         public const string TaskRunAgent = "TASK_RUN_AGENT";
         /// <summary>The operator's own: start, stop and delete the desktop.</summary>
         public const string TaskOperateDesktop = "TASK_OPERATE_DESKTOP";
+        /// <summary>The operator's own: make and remove the desktop kept ready for the team's next task.</summary>
+        public const string TeamOperateSpare = "TEAM_OPERATE_SPARE";
 
         public static readonly string[] All =
         [
             AdminView,
             TeamView, TeamViewUsage, TeamManageMembers, TeamManageSettings, TeamCreateEnvironment, TeamCreateTask,
             EnvironmentView, EnvironmentEdit,
-            TaskView, TaskUse, TaskManage, TaskRunAgent, TaskOperateDesktop,
+            TaskView, TaskUse, TaskManage, TaskRunAgent, TaskOperateDesktop, TeamOperateSpare,
         ];
     }
 
@@ -78,11 +80,12 @@ public static class WorkstreamAuthorization
         seed.Permission(Permissions.TaskManage, "Rename, stop, start and delete a task", ResourceTypes.Task);
         seed.Permission(Permissions.TaskRunAgent, "Run the task's agent", ResourceTypes.Task);
         seed.Permission(Permissions.TaskOperateDesktop, "Start, stop and delete the task's desktop", ResourceTypes.Task);
+        seed.Permission(Permissions.TeamOperateSpare, "Make and remove the team's spare desktop", ResourceTypes.Team);
 
         // The dashboard's numbers and every team's limits, and nothing inside a team: someone who should see a
         // team's tasks and desktops is invited to the team like anyone else.
         seed.Role(Roles.SystemAdmin, "System administrator").Can(Permissions.AdminView);
-        seed.Role(Roles.DesktopOperator, "Desktop operator").Can(Permissions.TaskOperateDesktop);
+        seed.Role(Roles.DesktopOperator, "Desktop operator").Can(Permissions.TaskOperateDesktop, Permissions.TeamOperateSpare);
         seed.Role(Roles.TeamMember, "Team member").Can(
             Permissions.TeamView, Permissions.TeamViewUsage, Permissions.TeamCreateEnvironment, Permissions.TeamCreateTask,
             Permissions.EnvironmentView, Permissions.EnvironmentEdit,

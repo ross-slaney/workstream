@@ -38,6 +38,7 @@ public static partial class WorkstreamApi
     {
         api.MapGet("/teams/{teamId}/tasks", ListTasks).WithName("list_tasks").WithTags("Tasks").Produces<ListPage<TaskDto>>();
         api.MapPost("/teams/{teamId}/tasks", PostTask).WithName("start_task").WithTags("Tasks").Produces<TaskDto>(201).ProducesProblem(402).ProducesProblem(409);
+        api.MapPost("/teams/{teamId}/spare", PostSpare).WithName("want_spare").WithTags("Tasks").Produces(204);
         api.MapGet("/tasks/{id}", GetTask).WithName("get_task").WithTags("Tasks").Produces<TaskDto>();
         api.MapPut("/tasks/{id}", PutTask).WithName("rename_task").WithTags("Tasks").Produces<TaskDto>();
         api.MapDelete("/tasks/{id}", DeleteTask).WithName("delete_task").WithTags("Tasks");
@@ -74,8 +75,18 @@ public static partial class WorkstreamApi
         return Results.Ok(new ListPage<TaskDto>([.. page.Data.Select(x => ToDto(x, names))], page.NextCursor));
     }
 
-    static async Task<IResult> PostTask(string teamId, StartTask body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct) =>
-        await TaskResultAsync(await Operations.StartTaskAsync(CallerOf(http), teamId, body, db, fga, jobs, ct), db, ct, created: true);
+    static async Task<IResult> PostTask(string teamId, StartTask body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct) =>
+        await TaskResultAsync(await Operations.StartTaskAsync(CallerOf(http), teamId, body, db, fga, jobs, desktops, ct), db, ct, created: true);
+
+    /// <summary>
+    /// Someone is in the team's workspace: have a desktop running for their next task. 204 whether or not one
+    /// was asked for, since there is nothing for the caller to do with the answer.
+    /// </summary>
+    static async Task<IResult> PostSpare(string teamId, WantSpare? body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions desktops, TimeProvider clock, CancellationToken ct)
+    {
+        var outcome = await Operations.WantSpareAsync(CallerOf(http), teamId, body, db, fga, jobs, desktops, clock, ct);
+        return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
+    }
 
     static async Task<IResult> GetTask(string id, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct) =>
         await TaskResultAsync(await Operations.ViewTaskAsync(CallerOf(http), id, db, fga, ct), db, ct);

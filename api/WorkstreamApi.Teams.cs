@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.DataProtection;
 using SqlOS.AuthServer.Services;
 using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
+using Workstream.Api.Desktops;
 using Workstream.Api.Domain;
 using static Workstream.Api.WorkstreamAuthorization;
 
@@ -186,9 +187,9 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 
-    static async Task<IResult> GetAdminOverview(HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, TimeProvider clock, CancellationToken ct)
+    static async Task<IResult> GetAdminOverview(HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, TimeProvider clock, CancellationToken ct)
     {
-        var outcome = await Operations.AdminOverviewAsync(CallerOf(http), db, fga, clock, ct);
+        var outcome = await Operations.AdminOverviewAsync(CallerOf(http), db, fga, desktops, clock, ct);
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 

@@ -113,8 +113,9 @@ public static class ModelGateway
     {
         var ct = http.RequestAborted;
         var desktop = Caller.Desktop(http);
-        var task = await db.Tasks.AsNoTracking().SingleOrDefaultAsync(x => x.Id == desktop.DesktopTaskId, ct);
-        if (task is null || task.State == DesktopState.Deleting || !await fga.Allows(desktop.PrincipalId, Permissions.TaskRunAgent, task.ResourceId))
+        // The task this desktop works on, which is a grant: a spare, or the desktop of a deleted task, has none.
+        var task = await Operations.DesktopTaskAsync(desktop, db, ct, tracked: false);
+        if (task is null)
         {
             await RefuseAsync(http, StatusCodes.Status401Unauthorized, "authentication_error", "This desktop's key is no longer valid.");
             return;
