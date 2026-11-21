@@ -36,10 +36,17 @@ public sealed class ModelJourneys
         Assert.IsFalse(call.Headers.Values.Any(value => value.Contains(desktop.Key)));
         Assert.AreEqual("2023-06-01", call.Headers["anthropic-version"]);
         StringAssert.Contains(call.Body, "Say done.");
+        // Foundry refuses a request that does not say how long it is, however the desktop sent it.
+        Assert.AreEqual(System.Text.Encoding.UTF8.GetByteCount(call.Body), call.ContentLength);
+        Stack.Model.Calls.Clear();
+        using var inChunks = await desktop.AskModelAsync(chunked: true);
+        Assert.AreEqual(HttpStatusCode.OK, inChunks.StatusCode);
+        var counted = Stack.Model.Calls.Single();
+        Assert.AreEqual(System.Text.Encoding.UTF8.GetByteCount(counted.Body), counted.ContentLength);
 
-        // Opus: $4 a million tokens in, $20 a million out.
+        // Opus: $4 a million tokens in, $20 a million out; two calls.
         var usage = await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage");
-        Assert.AreEqual(0.014m, usage.ModelSpentUsd);
+        Assert.AreEqual(0.028m, usage.ModelSpentUsd);
         Assert.AreEqual(team.ModelAllowanceUsd, usage.ModelAllowanceUsd);
 
         // The agent's harness may send its key as a bearer token instead.

@@ -80,11 +80,20 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
       browser: { command: process.execPath, args: [path.join(here, "node_modules/@playwright/mcp/cli.js"), "--cdp-endpoint", "http://127.0.0.1:9222"] },
     },
     hooks: {
+      // What the agent is working in is what the person sees: the browser comes to the front when the agent
+      // uses it, and a file the agent changes opens in the editor.
+      PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [showBrowser] }],
       PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }],
     },
     resume: state.sessionId ?? undefined,
     stderr: (line) => log("harness:", line.trimEnd()),
   });
+
+  /** The browser window comes to the front as the agent starts to use it. */
+  async function showBrowser() {
+    spawn("wmctrl", ["-x", "-a", "chromium"], { detached: true, stdio: "ignore", env: environment }).on("error", () => {}).unref();
+    return {};
+  }
 
   /** A file the agent just changed opens in VS Code, where the person is watching. */
   async function showInEditor(input) {

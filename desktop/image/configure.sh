@@ -14,10 +14,10 @@ install -d -m 0750 -o root -g work /etc/workstream
 
 # Chromium: no first-run questions, one profile shared by the person and the agent's browser tools (which
 # attach on port 9222, open to this desktop only), and no sandbox of its own inside a container, which has
-# none to give.
+# none to give (said without the warning bar Chromium would otherwise show about it).
 cat > /etc/chromium.d/workstream <<'EOF'
 export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check --password-store=basic --disable-features=Translate --remote-debugging-port=9222 --user-data-dir=/home/work/.workstream/browser"
-if [ -f /.dockerenv ]; then export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"; fi
+if [ -f /.dockerenv ]; then export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type --disable-dev-shm-usage"; fi
 EOF
 
 # The agent's own window, opened from the panel.
@@ -47,6 +47,7 @@ cat > ~/.config/Code/User/settings.json <<'JSON'
   "telemetry.telemetryLevel": "off",
   "update.mode": "none",
   "extensions.autoUpdate": false,
+  "extensions.ignoreRecommendations": true,
   "workbench.startupEditor": "none",
   "workbench.welcomePage.walkthroughs.openOnInstall": false,
   "chat.disableAIFeatures": true,

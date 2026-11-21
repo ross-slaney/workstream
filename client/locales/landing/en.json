@@ -12,14 +12,14 @@
     "body": "Workstream gives each piece of work its own computer in the cloud, with an AI agent on it. You watch the screen live, talk to the agent beside it, and take the mouse whenever you want. Your own computer stays free.",
     "cta": "Start a task",
     "secondary": "See how it works",
-    "pictureAlt": "The Workstream dashboard: a list of tasks on the left, and two tasks open side by side, each with its conversation and its live desktop."
+    "pictureAlt": "The Workstream workspace with two tasks open at once. Each has its conversation with the agent on the left and its live desktop on the right: one shows a web page the agent built, the other a script and its passing tests."
   },
   "how": {
     "title": "How it works",
     "steps": {
       "ask": {
         "title": "Say what you want done",
-        "body": "Write the task in plain words and choose the environment it starts from. A desktop is ready in about two minutes."
+        "body": "Write the task in plain words and choose the environment it starts from. A desktop is ready in about a minute."
       },
       "watch": {
         "title": "Watch it happen",

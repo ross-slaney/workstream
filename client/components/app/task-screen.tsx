@@ -26,6 +26,8 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
   const [messages, setMessages] = useState<Message[]>([]);
   const [unsent, setUnsent] = useState<Unsent[]>([]);
   const [draft, setDraft] = useState("");
+  // Four by three until the stream says what the desktop's screen really is (desktop/start.sh).
+  const [desktopShape, setDesktopShape] = useState(4 / 3);
   const last = useRef(0);
   const action = useAction();
 
@@ -144,7 +146,8 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
       onClose={onClose}
       busy={action.busy}
       error={action.error}
-      desktop={task?.state === "ready" ? <DesktopStream taskId={taskId} label={t("desktop.label", { title: task.title })} /> : null}
+      desktop={task?.state === "ready" ? <DesktopStream taskId={taskId} label={t("desktop.label", { title: task.title })} onShape={setDesktopShape} /> : null}
+      desktopShape={desktopShape}
     />
   );
 }

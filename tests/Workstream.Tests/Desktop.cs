@@ -41,12 +41,15 @@ public sealed class Desktop : IDisposable
     public Task<HttpResponseMessage> GetAsync(string path) => http.GetAsync(path);
 
     /// <summary>A model call, as the agent's harness makes it: Anthropic's Messages API at the gateway's address.</summary>
-    public Task<HttpResponseMessage> AskModelAsync(bool stream = false, string key = "x-api-key")
+    /// <param name="chunked">Send the body without saying its length, as some clients do.</param>
+    public Task<HttpResponseMessage> AskModelAsync(bool stream = false, string key = "x-api-key", bool chunked = false)
     {
+        var body = new { model = "claude-opus-5-5", max_tokens = 64, stream, messages = new[] { new { role = "user", content = "Say done." } } };
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/model/anthropic/v1/messages")
         {
-            Content = JsonContent.Create(new { model = "claude-opus-5-5", max_tokens = 64, stream, messages = new[] { new { role = "user", content = "Say done." } } }),
+            Content = chunked ? JsonContent.Create(body) : new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json"),
         };
+        if (chunked) request.Headers.TransferEncodingChunked = true;
         // The harness sends its key as Anthropic's clients do; the gateway reads either header.
         request.Headers.TryAddWithoutValidation(key, Key);
         request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");

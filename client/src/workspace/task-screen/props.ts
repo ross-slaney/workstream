@@ -45,4 +45,6 @@ export type TaskScreenProps = {
   error: string | null;
   /** The live desktop, which the controller draws once the desktop is ready. */
   desktop: ReactNode;
+  /** The desktop screen's width over its height, so a surface can give the picture exactly the room it needs. */
+  desktopShape: number;
 };

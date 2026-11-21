@@ -10,7 +10,8 @@ import { useT } from "@/lib/i18n";
  * it. The browser's remote-desktop client (noVNC) speaks to the desktop's display through the API's relay,
  * `GET /api/tasks/{id}/desktop` as a WebSocket. A browser cannot put a bearer token on a WebSocket, so the
  * token rides in the requested subprotocols beside `binary` (api/Desktops/DesktopRelay.cs), fresh each time
- * the stream connects. The picture is scaled to fit and keeps its shape; a dropped stream reconnects.
+ * the stream connects. The picture is scaled to fit and keeps its shape, which it reports so the screen can
+ * give it exactly the room it needs; a dropped stream reconnects.
  *
  * This is a browser component: it draws into a DOM element and loads its client only in the browser.
  */
@@ -26,12 +27,15 @@ type RemoteDesktop = {
   disconnect: () => void;
 };
 
-export function DesktopStream({ taskId, label }: { taskId: string; label: string }) {
+export function DesktopStream({ taskId, label, onShape }: { taskId: string; label: string; onShape?: (widthOverHeight: number) => void }) {
   const t = useT("workspace");
   const { colors } = useTheme();
   const screen = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const stage = colors.stage;
+  // Kept in a ref so a new callback from the controller does not reconnect the stream.
+  const shape = useRef(onShape);
+  shape.current = onShape;
 
   useEffect(() => {
     let remote: RemoteDesktop | null = null;
@@ -59,6 +63,9 @@ export function DesktopStream({ taskId, label }: { taskId: string; label: string
         client.addEventListener("connect", () => {
           attempts = 0;
           setStatus("connected");
+          // The picture is drawn at the desktop's own size: that is its shape, whatever it is scaled to.
+          const picture = screen.current?.querySelector("canvas");
+          if (picture && picture.width > 0 && picture.height > 0) shape.current?.(picture.width / picture.height);
         });
         client.addEventListener("disconnect", () => {
           if (remote === client) remote = null;

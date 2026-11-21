@@ -11,7 +11,8 @@ namespace Workstream.Tests;
 /// </summary>
 public sealed class FakeModel : HttpMessageHandler
 {
-    public sealed record Call(HttpMethod Method, Uri Uri, IReadOnlyDictionary<string, string> Headers, string Body);
+    /// <param name="ContentLength">The length the request said it had; null when it was sent in chunks, which Foundry refuses.</param>
+    public sealed record Call(HttpMethod Method, Uri Uri, IReadOnlyDictionary<string, string> Headers, string Body, long? ContentLength);
 
     public ConcurrentQueue<Call> Calls { get; } = new();
 
@@ -20,9 +21,11 @@ public sealed class FakeModel : HttpMessageHandler
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
+        // Read before the body is: a body sent in chunks has no length until someone counts it.
+        var length = request.Content?.Headers.ContentLength;
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
         var headers = request.Headers.ToDictionary(h => h.Key.ToLowerInvariant(), h => string.Join(",", h.Value));
-        Calls.Enqueue(new Call(request.Method, request.RequestUri!, headers, body));
+        Calls.Enqueue(new Call(request.Method, request.RequestUri!, headers, body, length));
         return Answer();
     }
 

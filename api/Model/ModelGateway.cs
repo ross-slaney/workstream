@@ -154,7 +154,29 @@ public static class ModelGateway
         forward.Headers.TryAddWithoutValidation("api-key", options.Key);
         if (HttpMethods.IsPost(http.Request.Method) || HttpMethods.IsPut(http.Request.Method))
         {
-            forward.Content = new StreamContent(http.Request.Body);
+            // Foundry refuses a request that does not say how long it is, so the body goes on with its length:
+            // the caller's own when it gave one, else counted here after reading it, up to the same limit.
+            if (http.Request.ContentLength is { } length)
+            {
+                forward.Content = new StreamContent(http.Request.Body);
+                forward.Content.Headers.ContentLength = length;
+            }
+            else
+            {
+                using var read = new MemoryStream();
+                var buffer = new byte[81920];
+                int count;
+                while ((count = await http.Request.Body.ReadAsync(buffer, ct)) > 0)
+                {
+                    if (read.Length + count > MaxRequestBytes)
+                    {
+                        await RefuseAsync(http, StatusCodes.Status413PayloadTooLarge, "request_too_large", "The request is too large.");
+                        return;
+                    }
+                    read.Write(buffer, 0, count);
+                }
+                forward.Content = new ByteArrayContent(read.ToArray());
+            }
             if (http.Request.ContentType is { } contentType) forward.Content.Headers.TryAddWithoutValidation("Content-Type", contentType);
         }
 
