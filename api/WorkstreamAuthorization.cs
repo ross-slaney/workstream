@@ -79,7 +79,9 @@ public static class WorkstreamAuthorization
         seed.Permission(Permissions.TaskRunAgent, "Run the task's agent", ResourceTypes.Task);
         seed.Permission(Permissions.TaskOperateDesktop, "Start, stop and delete the task's desktop", ResourceTypes.Task);
 
-        seed.Role(Roles.SystemAdmin, "System administrator").Can(Permissions.All);
+        // The dashboard's numbers and every team's limits, and nothing inside a team: someone who should see a
+        // team's tasks and desktops is invited to the team like anyone else.
+        seed.Role(Roles.SystemAdmin, "System administrator").Can(Permissions.AdminView);
         seed.Role(Roles.DesktopOperator, "Desktop operator").Can(Permissions.TaskOperateDesktop);
         seed.Role(Roles.TeamMember, "Team member").Can(
             Permissions.TeamView, Permissions.TeamViewUsage, Permissions.TeamCreateEnvironment, Permissions.TeamCreateTask,

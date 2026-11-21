@@ -69,7 +69,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 
 | Role | Granted on | To | Carries |
 | --- | --- | --- | --- |
-| `system_admin` | root | `group::system_admins` | Everything. |
+| `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits. Nothing inside a team. |
 | `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP` |
 | `team_member` | team | the team's group | `TEAM_VIEW`, `TEAM_VIEW_USAGE`, `TEAM_CREATE_ENVIRONMENT`, `TEAM_CREATE_TASK`, `ENVIRONMENT_VIEW`, `ENVIRONMENT_EDIT`, `TASK_VIEW`, `TASK_USE`, `TASK_MANAGE` |
 | `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS` |

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Caching.Memory;
+using Workstream.Api.Model;
 using Microsoft.AspNetCore.DataProtection;
 using SqlOS.AuthServer.Services;
 using SqlOS.Extensions;
@@ -190,9 +192,12 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
-    static async Task<IResult> SetTeamLimits(string teamId, SetLimits body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> SetTeamLimits(string teamId, SetLimits body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IMemoryCache cache, CancellationToken ct)
     {
         var caller = CallerOf(http);
-        return await TeamResultAsync(await Operations.SetTeamLimitsAsync(caller, teamId, body.ModelAllowanceUsd, body.MaxRunningDesktops, db, fga, ct), caller, db, fga, ct);
+        var outcome = await Operations.SetTeamLimitsAsync(caller, teamId, body.ModelAllowanceUsd, body.MaxRunningDesktops, db, fga, ct);
+        // The gateway remembers what a team has left for a few seconds: a raised allowance lets its agents go on at once.
+        if (outcome.IsOk) cache.Remove(ModelGateway.AllowanceKey(teamId));
+        return await TeamResultAsync(outcome, caller, db, fga, ct);
     }
 }

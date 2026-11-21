@@ -5,4 +5,7 @@
   <Folder Name="/apphost/">
     <Project Path="apphost/Workstream.AppHost.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Workstream.Tests/Workstream.Tests.csproj" />
+  </Folder>
 </Solution>

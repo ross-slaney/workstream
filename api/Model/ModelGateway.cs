@@ -64,6 +64,9 @@ public static class ModelGateway
     const long MaxRequestBytes = 64 * 1024 * 1024;
     static readonly TimeSpan AllowanceFor = TimeSpan.FromSeconds(15);
 
+    /// <summary>Where what a team has left this month is remembered between calls, for a few seconds.</summary>
+    public static string AllowanceKey(string teamId) => $"allowance:{teamId}";
+
     /// <summary>Headers that belong to one hop, or that this gateway sets itself.</summary>
     static readonly HashSet<string> NotForwarded = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -107,7 +110,7 @@ public static class ModelGateway
             await RefuseAsync(http, StatusCodes.Status400BadRequest, "invalid_request_error", "Models are not set up in this environment. Set Workstream:Model:Endpoint and Workstream:Model:Key (README, \"Models\").");
             return;
         }
-        var allowance = await cache.GetOrCreateAsync($"allowance:{task.TeamId}", async entry =>
+        var allowance = await cache.GetOrCreateAsync(AllowanceKey(task.TeamId), async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = AllowanceFor;
             var team = await db.Teams.AsNoTracking().SingleAsync(x => x.Id == task.TeamId, ct);
@@ -178,7 +181,7 @@ public static class ModelGateway
             var cost = options.CostOf(model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite);
             record.ModelUsage.Add(ModelUsage.Record(task.TeamId, task.Id, model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite, cost, clock.GetUtcNow()));
             await record.SaveChangesAsync(CancellationToken.None);
-            if (cache.TryGetValue($"allowance:{task.TeamId}", out decimal left)) cache.Set($"allowance:{task.TeamId}", left - cost, AllowanceFor);
+            if (cache.TryGetValue(AllowanceKey(task.TeamId), out decimal left)) cache.Set(AllowanceKey(task.TeamId), left - cost, AllowanceFor);
         }
     }
 
