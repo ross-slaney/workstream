@@ -1,0 +1,58 @@
+import { useRouter } from "expo-router";
+import Head from "expo-router/head";
+import { useState } from "react";
+import { useTeamShell } from "@/components/app/team-shell";
+import { useAction } from "@/hooks/use-action";
+import { useOnlineRead } from "@/hooks/use-online-read";
+import { useT } from "@/lib/i18n";
+import { valueOf } from "@/lib/online";
+import { useSession } from "@/lib/session";
+import { workstream, type PendingInvitation } from "@/lib/workstream/api";
+import { TeamScreen } from "@/src/settings/team-screen";
+
+/** /t/{team}/team: who is on the team, and inviting someone. */
+export default function TeamRoute() {
+  const t = useT("settings");
+  const router = useRouter();
+  const { teamId } = useTeamShell();
+  const session = useSession();
+  const team = useOnlineRead(() => workstream.team(teamId), `team:${teamId}`);
+  const people = useOnlineRead(() => workstream.people(teamId), `people:${teamId}`);
+  const admin = valueOf(team)?.admin ?? false;
+  // Only an administrator may read invitations; anyone else has none to see.
+  const invitations = useOnlineRead(() => (admin ? workstream.invitations(teamId) : Promise.resolve([])), `invitations:${teamId}:${admin}`);
+  const [invited, setInvited] = useState<PendingInvitation | null>(null);
+  const action = useAction();
+  const then = (refresh: () => void) => (run: () => Promise<unknown>) => void action.run(run).then(refresh);
+
+  return (
+    <>
+      <Head>
+        <title>{t("team.metaTitle")}</title>
+      </Head>
+      <TeamScreen
+        team={valueOf(team)}
+        people={people}
+        invitations={valueOf(invitations) ?? []}
+        meId={session?.userId ?? ""}
+        invited={invited}
+        busy={action.busy}
+        error={action.error}
+        onRetry={people.reload}
+        onRename={(name) => then(team.refresh)(() => workstream.renameTeam(teamId, name))}
+        onInvite={(email, asAdmin) => then(invitations.refresh)(async () => setInvited(await workstream.invite(teamId, email, asAdmin)))}
+        onDismissInvited={() => setInvited(null)}
+        onWithdraw={(invitationId) => then(invitations.refresh)(() => workstream.revokeInvitation(teamId, invitationId))}
+        onSetAdmin={(userId, makeAdmin) => then(people.refresh)(() => workstream.setAdmin(teamId, userId, makeAdmin))}
+        onRemove={(userId) =>
+          void action.run(async () => {
+            await workstream.removePerson(teamId, userId);
+            // Leaving: this team is no longer theirs to look at.
+            if (userId === session?.userId) router.replace("/home");
+            else people.refresh();
+          })
+        }
+      />
+    </>
+  );
+}

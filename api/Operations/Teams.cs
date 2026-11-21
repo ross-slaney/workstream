@@ -14,7 +14,11 @@ namespace Workstream.Api;
 public sealed record TeamPerson(string UserId, string Name, string? Email, bool Admin, DateTime JoinedAt);
 
 /// <summary>An invitation still waiting. <see cref="Link"/> is given once, when it is made, for the administrator to pass on.</summary>
-public sealed record PendingInvitation(string Id, string Email, bool Admin, DateTime ExpiresAt, string? Link, string? SendError);
+/// <summary>
+/// An invitation waiting to be accepted. <see cref="Link"/> is there only in the answer to making it, for the
+/// administrator to pass on; <see cref="Emailed"/> says whether Workstream sent it to them as well.
+/// </summary>
+public sealed record PendingInvitation(string Id, string Email, bool Admin, DateTime ExpiresAt, string? Link, bool Emailed);
 
 public static partial class Operations
 {
@@ -167,7 +171,9 @@ public static partial class Operations
 
     /// <summary>
     /// Invite someone by email. SqlOS keeps the invitation, bound to that address, and sends the email where
-    /// email is set up; the link is also returned so the administrator can pass it on themselves.
+    /// email is set up; the link is also returned so the administrator can pass it on themselves. Where email
+    /// is set up and the send fails, the invitation SqlOS kept is withdrawn: nobody has its link, so an
+    /// invitation either reached them or does not exist, and inviting again is all there is to do.
     /// </summary>
     public static async Task<Outcome<PendingInvitation>> InviteAsync(Caller caller, string teamId, string? email, bool admin, HttpContext http,
         WorkstreamApp app, WorkstreamDbContext db, ISqlOSFgaAuthService fga, SqlOSAuthService auth, CancellationToken ct)
@@ -181,16 +187,23 @@ public static partial class Operations
         {
             return Outcome<PendingInvitation>.Exists("They are already on the team.");
         }
+        var emails = app.Sender is not null;
+        var began = DateTime.UtcNow;
         try
         {
             var invitation = await auth.CreateEmailInvitationAsync(new SqlOSCreateEmailInvitationRequest(
                 teamId, address, admin ? IdentityProvisioning.AdminMembership : IdentityProvisioning.MemberMembership,
-                ClientId: WorkstreamApp.AppClientId, RedirectUri: $"{app.WebOrigin}{WorkstreamApp.WebRedirectPath}", InvitedByUserId: caller.PrincipalId), http, ct);
-            return Outcome<PendingInvitation>.Ok(new PendingInvitation(invitation.Id, invitation.Email, admin, invitation.ExpiresAt, invitation.InviteUrl, invitation.LastSendError));
+                ClientId: WorkstreamApp.AppClientId, RedirectUri: $"{app.WebOrigin}{WorkstreamApp.WebRedirectPath}", InvitedByUserId: caller.PrincipalId,
+                SendEmail: emails), http, ct);
+            return Outcome<PendingInvitation>.Ok(new PendingInvitation(invitation.Id, invitation.Email, admin, invitation.ExpiresAt, invitation.InviteUrl, emails));
         }
         catch (InvalidOperationException refused)
         {
-            return Outcome<PendingInvitation>.Invalid(refused.Message);
+            var kept = await db.Set<SqlOSInvitation>().AsNoTracking()
+                .Where(x => x.OrganizationId == teamId && x.InvitedByUserId == caller.PrincipalId && x.CreatedAt >= began && x.AcceptedAt == null && x.RevokedAt == null)
+                .Select(x => x.Id).ToListAsync(ct);
+            foreach (var id in kept) await auth.RevokeEmailInvitationAsync(new SqlOSRevokeEmailInvitationRequest(id, "send_failed"), http, ct);
+            return Outcome<PendingInvitation>.Invalid(kept.Count > 0 ? "The invitation email could not be sent. Try again." : refused.Message);
         }
     }
 
@@ -202,7 +215,7 @@ public static partial class Operations
         var waiting = await db.Set<SqlOSInvitation>().AsNoTracking()
             .Where(x => x.OrganizationId == teamId && x.AcceptedAt == null && x.RevokedAt == null && x.ExpiresAt > now)
             .OrderByDescending(x => x.CreatedAt).Take(200)
-            .Select(x => new PendingInvitation(x.Id, x.InvitedEmail, x.Role == IdentityProvisioning.AdminMembership, x.ExpiresAt, null, x.LastSendError))
+            .Select(x => new PendingInvitation(x.Id, x.InvitedEmail, x.Role == IdentityProvisioning.AdminMembership, x.ExpiresAt, null, x.LastSentAt != null))
             .ToListAsync(ct);
         return Outcome<IReadOnlyList<PendingInvitation>>.Ok(waiting);
     }
@@ -218,23 +231,5 @@ public static partial class Operations
         }
         await auth.RevokeEmailInvitationAsync(new SqlOSRevokeEmailInvitationRequest(invitationId, "withdrawn"), http, ct);
         return Outcome<bool>.Ok(true);
-    }
-
-    /// <summary>
-    /// A signed-in person takes an invitation. SqlOS accepts it only for the address it was sent to, makes the
-    /// membership, and provisioning puts them in the team's group. Answers the team they joined.
-    /// </summary>
-    public static async Task<Outcome<string>> AcceptInvitationAsync(Caller caller, string? token, HttpContext http, SqlOSAuthService auth, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(token) || token.Length > 500) return Outcome<string>.Invalid("That invitation link is not complete.");
-        try
-        {
-            var accepted = await auth.AcceptEmailInvitationAsync(new SqlOSAcceptEmailInvitationRequest(token, caller.PrincipalId), http, ct);
-            return Outcome<string>.Ok(accepted.OrganizationId);
-        }
-        catch (Exception refused) when (refused is InvalidOperationException or UnauthorizedAccessException or ArgumentException)
-        {
-            return Outcome<string>.Invalid("This invitation can't be used. It may have expired, been withdrawn, or been sent to a different email address than the one you signed in with.");
-        }
     }
 }

@@ -43,11 +43,18 @@
     "failed": "Sign-in did not work. Try again."
   },
   "invite": {
-    "title": "You're invited",
-    "signedOut": "Sign in, or create an account with the email this invitation was sent to, and you'll join the team.",
-    "signIn": "Sign in to accept",
-    "accepting": "Joining the team",
-    "open": "Open the team",
-    "missing": "This invitation link is not complete. Ask for a new one."
+    "metaTitle": "Join a team · Workstream",
+    "title": "Join {team}",
+    "subtitleNew": "Create your account and you're on {team}.",
+    "subtitleCode": "We'll email you a code, then you're on the team.",
+    "subtitlePassword": "Sign in and you're on the team.",
+    "emailHint": "The invitation was sent to this address.",
+    "submitNew": "Create account and join",
+    "submitPassword": "Sign in and join",
+    "switchNew": "New here? Create an account",
+    "unusableTitle": "This invitation can't be used",
+    "unusable": "It may have expired, been withdrawn, or been used already. Ask whoever invited you to send a new one.",
+    "signInInstead": "Sign in to Workstream",
+    "opening": "Opening your invitation"
   }
 }

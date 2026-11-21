@@ -14,7 +14,8 @@ export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd
 
 export type TeamPerson = { userId: string; name: string; email: string | null; admin: boolean; joinedAt: string };
 
-export type PendingInvitation = { id: string; email: string; admin: boolean; expiresAt: string; link: string | null; sendError: string | null };
+/** `link` comes only with the answer to making it; `emailed` says whether Workstream sent it to them as well. */
+export type PendingInvitation = { id: string; email: string; admin: boolean; expiresAt: string; link: string | null; emailed: boolean };
 
 export type TeamUsage = {
   since: string;
@@ -125,7 +126,6 @@ export const workstream = {
   invitations: (teamId: string) => apiJson<PendingInvitation[]>(`/api/teams/${id(teamId)}/invitations`),
   invite: (teamId: string, email: string, admin: boolean) => apiSend<PendingInvitation>("POST", `/api/teams/${id(teamId)}/invitations`, { email, admin }),
   revokeInvitation: (teamId: string, invitationId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/invitations/${id(invitationId)}`),
-  acceptInvitation: (token: string) => apiSend<{ teamId: string }>("POST", "/api/invitations/accept", { token }),
 
   environments: (teamId: string) => apiJson<ListPage<Environment>>(`/api/teams/${id(teamId)}/environments`),
   addEnvironment: (teamId: string, environmentId: string, body: WriteEnvironment) =>

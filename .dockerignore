@@ -1,0 +1,11 @@
+# Only what the API image's Dockerfile copies.
+**
+!Dockerfile
+!api/
+!api/**
+api/bin
+api/obj
+!desktop/
+desktop/**
+!desktop/apps.json
+**/.env*

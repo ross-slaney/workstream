@@ -8,7 +8,7 @@ This document defines who can do what to what. It is written in SqlOS terms firs
 
 | Word | Meaning |
 | --- | --- |
-| Team | A group of people who share tasks and environments. A person who signs up gets a team of their own and can create or join others. |
+| Team | A group of people who share tasks and environments. A person who signs up gets a team of their own. Someone who creates their account from an invitation joins that team and gets none of their own. Anyone can create another. |
 | Environment | What a desktop comes with: its apps and, optionally, a repository, a setup script, variables and instructions for the agent. |
 | Task | One piece of work. It has a desktop and a conversation with the agent on that desktop. |
 | Desktop | The task's cloud computer: a Linux virtual machine with a graphical desktop. |
@@ -83,7 +83,7 @@ Everyone on a team can see, use and manage every task and environment in it. Wor
 | --- | --- |
 | A person signs up | SqlOS organization and membership are created; the team's group gets `team_member` on the team; the person gets `team_admin`. |
 | A person creates another team | The same, for the new team. |
-| A person accepts an invitation | Their membership puts them in the team's group. An invitation as an administrator also grants `team_admin`. |
+| A person accepts an invitation | Accepting is signing in, or creating an account, with the invitation's token attached (SqlOS's own flow; the link proves the mailbox). Their membership puts them in the team's group. An invitation as an administrator also grants `team_admin`. |
 | An administrator promotes or demotes someone | `team_admin` is granted or revoked. The last administrator cannot be demoted or removed. |
 | A person is removed or leaves | Their membership is deleted; they leave the group; their `team_admin` on the team is removed. |
 | A desktop is made for a task | The desktop's service account is provisioned and granted `task_desktop` on the task. |
@@ -148,7 +148,7 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 
 ## Decisions
 
-- **Team is the only container.** One grant per person per team keeps every list cheap and the rules short. Private work goes in a person's own team.
+- **Team is the only container.** One grant per person per team keeps every list cheap and the rules short. Private work goes in a team of the person's own.
 - **The desktop is a principal.** The agent's key identifies one service account with one grant on one task, so a key taken from a desktop reaches that task and nothing else, and stops working when the task is deleted.
 - **The API is the only way into a desktop.** Desktops have no inbound access from the internet or from each other. The relay authorizes every stream.
 - **All inference goes through the gateway.** The Foundry key never leaves the API. Usage is recorded where it is spent.

@@ -9,7 +9,8 @@ namespace Workstream.Api;
 // Runs inside every save, before SqlOS writes: identities, memberships, nodes and grants commit together.
 // SqlOS has no sign-up or acceptance hook, and every path (headless, admin, the tests) saves through this
 // context, so this is the one place the rules in docs/core-model.md "Grants" are applied:
-//   a new person       -> a team of their own (a SqlOS organization and their membership in it);
+//   a new person       -> a team of their own (a SqlOS organization and their membership in it), unless
+//                         they created their account from an invitation: then they join that team only;
 //   a new team         -> its node, its group holding team_member, team_admin for whoever created it,
 //                         and the standard environment;
 //   a membership       -> the person is in the team's group; removed, they leave it and lose team_admin;
@@ -40,6 +41,10 @@ internal static class IdentityProvisioning
             }
             if (entry.State != EntityState.Added) continue;
             if (db.Set<SqlOSMembership>().Local.Any(x => x.UserId == user.Id)) continue;
+            // Someone creating their account from an invitation joins that team and gets none of their own:
+            // SqlOS tracks the sign-in request, bound to the invitation, in this same save. (The emailed link
+            // hands the browser to the web app's invite page, so every invitation sign-up is such a request.)
+            if (db.ChangeTracker.Entries<SqlOSAuthorizationRequest>().Any(e => e.Entity.InvitationId != null)) continue;
             // Repeat sign-ins never enter this branch, so leaving a team cannot make another.
             var teamId = $"org_{Guid.NewGuid():N}";
             db.Add(new SqlOSOrganization

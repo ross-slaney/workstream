@@ -37,7 +37,13 @@ public static partial class WorkstreamApi
                 ? Results.Ok(new { status = "ready", revision = configuration["SOURCE_COMMIT_SHA"] ?? "local" })
                 : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
         app.MapOpenApi();
+        // CORS first, then who is calling. Left to itself the host puts authentication and authorization
+        // before everything written here, and a refusal (401, 403) then leaves without the CORS headers: the
+        // browser reports it to the web app as a failed connection, so the app could neither refresh its
+        // token nor send the person to sign in.
         app.UseCors(WebCorsPolicy);
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.UseWebSockets();
 
         // People, with SqlOS's token.

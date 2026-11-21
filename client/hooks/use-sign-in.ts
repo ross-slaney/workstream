@@ -2,9 +2,10 @@ import { credentialEnabled } from "@sqlos/headless";
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AUTH_SCOPE, completeAuthorization } from "@/lib/auth";
+import { AUTH_SCOPE, completeAuthorization, signOut } from "@/lib/auth";
 import { getAuthServerUrl, getRedirectUri, getSqlOsClientId } from "@/lib/config";
 import { translator } from "@/lib/i18n";
+import { getSession } from "@/lib/session";
 import type { SignInScreenProps } from "@/src/auth/sign-in-screen";
 
 /*
@@ -16,6 +17,11 @@ import type { SignInScreenProps } from "@/src/auth/sign-in-screen";
  * Which method is the server's choice. SqlOS's settings arrive with the flow; where the API enables a
  * password (development, api/Workstream.cs PasswordSignIn) the method is `password`, else the code.
  *
+ * An invitation is the same flow started with the invitation's token (app/invite.tsx). SqlOS answers with the
+ * team and the address it was sent to, every step after that carries the token, and signing in or creating
+ * the account accepts it: the link proves the mailbox, so someone new only gives their name. The person
+ * lands in the team that invited them.
+ *
  * A person on several teams is asked by SqlOS which one the session is for. The app does not care: every
  * request names its team in its address and is checked against it, so the first is chosen without asking.
  */
@@ -24,7 +30,9 @@ const words = translator("auth");
 
 type Intent = "login" | "signup";
 
-export function useSignIn(initialIntent: Intent, after: string): SignInScreenProps {
+const VERIFY_VIEWS = ["email-otp-verify", "invite-email-otp-verify"];
+
+export function useSignIn(initialIntent: Intent, after: string, invitationToken?: string): SignInScreenProps {
   const router = useRouter();
   const { flow, status, view, viewModel, error, fieldErrors, authorization } = useHeadlessAuth({
     issuer: getAuthServerUrl(),
@@ -38,11 +46,15 @@ export function useSignIn(initialIntent: Intent, after: string): SignInScreenPro
   const [code, setCode] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
+  // The invitation SqlOS resolved from the token, kept once known: later views do not repeat it.
+  const [invitation, setInvitation] = useState<{ teamId: string; teamName: string; email: string } | null>(null);
   const started = useRef(false);
   const exchanging = useRef(false);
   const choosing = useRef(false);
 
-  const begin = (next: Intent) => flow.start({ scope: AUTH_SCOPE, view: next });
+  const invited = invitationToken ? { invitationToken } : {};
+  // Given a token and no view, SqlOS answers with the invitation.
+  const begin = (next: Intent) => flow.start(invitationToken ? { scope: AUTH_SCOPE, invitationToken } : { scope: AUTH_SCOPE, view: next });
   const restart = async (next: Intent) => {
     setIntent(next);
     setCode("");
@@ -62,49 +74,65 @@ export function useSignIn(initialIntent: Intent, after: string): SignInScreenPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow]);
 
+  useEffect(() => {
+    const found = viewModel?.invitation;
+    if (found) setInvitation({ teamId: found.organizationId, teamName: found.organizationName, email: found.email });
+  }, [viewModel?.invitation]);
+
   // SqlOS ended the flow with a code: exchange it, keep the session, go on.
   useEffect(() => {
     if (status !== "redirect" || !authorization || exchanging.current) return;
     exchanging.current = true;
     setFinishing(true);
-    void completeAuthorization(authorization)
-      .then(() => router.replace(after))
-      .catch(() => {
-        setLocalError(words("errors.failed"));
-        setFinishing(false);
-        exchanging.current = false;
-      });
-  }, [status, authorization, router, after]);
+    void (async () => {
+      // A session this browser already holds (someone else's, or this person's from before) ends first.
+      if (getSession()) await signOut();
+      await completeAuthorization(authorization);
+      router.replace(invitation ? `/t/${encodeURIComponent(invitation.teamId)}` : after);
+    })().catch(() => {
+      setLocalError(words("errors.failed"));
+      setFinishing(false);
+      exchanging.current = false;
+    });
+  }, [status, authorization, router, after, invitation]);
 
-  // On several teams: the session is for the first; the app asks for a team by its address, not by the session.
+  // On several teams: the session is for the one that invited them, else the first. The app asks for a team
+  // by its address, not by the session.
   useEffect(() => {
-    const first = viewModel?.organizationSelection?.[0];
-    if (view !== "organization" || !first || choosing.current) return;
+    const choice = viewModel?.organizationSelection?.find((candidate) => candidate.id === invitation?.teamId) ?? viewModel?.organizationSelection?.[0];
+    if (view !== "organization" || !choice || choosing.current) return;
     choosing.current = true;
-    void flow.organization.select({ organizationId: first.id });
-  }, [view, viewModel, flow]);
+    void flow.organization.select({ organizationId: choice.id });
+  }, [view, viewModel, flow, invitation]);
 
   const signupVerify = view === "email-otp-signup-verify";
-  const verifying = signupVerify || view === "email-otp-verify";
+  const verifying = signupVerify || (view !== null && VERIFY_VIEWS.includes(view));
   // Signed in with an address that has no account: the code proved it, so SqlOS asks for a name.
   const naming = view === "email-otp-signup-complete";
   const method = credentialEnabled(viewModel?.settings, "password") ? "password" : "code";
   const busy = status === "idle" || status === "loading" || finishing || view === "organization";
+  // A link with no token, or one SqlOS would not resolve: expired, withdrawn or already used.
+  const unusable = invitationToken !== undefined && !invitation && (invitationToken === "" || status === "error");
+  const address = invitation?.email ?? email.trim();
 
   const send = () =>
-    intent === "signup" ? flow.emailOtp.signupStart({ email: email.trim(), displayName: name.trim() }) : flow.emailOtp.start({ email: email.trim() });
+    intent === "login" ? flow.emailOtp.start({ email: address, ...invited })
+    // An invitation's link proved the mailbox, so someone new needs no code.
+    : invitationToken ? flow.invitation.signup({ displayName: name.trim(), email: address, invitationToken })
+    : flow.emailOtp.signupStart({ displayName: name.trim(), email: address });
   const withPassword = () =>
-    intent === "signup" ? flow.signup({ email: email.trim(), displayName: name.trim(), password }) : flow.password.login({ email: email.trim(), password });
+    intent === "signup" ? flow.signup({ email: address, displayName: name.trim(), password, ...invited }) : flow.password.login({ email: address, password, ...invited });
 
   return {
-    mode: finishing || view === "organization" ? "finishing" : verifying ? "verify" : naming ? "name" : intent,
+    mode: unusable ? "unusable" : finishing || view === "organization" ? "finishing" : verifying ? "verify" : naming ? "name" : invitationToken !== undefined && !invitation ? "opening" : intent,
     method,
     busy,
-    email,
+    invitation: invitation ? { teamName: invitation.teamName, email: invitation.email } : null,
+    email: address,
     name,
     password,
     code,
-    error: localError ?? error ?? (Object.values(fieldErrors).join(" ") || null),
+    error: unusable ? null : localError ?? error ?? (Object.values(fieldErrors).join(" ") || null),
     onEmailChange: setEmail,
     onNameChange: setName,
     onPasswordChange: setPassword,
@@ -113,9 +141,9 @@ export function useSignIn(initialIntent: Intent, after: string): SignInScreenPro
       if (busy) return;
       setLocalError(null);
       void (naming
-        ? flow.emailOtp.signupComplete({ displayName: name.trim() })
+        ? flow.emailOtp.signupComplete({ displayName: name.trim(), ...invited })
         : verifying
-          ? signupVerify ? flow.emailOtp.signupVerify({ code: code.trim() }) : flow.emailOtp.verify({ code: code.trim() })
+          ? signupVerify ? flow.emailOtp.signupVerify({ code: code.trim(), ...invited }) : flow.emailOtp.verify({ code: code.trim(), ...invited })
           : method === "password" ? withPassword() : send());
     },
     onResend: () => {

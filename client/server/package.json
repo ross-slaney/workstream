@@ -1,0 +1,13 @@
+{
+  "name": "workstream-web-server",
+  "private": true,
+  "description": "Runtime dependencies of ../server.js, the web container's process. Versions follow ../package.json.",
+  "dependencies": {
+    "compression": "^1.8.2",
+    "expo-server": "~58.0.6",
+    "express": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

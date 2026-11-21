@@ -73,11 +73,11 @@
       "asAdmin": "As an administrator",
       "send": "Invite",
       "linkTitle": "Invitation ready",
-      "linkBody": "An email is on its way where email is set up. You can also send this link yourself. It works once, for {email} only.",
-      "notSent": "The email could not be sent. Send the link yourself.",
+      "linkBody": "Send {email} this link. It works once, and only for that address.",
       "pending": "Waiting to be accepted",
       "withdraw": "Withdraw",
-      "expires": "Expires {date}"
+      "expires": "Expires {date}",
+      "emailedBody": "We emailed {email} an invitation. You can also send them this link yourself. It works once, and only for that address."
     },
     "adminOnly": "Only an administrator can invite people or change who is on the team."
   },

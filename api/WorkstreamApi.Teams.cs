@@ -16,10 +16,8 @@ public sealed record SetAdmin(bool Admin);
 
 public sealed record Invite(string Email, bool Admin = false);
 
-public sealed record AcceptInvitation(string Token);
 
 /// <summary>The team a person joined by taking an invitation.</summary>
-public sealed record JoinedTeam(string TeamId);
 
 /// <summary>An environment as it is shown. Variables are listed by name; their values are never sent.</summary>
 public sealed record EnvironmentDto(
@@ -53,7 +51,6 @@ public static partial class WorkstreamApi
         api.MapGet("/teams/{teamId}/invitations", ListInvitations).WithName("list_invitations").WithTags("People").Produces<IReadOnlyList<PendingInvitation>>();
         api.MapPost("/teams/{teamId}/invitations", InvitePerson).WithName("invite_person").WithTags("People").Produces<PendingInvitation>(201).ProducesProblem(409);
         api.MapDelete("/teams/{teamId}/invitations/{invitationId}", RevokeInvitation).WithName("revoke_invitation").WithTags("People");
-        api.MapPost("/invitations/accept", AcceptInvite).WithName("accept_invitation").WithTags("People").Produces<JoinedTeam>().ProducesProblem(400);
     }
 
     static void MapEnvironments(RouteGroupBuilder api)
@@ -152,12 +149,6 @@ public static partial class WorkstreamApi
     {
         var outcome = await Operations.RevokeInvitationAsync(CallerOf(http), teamId, invitationId, http, db, fga, auth, ct);
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
-    }
-
-    static async Task<IResult> AcceptInvite(AcceptInvitation body, HttpContext http, SqlOSAuthService auth, CancellationToken ct)
-    {
-        var outcome = await Operations.AcceptInvitationAsync(CallerOf(http), body.Token, http, auth, ct);
-        return outcome.IsOk ? Results.Ok(new JoinedTeam(outcome.Value!)) : ToResult(outcome);
     }
 
     static EnvironmentDto ToDto(WorkEnvironment x) => new(
