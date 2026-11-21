@@ -7,13 +7,15 @@
 # and its service principal, and gives the principal, at subscription scope:
 #   - Contributor: every resource the Bicep declares, whatever types it adds later, and the builder machine
 #     the desktops' image is baked on;
-#   - Role Based Access Control Administrator, conditioned to assign only the three roles the Bicep gives the
+#   - Role Based Access Control Administrator, conditioned to assign only the four roles the Bicep gives the
 #     runtime identity: AcrPull (registry-access.bicep), Virtual Machine Contributor (desktops.bicep,
-#     desktop-access.bicep) and Reader (desktop-access.bicep);
+#     desktop-access.bicep), Disk Snapshot Contributor (desktops.bicep, for environments' saved setups) and
+#     Reader (desktop-access.bicep);
 #   - Microsoft Graph Group.ReadWrite.All, for each copy's `…-sql-admins` group (data.bicep).
 # It stores the principal's credential as the environment's AZURE_CREDENTIALS secret when the environment has none.
 #
-# Nothing here depends on what the Bicep deploys, so a change to infra never needs this run again.
+# Nothing here depends on what the Bicep deploys, so a change to infra never needs this run again, except a
+# new role for the runtime identity: the condition is then written again, which only an Owner can do.
 #
 #   PREFIX  app registration name prefix (default workstream-github)
 #   ENVS    environments to set up (default "production staging")
@@ -34,15 +36,20 @@ rbac_admin=f58310d9-a9f6-439a-9e8d-f62e7b41a168
 acr_pull=7f951dda-4ed3-4680-a7ca-43fe172d538d
 machine_contributor=9980e02c-c2be-4d73-94e8-173b1dc7cf3c
 reader=acdd72a7-3385-48ef-bd42-f606fba81ae7
+snapshot_contributor=7efff54f-a5b4-42b5-a1c5-5411624893ce
 graph_group_readwrite=62a82d76-70ea-41e2-9197-370581804d09
-roles="$acr_pull, $machine_contributor, $reader"
+roles="$acr_pull, $machine_contributor, $snapshot_contributor, $reader"
 condition="((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles}))"
 
 graph=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
 
 assign() { # principal, role id, [condition]
-  if [ -n "$(az role assignment list --scope "$scope" --query "[?principalId=='$1' && ends_with(roleDefinitionId, '$2')].id" -o tsv)" ]; then
-    return
+  local existing
+  existing=$(az role assignment list --scope "$scope" --query "[?principalId=='$1' && ends_with(roleDefinitionId, '$2')].id" -o tsv)
+  if [ -n "$existing" ]; then
+    # Already there with the same condition. One with another condition (a role was added) is made again.
+    [ -z "${3:-}" ] || [ "$(az role assignment list --scope "$scope" --query "[?principalId=='$1' && ends_with(roleDefinitionId, '$2')].condition | [0]" -o tsv)" = "$3" ] && return
+    az role assignment delete --ids $existing -o none
   fi
   if [ -n "${3:-}" ]; then
     az role assignment create --assignee-object-id "$1" --assignee-principal-type ServicePrincipal --role "$scope/providers/Microsoft.Authorization/roleDefinitions/$2" --scope "$scope" \

@@ -22,7 +22,7 @@ The two origins are under the container apps environment's own domain: `https://
 
 ### What the API may do in Azure
 
-The API and the web app run as one user-assigned identity, `workstream-runtime`. It pulls both images (`AcrPull` on the registry), owns the database's schema (it is in the SQL administrators group), and makes desktops: `Virtual Machine Contributor` on the `workstream-desktops` group and on the desktops' subnet, and `Reader` on the gallery. It has no other role.
+The API and the web app run as one user-assigned identity, `workstream-runtime`. It pulls both images (`AcrPull` on the registry), owns the database's schema (it is in the SQL administrators group), and makes desktops: `Virtual Machine Contributor` on the `workstream-desktops` group and on the desktops' subnet, `Disk Snapshot Contributor` on the `workstream-desktops` group for environments' saved setups, and `Reader` on the gallery. It has no other role.
 
 ## Setting up a subscription
 
@@ -32,7 +32,7 @@ Once, by an owner of the subscription who is also a tenant administrator, signed
 ./scripts/setup-azure.sh
 ```
 
-For each of the GitHub environments `production` and `staging` it makes an app registration (`workstream-github-production`, `workstream-github-staging`) and gives its service principal Contributor on the subscription, the right to assign exactly the three roles above, and Microsoft Graph `Group.ReadWrite.All` for the SQL administrators groups. It stores each credential as that environment's `AZURE_CREDENTIALS` secret. It is safe to run again.
+For each of the GitHub environments `production` and `staging` it makes an app registration (`workstream-github-production`, `workstream-github-staging`) and gives its service principal Contributor on the subscription, the right to assign exactly the four roles above, and Microsoft Graph `Group.ReadWrite.All` for the SQL administrators groups. It stores each credential as that environment's `AZURE_CREDENTIALS` secret. It is safe to run again, and it is run again when the runtime identity is given a new role, because the CI identity cannot widen what it may assign: an assignment whose condition is out of date is made again.
 
 Then set, on the GitHub environment `production`:
 
@@ -195,8 +195,12 @@ The prices are Azure's list prices in West US 3, kept in one place (`DesktopOpti
 | A task's desktop, running | $0.091 (Small), $0.182 (Standard) or $0.364 (Large) an hour |
 | A desktop's disk, running or stopped, until its task is deleted | $4.80 a month (Standard SSD, 64 GB) |
 | A spare, while someone is in a team's workspace | the same hourly price as a desktop of its size |
+| A machine preparing an environment's setup | the same hourly price as a desktop of its size, until its disk is saved |
+| An environment's saved setup | $0.05 a month for each GB on it (a full snapshot on standard storage, billed on the used size) |
 
 Spares are the one cost that is not somebody's task. Their limits are two settings in `infra/api.bicep`: `sparesAtOnce` (2) and `spareHoursADay` (6). At those, spares cost at most 6 × $0.182 = $1.09 a day, about $33 in a month in which the limit is reached every day, and nothing on a day nobody opens the app. A spare nobody takes is removed after 15 minutes, which is $0.05.
+
+A saved setup is an environment's repository cloned and setup script run once, on a machine made only for that, whose disk is then kept as a snapshot that tasks' disks are made from (`EnvironmentSetup`, `api/Desktops/DesktopJobs.cs`). An environment keeps one: a new one replaces the old, deleting the environment deletes it, and one nothing has started from for 30 days is deleted; the sweep deletes any snapshot no environment knows. A desktop with 10 GB on its disk makes a save of about $0.50 a month. The preparing machines are limited by `Workstream:Desktops:Saves` (`api/Desktops/DesktopHosts.cs`, `SaveOptions`): one at a time over every team, four hours of preparing a day, 45 minutes at most each, so at most 4 × $0.182 = $0.73 a day for Standard desktops. A save older than a week is made again when a task next starts from it. Making the snapshot took about 13 seconds when measured, and a machine made from one booted like one made from the image.
 
 A pool of stopped machines was measured and not built: Azure takes as long to start a stopped machine as to make a new one (a middle of about 17 seconds for either, and up to a minute), so its disks would have bought nothing.
 

@@ -74,15 +74,16 @@ export function ChartCard({ overview }: { overview: AdminOverview }) {
 const cell = "px-3 py-2 text-sm text-foreground";
 const head = "px-3 py-2 text-left text-[12.5px] font-medium text-muted-foreground";
 
-const PURPOSE: Record<string, string> = { task: "Tasks' desktops", spare: "Spares" };
+const PURPOSE: Record<string, string> = { task: "Tasks' desktops", spare: "Spares", prepare: "Preparing environments" };
 
 /**
  * What the desktops cost Workstream: the hours machines ran this month, by what they ran for, at each size's
- * price; the disks kept, which is all a stopped desktop costs; and the spares running now. Narrow enough for
+ * price; the disks kept, which is all a stopped desktop costs; the environments' saved setups kept; and the
+ * spares running now. Narrow enough for
  * a phone, so both surfaces draw it the same.
  */
 export function CostsCard({ overview, now }: { overview: AdminOverview; now: number }) {
-  const { thisMonth, disks, disksMonthlyUsd, spares } = overview.machines;
+  const { thisMonth, disks, disksMonthlyUsd, saves, savesMonthlyUsd, spares } = overview.machines;
   const total = thisMonth.reduce((sum, line) => sum + line.usd, 0);
   return (
     <Card title="What the desktops cost" note="This month, at Azure's list prices">
@@ -111,6 +112,9 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
       </table>
       <p className="text-[13px] text-muted-foreground">
         {disks === 0 ? "No disk is kept." : `${disks} ${disks === 1 ? "disk is" : "disks are"} kept, one for each desktop whether it runs or not: ${dollars(disksMonthlyUsd)} a month at this many.`}{" "}
+        {saves === 0
+          ? "No saved setup is kept."
+          : `${saves} saved ${saves === 1 ? "setup is" : "setups are"} kept, one at most for each environment: ${dollars(savesMonthlyUsd)} a month for what is on them.`}{" "}
         {spares.length === 0
           ? "No spare is running."
           : `Spares running now: ${spares.map((spare) => `${spare.teamName} (${spare.size}, ${spare.state}, ${since(spare.since, now)})`).join("; ")}.`}
@@ -119,7 +123,7 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
   );
 }
 
-const SOURCE: Record<string, string> = { image: "A new machine", spare: "A spare", stopped: "Its own machine, stopped" };
+const SOURCE: Record<string, string> = { image: "A new machine", save: "A new machine, from a saved setup", spare: "A spare", stopped: "Its own machine, stopped" };
 
 /** How long a start took, from when each step was written down as it happened: the middle start of the last seven days, by what it started from. */
 export function StartsCard({ overview }: { overview: AdminOverview }) {

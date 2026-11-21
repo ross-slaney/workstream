@@ -30,6 +30,8 @@ public sealed class FakeDesktops : IDesktopHost
     public Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct)
     {
         if (Refuse.ContainsKey(spec.DesktopId)) throw new InvalidOperationException("No capacity.");
+        // As Azure: a disk is made from a saved setup only while the setup is there.
+        if (spec.Save is not null && !Saves.ContainsKey(spec.Save)) throw new InvalidOperationException($"The saved setup {spec.Save} is not there.");
         Made[spec.Name] = spec;
         Running[spec.Name] = true;
         return Task.FromResult(new DesktopPlace(spec.Name, Display.Address));
@@ -67,8 +69,31 @@ public sealed class FakeDesktops : IDesktopHost
     public Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<HostedMachine>>(Running.Keys.Select(name => new HostedMachine(name, MadeAt.GetValueOrDefault(name, DateTimeOffset.UtcNow))).ToList());
 
+    /// <summary>The saved setups the host holds, by name, with the machine each was saved from and when.</summary>
+    public ConcurrentDictionary<string, (string Machine, DateTimeOffset At)> Saves { get; } = new();
+
+    public Task SaveAsync(string host, string name, CancellationToken ct)
+    {
+        if (Running.GetValueOrDefault(host)) throw new InvalidOperationException("Only a stopped machine's disk can be saved.");
+        Saves[name] = (host, DateTimeOffset.UtcNow);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteSaveAsync(string name, CancellationToken ct)
+    {
+        Saves.TryRemove(name, out _);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<HostedMachine>> ListSavesAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<HostedMachine>>(Saves.Select(save => new HostedMachine(save.Key, save.Value.At)).ToList());
+
     /// <summary>What the machine for this desktop (a task's id, or a spare's) was made with.</summary>
     public DesktopSpec For(string desktopId) => Made.Values.Single(spec => spec.DesktopId == desktopId);
+
+    /// <summary>The machine preparing an environment now: made for its preparing account, and not deleted yet.</summary>
+    public DesktopSpec? Preparing(string environmentId) =>
+        Made.Values.SingleOrDefault(spec => spec.DesktopId == Workstream.Api.Domain.EnvironmentSetup.DesktopIdFor(environmentId));
 }
 
 /// <summary>

@@ -1,5 +1,5 @@
 import type { Online } from "@/lib/online";
-import type { DesktopApp, DesktopSize, Environment, GitHubRepository } from "@/lib/workstream/api";
+import type { DesktopApp, DesktopSize, Environment, EnvironmentSetup, GitHubRepository } from "@/lib/workstream/api";
 
 /** A variable in the editor. One that is already saved shows no value; typing one replaces it. */
 export type VariableDraft = { name: string; value: string; saved: boolean };
@@ -32,10 +32,24 @@ export type EnvironmentsScreenProps = {
   onRetry: () => void;
   onAdd: () => void;
   onEdit: (environment: Environment) => void;
-  /** The environment being written: a new one when `id` is null. Null when the editor is closed. */
-  editor: { id: string | null; draft: EnvironmentDraft; busy: boolean; error: string | null } | null;
+  /**
+   * The environment being written: a new one when `id` is null. Null when the editor is closed. `setup` is
+   * how the saved environment's prepared setup stands now (null for a new one); `preparing` and
+   * `prepareError` are "Prepare again" under way and its refusal.
+   */
+  editor: {
+    id: string | null;
+    draft: EnvironmentDraft;
+    busy: boolean;
+    error: string | null;
+    setup: EnvironmentSetup | null;
+    preparing: boolean;
+    prepareError: string | null;
+  } | null;
   onChangeDraft: (draft: EnvironmentDraft) => void;
   onSave: () => void;
   onDelete: () => void;
+  /** "Prepare again": do the saved environment's setup once more and save it for its tasks. */
+  onPrepare: () => void;
   onCloseEditor: () => void;
 };

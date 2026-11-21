@@ -32,10 +32,12 @@ public sealed record SpareNow(string TeamId, string TeamName, string Size, strin
 public sealed record StartTimes(string Source, int Starts, double? ScreenSeconds, double? AgentSeconds);
 
 /// <summary>
-/// What the desktops cost Workstream. The machines' time this month by purpose; the disks kept now, one per
-/// machine whether it runs or not, at what that many cost a month; and the spares running now.
+/// What the desktops cost Workstream. The machines' time this month by purpose (a task's desktop, a spare, a
+/// machine preparing an environment); the disks kept now, one per machine whether it runs or not, at what that
+/// many cost a month; the environments' saved setups kept now, at what they cost a month for what is on them;
+/// and the spares running now.
 /// </summary>
-public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, int Disks, decimal DisksMonthlyUsd, IReadOnlyList<SpareNow> Spares);
+public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, int Disks, decimal DisksMonthlyUsd, int Saves, decimal SavesMonthlyUsd, IReadOnlyList<SpareNow> Spares);
 
 /// <summary>The system administrator's page: what is running now, the last day's curve, each team's month, what the desktops cost and how long they take to start.</summary>
 public sealed record AdminOverview(
@@ -123,6 +125,8 @@ public static partial class Operations
         // Every machine has a disk, running or stopped, until its task is deleted or its spare is removed.
         var spares = await db.Spares.AsNoTracking().OrderBy(x => x.CreatedAt).ToListAsync(ct);
         var disks = await db.Tasks.CountAsync(x => x.Host != null, ct) + spares.Count(x => x.Host is not null);
+        // An environment keeps one save at most, billed for what is on it.
+        var saves = await db.Setups.AsNoTracking().Where(x => x.Save != null).Select(x => x.SaveBytes).ToListAsync(ct);
 
         // How long a start takes, from what the runs wrote down as it happened.
         var weekAgo = now.AddDays(-7);
@@ -145,7 +149,7 @@ public static partial class Operations
             points,
             [.. running.Select(x => new RunningDesktop(x.Id, x.Title, x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.AgentWorking, x.StateChangedAt))],
             numbers,
-            new MachineCosts(costs, disks, disks * desktops.Prices.DiskMonthlyUsd,
+            new MachineCosts(costs, disks, disks * desktops.Prices.DiskMonthlyUsd, saves.Count, saves.Sum(desktops.Prices.SaveMonthlyOf),
                 [.. spares.Select(x => new SpareNow(x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.CreatedAt))]),
             starts));
     }

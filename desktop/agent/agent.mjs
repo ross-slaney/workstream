@@ -11,6 +11,12 @@
 //   5. serves the agent's own window on the desktop (window.mjs), which shows the same conversation;
 //   6. after a stop, brings back what was running and what was open (restore.mjs).
 //
+// A machine made to prepare an environment does none of that. The API tells it so (`prepare` in its setup):
+// it clones the repository and runs the setup script once, says how that went, and leaves nothing of a task
+// on the disk before it says it is done, because the disk is then saved for the environment's tasks to start
+// from. A task's machine made from such a save finds ~/.workstream/prepared.json, pulls the branch's newer
+// commits and does not run the setup script again.
+//
 // Everything but the two things it is told comes from the API.
 
 import { spawn, execFile } from "node:child_process";
@@ -22,6 +28,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { panelFor } from "./panel.mjs";
+import { startedFromLine, tail, usedBytes } from "./prepared.mjs";
 import { localPort, machineStarted, noteTabs, restartScript, restoredLine, restorePlan } from "./restore.mjs";
 import { told } from "./told.mjs";
 import { startWindow } from "./window.mjs";
@@ -33,6 +40,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dir = path.join(home, ".workstream");
 const stateFile = path.join(dir, "state.json");
 const conversationFile = path.join(dir, "conversation.jsonl");
+const preparedFile = path.join(dir, "prepared.json");
 const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 const { api, key } = await told({ log });
@@ -108,7 +116,7 @@ async function call(method, route, body) {
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw Object.assign(new Error(`${method} ${route} answered ${response.status}`), { status: response.status });
-  return response.json();
+  return response.status === 204 ? null : response.json();
 }
 
 /** One exchange: hand over what is new, take what people wrote, hear whether they asked the agent to stop. */
@@ -139,9 +147,12 @@ async function exchange() {
  */
 const again = (error, wait) => (error.status === 404 ? 500 : error.status === 401 ? 30_000 : Math.min(wait * 2, 15_000));
 
+/** False on a machine that prepares an environment: it has no task to exchange with. */
+let exchanging = true;
+
 async function exchangeForever() {
   let wait = 1000;
-  while (true) {
+  while (exchanging) {
     try {
       await exchange();
       wait = 1000;
@@ -227,14 +238,39 @@ async function showApps(apps) {
   await saveState();
 }
 
+/** Where the repository is cloned: ~/work/<its name>. */
+const repositoryFolder = (repository) =>
+  path.join(home, "work", repository.url.replace(/\/+$/, "").split("/").pop().replace(/\.git$/, "") || "repository");
+
+const git = (folder, args, timeout = 60_000) => run("git", ["-C", folder, ...args], { timeout }).then((result) => result.stdout.trim());
+
+/**
+ * The desktop was made from the environment's saved setup: the repository is there and the setup script has
+ * run. The branch's newer commits are pulled, and the conversation's first line says where it started from.
+ */
+async function startFromSave(saved, setup, target) {
+  let newer = null;
+  let branch = saved.branch ?? null;
+  if (saved.commit && existsSync(target)) {
+    try {
+      await run("git", ["-C", target, "pull", "--ff-only"], { timeout: 5 * 60_000 });
+      newer = Number(await git(target, ["rev-list", "--count", `${saved.commit}..HEAD`]));
+      branch ??= await git(target, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    } catch (error) {
+      log("Could not pull the newer commits:", String(error.stderr || error.message).trim());
+    }
+  }
+  say("activity", startedFromLine({ preparedAt: saved.preparedAt, commit: saved.commit, branch: branch ?? setup.repository?.branch ?? null, newer }));
+}
+
 /** The part of preparing that needs no window: the variables and the repository. Answers the folder the agent works in. */
-async function prepareFiles(setup) {
+async function prepareFiles(setup, saved) {
   await writeVariables(setup.variables);
   let workspace = path.join(home, "work");
   await mkdir(workspace, { recursive: true });
+  if (saved) await startFromSave(saved, setup, setup.repository ? repositoryFolder(setup.repository) : workspace);
   if (setup.repository) {
-    const name = setup.repository.url.replace(/\/+$/, "").split("/").pop().replace(/\.git$/, "") || "repository";
-    const target = path.join(workspace, name);
+    const target = repositoryFolder(setup.repository);
     if (!existsSync(target)) {
       say("activity", `Cloning ${setup.repository.url}`);
       const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
@@ -359,6 +395,105 @@ function warmUp() {
   sessionReady().then(() => start("chromium", ["about:blank"], {})).catch(() => {});
 }
 
+/** Run a script as the desktop's person, out of sight, keeping what it writes. Answers its exit code and its output. */
+function runScript(script, folder, variables, onOutput) {
+  return new Promise((resolve) => {
+    let output = "";
+    const child = spawn("bash", ["-lc", script], { cwd: folder, env: { ...process.env, ...variables }, stdio: ["ignore", "pipe", "pipe"] });
+    const keep = (chunk) => {
+      output = tail(output + chunk.toString());
+      onOutput(output);
+    };
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
+    // An hour at most, as on a task's desktop.
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60 * 60_000);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ code: 127, output: tail(`${output}\n${error.message}`) });
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code: signal === "SIGKILL" ? 124 : code ?? 1, output });
+    });
+  });
+}
+
+/**
+ * This machine prepares an environment: the repository cloned and the setup script run once, for a save
+ * that tasks start from. Nothing of a task is ever here, and nothing of the preparing is left behind: before
+ * it says it is done, the variables, the logs and the browser's profile are removed, and the
+ * one file left in ~/.workstream says when and at which commit it was prepared.
+ */
+async function prepareForSave(setup) {
+  exchanging = false;
+  log(`This desktop prepares the environment ${setup.title}, to be saved.`);
+  const report = (body) => call("POST", "/api/desktop/setup", body).catch((error) => log("Could not say how the setup is going:", error.message));
+  await writeVariables(setup.variables);
+  let workspace = path.join(home, "work");
+  await mkdir(workspace, { recursive: true });
+  let commit = null;
+  let branch = null;
+  if (setup.repository) {
+    const target = repositoryFolder(setup.repository);
+    await rm(target, { recursive: true, force: true });
+    const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
+    await report({ state: "running", output: `git clone ${setup.repository.url}` });
+    try {
+      // As on a task's desktop: the token comes from github.mjs, or a pasted GITHUB_TOKEN; nothing waits on a prompt.
+      await run("git", args, { timeout: 15 * 60_000, env: { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" } });
+    } catch (error) {
+      await report({ state: "failed", exit: null, output: tail(String(error.stderr || error.message).trim()) });
+      return;
+    }
+    workspace = target;
+    commit = await git(target, ["rev-parse", "HEAD"]).catch(() => null);
+    branch = await git(target, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => null);
+  }
+  let output = "";
+  if (setup.setupScript) {
+    let sent = 0;
+    const result = await runScript(setup.setupScript, workspace, setup.variables, (written) => {
+      output = written;
+      // What it writes reaches the environment's page every few seconds.
+      if (Date.now() - sent > 5000) {
+        sent = Date.now();
+        report({ state: "running", output: written });
+      }
+    });
+    output = result.output;
+    if (result.code !== 0) {
+      await report({ state: "failed", exit: result.code, output });
+      return;
+    }
+  }
+  await clearForSave();
+  await writeFile(preparedFile, JSON.stringify({ preparedAt: new Date().toISOString(), commit, branch }));
+  await run("sync").catch(() => {});
+  const bytes = usedBytes(await run("df", ["-B1", "--output=used", "/"]).then((result) => result.stdout, () => ""));
+  await report({ state: "done", exit: 0, output, commit, bytes });
+  log("Prepared. The machine is about to be stopped and its disk saved.");
+}
+
+/**
+ * Remove what is the preparing's and nobody's after it: everything in ~/.workstream (the variables, the logs,
+ * the browser's profile) and the shell's history. Git keeps no token: it asks github.mjs for one each time,
+ * with the key of whichever machine it runs on.
+ */
+async function clearForSave() {
+  for (const name of existsSync(dir) ? readdirSync(dir) : []) await rm(path.join(dir, name), { recursive: true, force: true });
+  await rm(path.join(home, ".bash_history"), { force: true });
+}
+
+/** What the machine that prepared the save left behind, when this desktop was made from one. */
+function preparedSave() {
+  try {
+    return existsSync(preparedFile) ? JSON.parse(readFileSync(preparedFile, "utf8")) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function setupFromApi() {
   let wait = 1000;
   while (true) {
@@ -379,6 +514,11 @@ exchangeForever();
 const harnessLoading = import("./harness.mjs");
 harnessLoading.catch(() => {});
 const setup = await setupFromApi();
+if (setup.prepare) {
+  await prepareForSave(setup);
+  // Its work is done: it waits, writing nothing, for the operator to stop it.
+  await new Promise(() => {});
+}
 title = setup.title;
 startWindow({
   conversation,
@@ -394,8 +534,15 @@ startWindow({
 // for the second only when there is a setup script, whose result it must find in place; otherwise it
 // starts on what the person asked while XFCE is still drawing itself.
 preparing = true;
+// Made from a saved setup, and not told so yet: the setup script ran when the save was made.
+const saved = state.startedFrom ? null : preparedSave();
+if (saved) {
+  state.prepared = true;
+  state.startedFrom = saved;
+  await saveState();
+}
 const scripted = Boolean(setup.setupScript && !state.prepared);
-const workspace = await prepareFiles(setup);
+const workspace = await prepareFiles(setup, saved);
 const windows = prepareWindows(setup, workspace).catch((error) => log("Preparing the desktop's windows failed:", error));
 if (scripted) await windows;
 preparing = false;

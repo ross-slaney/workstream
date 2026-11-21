@@ -9,6 +9,13 @@
     "hasRepository": "Clones {repository}",
     "hasSetup": "Runs a setup script",
     "variablesCount": "{count, plural, one {# variable} other {# variables}}",
+    "setupFact": {
+      "not_prepared": "Not prepared",
+      "preparing": "Preparing",
+      "prepared": "Prepared",
+      "out_of_date": "Prepared, out of date",
+      "failed": "Preparing failed"
+    },
     "editor": {
       "newTitle": "New environment",
       "editTitle": "Edit environment",
@@ -50,6 +57,23 @@
       "delete": "Delete environment",
       "deleteTitle": "Delete this environment?",
       "deleteBody": "Tasks can no longer start from it. Tasks already started from it must be deleted first."
+    },
+    "setup": {
+      "title": "Setup",
+      "hint": "The repository is cloned and the setup script run once, on a desktop of its own, and that desktop is saved. Tasks then start from it with everything in place, and pull the newest commits.",
+      "nothing": "Nothing to prepare. Add a repository or a setup script under Advanced.",
+      "notPrepared": "Not prepared. Each task clones the repository and runs the setup script itself.",
+      "waiting": "Preparing: waiting for a desktop to prepare it on.",
+      "preparing": "Preparing since {since}.",
+      "prepared": "Prepared {when}. Tasks start from it.",
+      "preparedAt": "Prepared {when}, at commit {commit}. Tasks start from it.",
+      "kept": "{gigabytes} GB on its disk, about {cost} a month to keep.",
+      "outOfDateSetup": "Out of date: the setup changed since it was prepared. Each task runs the setup itself until it is prepared again.",
+      "outOfDateDesktop": "Out of date: desktops were updated since it was prepared. Each task runs the setup itself until it is prepared again.",
+      "failed": "The last preparation failed. {failure} Tasks still work: each one runs the setup itself.",
+      "output": "What the setup wrote",
+      "prepare": "Prepare now",
+      "prepareAgain": "Prepare again"
     }
   },
   "team": {
