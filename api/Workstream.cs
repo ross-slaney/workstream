@@ -5,6 +5,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
 using Workstream.Api.Desktops;
+using Workstream.Api.GitHub;
 using Workstream.Api.Model;
 
 namespace Workstream.Api;
@@ -32,6 +33,8 @@ public sealed class WorkstreamApp
     public const string DevicePath = "/device";
     /// <summary>Where an invitation to a shared task is taken (client/app/share.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
     public const string SharePath = "/share";
+    /// <summary>Where the browser lands back from installing the GitHub App (client/app/(app)/github.tsx), under <see cref="WebOrigin"/>.</summary>
+    public const string GitHubReturnPath = "/github";
     public const string ApiPath = "/api";
     /// <summary>Required by every /api route. Keep in sync with AUTH_SCOPE in client/lib/auth.ts.</summary>
     public const string ReadScope = "workstream.read";
@@ -195,6 +198,7 @@ public static class WorkstreamHosting
 
         builder.AddDesktops();
         builder.AddModelGateway();
+        builder.AddGitHub();
         builder.AddWorkstreamJobs(connectionString);
         return builder.AddWorkstreamSqlOS(app, connectionString);
     }

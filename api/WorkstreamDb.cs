@@ -25,6 +25,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
     public DbSet<PersonSettings> PersonSettings => Set<PersonSettings>();
     public DbSet<TaskWatcher> TaskWatchers => Set<TaskWatcher>();
+    public DbSet<GitHubConnection> GitHubConnections => Set<GitHubConnection>();
 
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
     internal static decimal DefaultModelAllowanceUsd { get; set; } = 20m;
@@ -178,6 +179,20 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             watcher.HasOne<WorkTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
             watcher.Property(x => x.TaskId).HasMaxLength(36);
             watcher.Property(x => x.UserId).HasMaxLength(450);
+        });
+
+        model.Entity<GitHubConnection>(connection =>
+        {
+            connection.ToTable("GitHubConnections");
+            // A team has one connection at most.
+            connection.HasKey(x => x.TeamId);
+            connection.HasOne<Team>().WithOne().HasForeignKey<GitHubConnection>(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
+            connection.Property(x => x.TeamId).HasMaxLength(100);
+            connection.Property(x => x.Account).HasMaxLength(100);
+            connection.Property(x => x.AccountType).HasMaxLength(20);
+            connection.Property(x => x.ConnectedBy).HasMaxLength(450);
+            // GitHub says an installation was removed by its id.
+            connection.HasIndex(x => x.InstallationId);
         });
     }
 

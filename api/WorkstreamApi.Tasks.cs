@@ -75,6 +75,8 @@ public static partial class WorkstreamApi
     {
         desktop.MapGet("/setup", GetDesktopSetup).ExcludeFromDescription();
         desktop.MapPost("/exchange", Exchange).ExcludeFromDescription();
+        // A token for the desktop's repository from the team's GitHub connection (WorkstreamApi.GitHub.cs).
+        desktop.MapGet("/github/token", GetDesktopGitHubToken).ExcludeFromDescription();
     }
 
     static TaskDto ToDto(WorkTask x, IReadOnlyDictionary<string, string> names) => new(

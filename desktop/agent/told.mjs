@@ -34,6 +34,16 @@ async function fromUserData() {
 }
 
 /**
+ * What the desktop was told, asked once and answered at once: for a short program that runs long after the
+ * desktop started (github.mjs). Empty strings when it was told nothing.
+ */
+export async function toldNow(env = process.env) {
+  const given = { api: (env.WORKSTREAM_API ?? "").replace(/\/+$/, ""), key: env.WORKSTREAM_KEY ?? "" };
+  if (given.api && given.key) return given;
+  return (await fromUserData()) ?? { api: "", key: "" };
+}
+
+/**
  * Answers once the desktop has been told both things. A machine that has not been told yet asks again,
  * quickly at first because it has usually just started, then once a second.
  */

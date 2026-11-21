@@ -66,6 +66,8 @@ public static partial class WorkstreamApi
         MapEnvironments(api);
         MapTasks(api);
         MapAdmin(api);
+        MapGitHub(api);
+        MapGitHubCallbacks(app);
 
         // A person watching a desktop: a WebSocket, authorized inside (Desktops/DesktopRelay.cs).
         app.Map(DesktopRelay.Route, DesktopRelay.HandleAsync).ExcludeFromDescription();

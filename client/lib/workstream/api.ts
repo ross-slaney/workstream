@@ -29,6 +29,27 @@ export type TeamUsage = {
   maxRunningDesktops: number;
 };
 
+/**
+ * A team's GitHub connection. `available` says whether Workstream's GitHub App is set up at all; `manageUrl`
+ * is where on GitHub the installation is changed (which repositories it reaches) or removed.
+ */
+export type GitHub = {
+  available: boolean;
+  connected: boolean;
+  account: string | null;
+  /** `Organization` or `User`, as GitHub says. */
+  accountType: string | null;
+  connectedAt: string | null;
+  connectedByName: string | null;
+  manageUrl: string | null;
+};
+
+/** A repository the team's GitHub connection reaches. `url` is what an environment clones. */
+export type GitHubRepository = { fullName: string; url: string; defaultBranch: string; private: boolean };
+
+/** What GitHub hands back after an installation, which the web app passes on as the person signed in here. */
+export type ConnectGitHub = { state: string; code: string | null; installationId: number | null };
+
 export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean };
 
 export type DesktopSize = "small" | "standard" | "large";
@@ -172,6 +193,13 @@ export const workstream = {
   invitations: (teamId: string) => apiJson<PendingInvitation[]>(`/api/teams/${id(teamId)}/invitations`),
   invite: (teamId: string, email: string, admin: boolean) => apiSend<PendingInvitation>("POST", `/api/teams/${id(teamId)}/invitations`, { email, admin }),
   revokeInvitation: (teamId: string, invitationId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/invitations/${id(invitationId)}`),
+
+  github: (teamId: string) => apiJson<GitHub>(`/api/teams/${id(teamId)}/github`),
+  githubRepositories: (teamId: string) => apiJson<GitHubRepository[]>(`/api/teams/${id(teamId)}/github/repositories`),
+  /** Where on GitHub an administrator installs the app, with a state the API signed for them. */
+  startGitHubInstall: (teamId: string) => apiSend<{ url: string }>("POST", `/api/teams/${id(teamId)}/github/install`),
+  connectGitHub: (body: ConnectGitHub) => apiSend<{ teamId: string; gitHub: GitHub }>("POST", "/api/github/connect", body),
+  disconnectGitHub: (teamId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/github`),
 
   environments: (teamId: string) => apiJson<ListPage<Environment>>(`/api/teams/${id(teamId)}/environments`),
   addEnvironment: (teamId: string, environmentId: string, body: WriteEnvironment) =>
