@@ -1,6 +1,6 @@
 name: Checks
 
-# Every pull request and every push to main: the web app's checks, the agent's tests, the API's journeys and
+# Every pull request and every push to main: the web app's checks, the agent's tests, the command line's tests, the API's journeys and
 # the infrastructure's templates. Nothing here deploys; production ships from a published release (release.yml).
 
 on:
@@ -56,6 +56,19 @@ jobs:
         run: npm test
       - name: The image's scripts parse
         run: for script in desktop/image/*.sh desktop/*.sh scripts/*.sh client/scripts/*.sh; do bash -n "$script"; done
+
+  cli:
+    name: Command line
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Nothing to install: it uses Node and nothing else.
+      - run: for file in cli/*.mjs; do node --check "$file"; done
+      - run: node --test cli/*.test.mjs
 
   api:
     name: API journeys

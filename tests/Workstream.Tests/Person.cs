@@ -47,6 +47,14 @@ public sealed class Person : IDisposable
         return (person, (await person.GetAsync<ListPage<TeamDto>>("/api/teams")).Data.Single());
     }
 
+    /// <summary>The same person calling with another of their tokens: the command line's (CommandLine.cs).</summary>
+    public static Person Holding(string accessToken, string email, string userId)
+    {
+        var person = new Person { Email = email, UserId = userId };
+        person.http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        return person;
+    }
+
     static async Task<Person> SignAsync(string email, string password, string? name, string? invitationToken)
     {
         // The flow keeps its place in cookies, as a browser would.
