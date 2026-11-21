@@ -43,6 +43,14 @@ az bicep build --file infra/main.bicep --stdout > /dev/null
 
 `.github/workflows/ci.yml` runs the same on every pull request and every push to `main`.
 
+To try a running stack from outside, the way a browser would, including the desktop's display through the relay:
+
+```bash
+node scripts/try-stack.mjs --api http://localhost:5280 --web http://localhost:8091
+```
+
+It works against the local stack and against staging, which sign in with a password. Production signs in by emailed code.
+
 ## Ship it
 
 Production ships only from a published GitHub release. Merging to `main` deploys nothing. The version is `client/app.json` → `expo.version`, mirrored in `client/package.json`; publishing the release `vX.Y.Z` runs `.github/workflows/release.yml`, which builds both images from the tag's commit, deploys `infra/main.bicep`, checks that both origins serve that exact commit, and bakes the desktops' image when `desktop/` changed since the previous release.

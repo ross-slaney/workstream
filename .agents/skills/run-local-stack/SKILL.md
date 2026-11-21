@@ -38,6 +38,14 @@ The agent calls Claude through the API's gateway, which needs Workstream's Found
 
 It writes `WORKSTREAM_MODEL_ENDPOINT` and `WORKSTREAM_MODEL_KEY` into `.env` from Azure (you must be signed in with `az login`). Restart the AppHost afterwards. Without them everything else works and the agent answers that models are not set up. Never copy that key anywhere else: not into `client/`, a log, an issue or a reply.
 
+## Try the whole thing in one command
+
+```bash
+node scripts/try-stack.mjs --api http://localhost:5280 --web http://localhost:8091
+```
+
+It signs up a new person, starts a task, waits for the desktop, opens its display through the relay, reads what the agent answered, checks a stranger is refused, then stops, starts and deletes the task. `--keep` leaves the task running and prints how to sign in to look at it.
+
 ## Things that catch people out
 
 - The API does not pick up a code change by itself. Stop the AppHost, `dotnet build api`, start it again. The web app reloads on its own.

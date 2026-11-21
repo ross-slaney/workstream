@@ -6,7 +6,7 @@ param location string = resourceGroup().location
 
 var suffix = uniqueString(subscription().id, 'workstream')
 var networkPrefix = '10.60.0.0/16'
-var appsPrefix = '10.60.0.0/23'
+var appsPrefix = '10.60.2.0/23'
 var desktopsPrefix = '10.60.16.0/20'
 // A desktop's display (desktop/start.sh), which only the API's relay connects to.
 var displayPort = '5900'
@@ -29,7 +29,7 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 }
 
 // --- The network ------------------------------------------------------------------------------------------
-// Two subnets. `apps` is the container apps environment's. `desktops` is where every task's machine sits: no
+// Two subnets. `container-apps` is the container apps environment's. `desktops` is where every task's machine sits: no
 // machine has a public address, they reach the internet through one NAT gateway, and the rules below admit
 // one thing in, the API's relay to a desktop's display, and refuse every other machine on the network,
 // other desktops included. A desktop reaches the API the way anything else does, at its public address.
@@ -106,7 +106,7 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
     addressSpace: { addressPrefixes: [networkPrefix] }
     subnets: [
       {
-        name: 'apps'
+        name: 'container-apps'
         properties: {
           addressPrefix: appsPrefix
           delegations: [{ name: 'container-apps', properties: { serviceName: 'Microsoft.App/environments' } }]
@@ -126,7 +126,7 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
 }
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: 'workstream-env'
+  name: 'workstream-apps'
   location: location
   properties: {
     appLogsConfiguration: {
@@ -138,7 +138,7 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
     }
     // Inside the network, so the API reaches a desktop at its private address; still answering the public.
     vnetConfiguration: {
-      infrastructureSubnetId: '${network.id}/subnets/apps'
+      infrastructureSubnetId: '${network.id}/subnets/container-apps'
       internal: false
     }
     workloadProfiles: [{ name: 'Consumption', workloadProfileType: 'Consumption' }]

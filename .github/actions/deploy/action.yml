@@ -76,7 +76,7 @@ runs:
           # `az acr list -g` fails, rather than listing nothing, when the group does not exist yet.
           if [ "$(az group exists -n "$GROUP")" = true ]; then
             registry=$(az acr list -g "$GROUP" --query "[0].name" -o tsv)
-            domain=$(az resource show -g "$GROUP" -n workstream-env --resource-type Microsoft.App/managedEnvironments --query "properties.provisioningState == 'Succeeded' && properties.defaultDomain || ''" -o tsv 2>/dev/null || true)
+            domain=$(az resource show -g "$GROUP" -n workstream-apps --resource-type Microsoft.App/managedEnvironments --query "properties.provisioningState == 'Succeeded' && properties.defaultDomain || ''" -o tsv 2>/dev/null || true)
           fi
         }
         find

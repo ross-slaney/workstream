@@ -18,7 +18,7 @@ The two origins are under the container apps environment's own domain: `https://
 
 ### The network
 
-`workstream-net` (10.60.0.0/16) has two subnets. `apps` holds the container apps environment. `desktops` holds every task's machine. A desktop has no public address and reaches the internet through the NAT gateway. The subnet's rules admit one thing in, the API's relay to a desktop's display on port 5900 from the `apps` subnet, and refuse every other machine on the network, other desktops included. Outbound to the network is refused too. A desktop calls the API at its public address like anything else.
+`workstream-net` (10.60.0.0/16) has two subnets. `container-apps` holds the container apps environment. `desktops` holds every task's machine. A desktop has no public address and reaches the internet through the NAT gateway. The subnet's rules admit one thing in, the API's relay to a desktop's display on port 5900 from the `container-apps` subnet, and refuse every other machine on the network, other desktops included. Outbound to the network is refused too. A desktop calls the API at its public address like anything else.
 
 ### What the API may do in Azure
 

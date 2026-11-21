@@ -64,7 +64,7 @@ module foundation 'foundation.bicep' = if (production) {
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
   scope: resourceGroup(shared)
-  name: 'workstream-env'
+  name: 'workstream-apps'
 }
 
 resource emailDomain 'Microsoft.Communication/emailServices/domains@2023-04-01' existing = {
