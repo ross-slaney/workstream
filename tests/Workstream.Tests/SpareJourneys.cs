@@ -170,6 +170,14 @@ public sealed class SpareJourneys
         using var __ = desktop;
         var machine = desktop.Host;
 
+        // The system administrator sees it while it runs, and its time as a line of its own.
+        using var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
+        var overview = await administrator.GetAsync<AdminOverview>("/api/admin/overview");
+        Assert.IsTrue(overview.Machines.Spares.Any(x => x.TeamId == team.Id && x.State == "ready"));
+        Assert.IsTrue(overview.Machines.ThisMonth.Any(x => x.Purpose == MachinePurpose.Spare));
+        // It is no task, so it is not among the desktops running.
+        Assert.IsFalse(overview.Desktops.Any(x => x.TeamId == team.Id));
+
         await Task.Delay(TimeSpan.FromMilliseconds(20));
         await ImpatientSweep().SweepAsync(CancellationToken.None);
         Assert.IsNull(await SpareOfAsync(team.Id));

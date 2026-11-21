@@ -116,7 +116,21 @@ An estimate from list prices, not a bill: about $105 a month at most, less while
 | Container registry, Basic | $5 |
 | Logs, email, the image in the gallery | a few dollars |
 
-A running desktop is its machine: a Standard desktop (`Standard_D4as_v7`, 4 cores, 16 GB) is $0.182 an hour. A stopped desktop costs only its 64 GB disk, about $5 a month, until its task is deleted.
+None of the rest costs anything while nobody is using the product.
+
+## What it costs when people use it
+
+The prices are Azure's list prices in West US 3, kept in one place (`DesktopOptions.PriceOptions`, `api/Desktops/DesktopHosts.cs`). Every hour a machine runs is written down with what it ran for (`DesktopRuns`), and the system administrator's page adds it up by purpose for the month.
+
+| | |
+| --- | --- |
+| A task's desktop, running | $0.091 (Small), $0.182 (Standard) or $0.364 (Large) an hour |
+| A desktop's disk, running or stopped, until its task is deleted | $4.80 a month (Standard SSD, 64 GB) |
+| A spare, while someone is in a team's workspace | the same hourly price as a desktop of its size |
+
+Spares are the one cost that is not somebody's task. Their limits are two settings in `infra/api.bicep`: `sparesAtOnce` (2) and `spareHoursADay` (6). At those, spares cost at most 6 × $0.182 = $1.09 a day, about $33 in a month in which the limit is reached every day, and nothing on a day nobody opens the app. A spare nobody takes is removed after 15 minutes, which is $0.05.
+
+A pool of stopped machines was measured and not built: Azure takes as long to start a stopped machine as to make a new one (a middle of about 17 seconds for either, and up to a minute), so its disks would have bought nothing.
 
 ## Limits to know
 

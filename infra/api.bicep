@@ -27,6 +27,9 @@ param administratorPassword string = ''
 @description('The resource group desktops are made in (desktops.bicep).')
 param desktopsGroup string
 param desktopsSubnetId string
+@description('Spares: how many may run at once over every team, and how many hours of spare time there may be in a day. A spare is a running machine nobody is using yet, so these two are what it can cost (api/Desktops/DesktopHosts.cs, SpareOptions). 0 at once turns spares off.')
+param sparesAtOnce int = 2
+param spareHoursADay int = 6
 @description('The image version a desktop is made from: the one this deployment was made with.')
 param desktopImageId string
 @description('The agents\' models (api/Model/ModelGateway.cs): the Foundry resource\'s Anthropic endpoint; empty leaves agents without one.')
@@ -88,6 +91,9 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'Workstream__Desktops__Azure__Location', value: location }
           { name: 'Workstream__Desktops__Azure__SubnetId', value: desktopsSubnetId }
           { name: 'Workstream__Desktops__Azure__ImageId', value: desktopImageId }
+          { name: 'Workstream__Desktops__Spares__Enabled', value: sparesAtOnce > 0 ? 'true' : 'false' }
+          { name: 'Workstream__Desktops__Spares__Max', value: string(sparesAtOnce) }
+          { name: 'Workstream__Desktops__Spares__HoursPerDay', value: string(spareHoursADay) }
         ], email ? [
           { name: 'SqlOS__EmailOtp__AzureCommunicationServicesConnectionString', secretRef: 'acs' }
           { name: 'SqlOS__EmailOtp__FromAddress', value: communication.sender }

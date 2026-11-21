@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Workstream.Api;
+using Workstream.Api.Domain;
 
 namespace Workstream.Tests;
 
@@ -30,6 +31,16 @@ public sealed class AdminJourneys
         // A day in half hours, ending now with this desktop counted.
         Assert.AreEqual(49, overview.Running.Count);
         Assert.IsTrue(overview.Running[^1].Running >= 1);
+        // What the desktops cost: the machines' time by what they ran for, and a disk for every machine there is.
+        var tasksTime = overview.Machines.ThisMonth.Single(x => x.Purpose == MachinePurpose.Task);
+        Assert.IsTrue(tasksTime.Hours >= 0 && tasksTime.Usd >= 0);
+        Assert.IsTrue(overview.Machines.Disks >= 1);
+        Assert.AreEqual(overview.Machines.Disks * 4.80m, overview.Machines.DisksMonthlyUsd);
+        // How long starts take, from what was written down as this one happened: it was a new machine, and it got as far as its agent.
+        var fromImage = overview.Starts.Single(x => x.Source == StartSource.Image);
+        Assert.IsTrue(fromImage.Starts >= 1);
+        Assert.IsNotNull(fromImage.ScreenSeconds);
+        Assert.IsNotNull(fromImage.AgentSeconds);
         var numbers = overview.TeamNumbers.Single(x => x.Id == team.Id);
         Assert.AreEqual(1, numbers.People);
         Assert.AreEqual(1, numbers.Tasks);

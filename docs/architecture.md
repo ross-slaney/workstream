@@ -33,7 +33,18 @@ a person's browser
 6. The agent reads its setup from the API with its key: the apps for the panel, the repository, the setup script, the variables and the instructions. It prepares the desktop where the person can watch: it clones the repository, shows the environment's apps on the panel, runs the setup script in a terminal window, and opens the browser and the editor.
 7. The person's browser reads the conversation twice a second while the desktop is starting, and every second and a half after. It shows each step as the task reports it (`step`: `machine`, `boot`, `agent`), and opens a WebSocket to the API for the display as soon as there is one.
 
-Each of those moments is kept with the run (`DesktopRun`: asked, on, display, ready), so how long a start takes is something the product knows and not something anyone has to guess.
+Each of those moments is kept with the run (`DesktopRun`: asked, on, display, ready), so how long a start takes is something the product knows and not something anyone has to guess. The system administrator's page shows the middle start of the last seven days, by what it started from.
+
+## A spare, so a task starts at once
+
+Step 2 is the slow one, and it is Azure's: between fifteen seconds and a minute to hand over a machine, more on a bad hour, whether the machine is new or was stopped. So while someone is in a team's workspace, the operator keeps one desktop running ahead of them (`Spare`, `api/Operations/Spares.cs`).
+
+- The web app says someone is there when a team's pages open and when the new-task dialog opens. The API makes the team a spare if it has none and the limits allow: a machine like any other, told the API's address and a key of its own.
+- The spare boots, draws its desktop, opens the browser and reads its agent's program off the disk, so nothing is cold. Its agent asks the API twice a second what it is for. Its key opens nothing, because its account is granted nothing.
+- A task from an environment of the same size takes the spare as it is made: one transaction deletes the spare's row, writes the task with the spare's machine, and grants the spare's account `task_desktop` on the task. The person has the screen at once, and the agent's next question, at most half a second later, is answered with the task. Then the operator makes the team's next spare.
+- A spare nobody on the team has wanted for fifteen minutes is removed, with its machine and its key.
+
+A spare is a running machine nobody is using yet, so what it can cost is limited by settings (`Workstream:Desktops:Spares`, set in `infra/api.bicep`): one a team, two at once over every team, six hours of spare time a day, and none for a team already at its limit of running desktops. With nobody in the app there are none.
 
 Stopping a task deallocates its machine and keeps its disk. Starting it again brings the same desktop back, and the agent resumes the same conversation. Deleting a task deletes the machine, its disk and its network interface, and ends its key. A desktop nobody watches or writes to, whose agent is idle, is stopped after half an hour by a sweep that also fails a desktop that never arrived, and deletes a machine no task knows once it has been there half an hour (a newer one may belong to a task that has just started).
 
@@ -65,6 +76,7 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 - It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted.
 - It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
 - It has no Azure identity.
+- A spare is a desktop with no task. Its key authenticates and nothing more until a task takes it, and it is never given to another team.
 - An environment's variables are stored protected and are sent only to a desktop made from that environment. They are on that desktop in plain text, because the work needs them there: anyone on the team can read them by opening the desktop.
 
 ## What is kept where
