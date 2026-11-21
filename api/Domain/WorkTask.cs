@@ -128,6 +128,20 @@ public sealed class WorkTask : ISqlOSResourceEntity
         Address = address;
     }
 
+    /// <summary>
+    /// The task starts on a spare, which is already running with its display up: there is a screen to watch at
+    /// once, and only the agent is waited for.
+    /// </summary>
+    public void TakeSpare(Spare spare, DateTimeOffset now)
+    {
+        if (State != DesktopState.Starting || Host is not null) throw new DomainRuleException("Only a task with no desktop yet can take a spare.");
+        if (spare.TeamId != TeamId) throw new DomainRuleException("The spare belongs to another team.");
+        Host = spare.Host;
+        Address = spare.Address;
+        OnAt = now;
+        DisplayAt = now;
+    }
+
     /// <summary>The host said the machine is on.</summary>
     public void MachineOn(DateTimeOffset now)
     {
@@ -280,10 +294,32 @@ public sealed class TaskMessage : IHasResourceId
     }
 }
 
+/// <summary>What a machine was running for. Each is a line of what the desktops cost.</summary>
+public static class MachinePurpose
+{
+    /// <summary>A task's desktop.</summary>
+    public const string Task = "task";
+    /// <summary>A spare, kept ready for a team's next task (<see cref="Spare"/>).</summary>
+    public const string Spare = "spare";
+}
+
+/// <summary>What a task's desktop started from, which is most of how long the start took.</summary>
+public static class StartSource
+{
+    /// <summary>A new machine, made from the image.</summary>
+    public const string Image = "image";
+    /// <summary>A spare that was already running.</summary>
+    public const string Spare = "spare";
+    /// <summary>The task's own machine, stopped earlier.</summary>
+    public const string Stopped = "stopped";
+}
+
 /// <summary>
-/// One stretch of a desktop running: from when it was asked to start until it stopped, failed or was deleted.
-/// What a team's desktop hours are summed from, and what the administrator's graph is drawn from. It also
-/// keeps when each step of the start happened, which is how long a start really takes.
+/// One stretch of a machine running: from when it was asked for until it stopped, failed, was deleted or, for
+/// a spare, was taken by a task. Every hour a machine runs is in one of these, with what it ran for, so what
+/// the desktops cost can be added up by purpose (<see cref="DesktopOptions"/> has the prices). A team's desktop
+/// hours are its task runs. A task's run also keeps when each step of the start happened, which is how long a
+/// start really takes.
 /// </summary>
 public sealed class DesktopRun
 {
@@ -293,9 +329,14 @@ public sealed class DesktopRun
     }
 
     public string Id { get; private set; } = "";
+    /// <summary>The task. For a spare's run, the spare's own id.</summary>
     public string TaskId { get; private set; } = "";
     public string TeamId { get; private set; } = "";
     public string Size { get; private set; } = "";
+    /// <summary>One of <see cref="MachinePurpose"/>.</summary>
+    public string Purpose { get; private set; } = MachinePurpose.Task;
+    /// <summary>One of <see cref="StartSource"/>. A spare's own run started from the image.</summary>
+    public string Source { get; private set; } = StartSource.Image;
     public DateTimeOffset StartedAt { get; private set; }
     /// <summary>When the host said the machine was on.</summary>
     public DateTimeOffset? OnAt { get; private set; }
@@ -305,9 +346,15 @@ public sealed class DesktopRun
     public DateTimeOffset? ReadyAt { get; private set; }
     public DateTimeOffset? EndedAt { get; private set; }
 
-    public static DesktopRun Begin(WorkTask task, DateTimeOffset now) => new()
+    public static DesktopRun Begin(WorkTask task, DateTimeOffset now, string source = StartSource.Image) => new()
     {
-        Id = Guid.NewGuid().ToString("D"), TaskId = task.Id, TeamId = task.TeamId, Size = task.Size, StartedAt = now,
+        Id = Guid.NewGuid().ToString("D"), TaskId = task.Id, TeamId = task.TeamId, Size = task.Size, StartedAt = now, Source = source,
+    };
+
+    /// <summary>A spare's time, from when its machine is asked for until a task takes it or it is removed.</summary>
+    public static DesktopRun Begin(Spare spare, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid().ToString("D"), TaskId = spare.Id, TeamId = spare.TeamId, Size = spare.Size, StartedAt = now, Purpose = MachinePurpose.Spare,
     };
 
     public void MachineOn(DateTimeOffset now) => OnAt ??= now;

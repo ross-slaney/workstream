@@ -11,8 +11,8 @@ namespace Workstream.Api.Desktops;
 
 /// <summary>
 /// Everything that happens to a desktop outside a request: making and starting its machine and following it
-/// until its screen can be watched, stopping it, deleting it, and the sweep that stops idle desktops and
-/// removes strays. Each job is an operation run by a
+/// until its screen can be watched, stopping it, deleting it, keeping a team's spare, and the sweep that stops
+/// idle desktops, removes spares nobody took and deletes strays. Each job is an operation run by a
 /// principal of its own, <c>agent::desktop-operator</c>, which holds <c>desktop_operator</c> on root: it checks
 /// <c>TASK_OPERATE_DESKTOP</c> on every task it touches and pages the tasks it sweeps with the same permission.
 /// A job changes a task only from the state the person's request left it in, so a job that runs twice, or late,
@@ -47,8 +47,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             existing = task.Host;
             if (existing is null)
             {
-                // The key is made here and handed to the machine; nothing keeps it.
-                var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), task, ct);
+                // The key is made here and handed to the machine; nothing keeps it. A machine made for a task is
+                // that task's desktop from the start: it has the task's id, and works on the task at once.
+                var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), task.Id, task.TeamId, ct);
+                await DesktopKeys.GrantAsync(db, task.Id, task, ct);
                 await db.SaveChangesAsync(ct);
                 spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key);
             }
@@ -102,85 +104,207 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             return;
         }
 
-        // The host has only taken the request. Two things are asked at once, each at its own pace: the display
-        // every quarter second, since its answer is the moment there is a screen to watch, and the host every
-        // two seconds, for when the machine is on and in case it could not be started.
+        await FollowAsync(place,
+            on: () => StepAsync(taskId, (task, run, now) =>
+            {
+                task.MachineOn(now);
+                run?.MachineOn(now);
+            }, ct),
+            display: () => StepAsync(taskId, (task, run, now) =>
+            {
+                task.DisplayUp(now);
+                run?.DisplayUp(now);
+            }, ct),
+            failed: why => FailAsync(new InvalidOperationException(why)),
+            wanted: () => IsStartingAsync(taskId, ct),
+            // The agent was there before the display was seen to answer. It is answering: its time is kept.
+            unwanted: async () =>
+            {
+                if (await host.DisplayAnswersAsync(place, ct)) await StepAsync(taskId, (_, run, now) => run?.DisplayUp(now), ct);
+            },
+            what: $"task {taskId}", ct);
+    }
+
+    /// <summary>
+    /// Follow a machine the host has only taken the request for, until its display answers. Two things are
+    /// asked at once, each at its own pace: the display every quarter second, since its answer is the moment
+    /// there is a screen to watch, and the host every two seconds, for when the machine is on and in case it
+    /// could not be started. Ends early, through <paramref name="unwanted"/>, when whatever asked for the
+    /// machine no longer waits for it.
+    /// </summary>
+    async Task FollowAsync(DesktopPlace place, Func<Task> on, Func<Task> display, Func<string, Task> failed, Func<Task<bool>> wanted, Func<Task> unwanted, string what, CancellationToken ct)
+    {
         using var following = CancellationTokenSource.CreateLinkedTokenSource(ct);
         following.CancelAfter(FollowFor);
-        var display = Task.Run(async () =>
+        var answered = Task.Run(async () =>
         {
             while (!await host.DisplayAnswersAsync(place, following.Token)) await Task.Delay(TimeSpan.FromMilliseconds(250), following.Token);
         }, following.Token);
         var hosted = Task.Run(async () =>
         {
-            var on = false;
+            var isOn = false;
             while (true)
             {
-                var state = new MachineState(on);
+                var state = new MachineState(isOn);
                 try
                 {
                     state = await host.StateAsync(place.Host, following.Token);
                 }
                 catch (Exception error) when (error is HttpRequestException or InvalidOperationException)
                 {
-                    log.LogWarning(error, "The host did not say how the machine of task {TaskId} is doing.", taskId);
+                    log.LogWarning(error, "The host did not say how the machine of {What} is doing.", what);
                 }
                 if (state.Failure is not null) return state.Failure;
-                if (state.On && !on)
+                if (state.On && !isOn)
                 {
-                    on = true;
-                    // What is written is written whole: ending the following never cuts a save short.
-                    await StepAsync(taskId, (task, run, now) =>
-                    {
-                        task.MachineOn(now);
-                        run?.MachineOn(now);
-                    }, ct);
+                    isOn = true;
+                    await on();
                 }
-                // The person stopped or deleted the task, or its agent is already there: nothing more to follow.
-                if (!await IsStartingAsync(taskId, ct)) return null;
+                if (!await wanted()) return null;
                 await Task.Delay(AskHostEvery, following.Token);
             }
         }, following.Token);
 
         try
         {
-            var first = await Task.WhenAny(display, hosted);
-            if (first == display && display.IsCompletedSuccessfully)
+            var first = await Task.WhenAny(answered, hosted);
+            if (first == answered && answered.IsCompletedSuccessfully)
             {
-                await StepAsync(taskId, (task, run, now) =>
-                {
-                    task.DisplayUp(now);
-                    run?.DisplayUp(now);
-                }, ct);
+                await display();
             }
             else if (first == hosted && await hosted is { } failure)
             {
-                await FailAsync(new InvalidOperationException(failure));
+                await failed(failure);
             }
             else
             {
                 await first;
-                // The agent was there before the display was seen to answer. It is answering: its time is kept.
-                if (await host.DisplayAnswersAsync(place, ct)) await StepAsync(taskId, (_, run, now) => run?.DisplayUp(now), ct);
+                await unwanted();
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            log.LogWarning("The display of task {TaskId} did not answer in {Minutes} minutes.", taskId, FollowFor.TotalMinutes);
+            log.LogWarning("The display of {What} did not answer in {Minutes} minutes.", what, FollowFor.TotalMinutes);
         }
         finally
         {
             following.Cancel();
             try
             {
-                await Task.WhenAll(display, hosted);
+                await Task.WhenAll(answered, hosted);
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
                 // The one that was not first, stopped where it was. What it was doing no longer matters.
-                log.LogDebug(error, "The following of task {TaskId} ended.", taskId);
+                log.LogDebug(error, "The following of {What} ended.", what);
             }
         }
+    }
+
+    /// <summary>
+    /// Make a spare's machine and follow it until its display answers. The spare is ready when its agent first
+    /// asks the API what it is for (<see cref="Operations.EnsureSpareAsync"/> made the row). The operator
+    /// checks <c>TEAM_OPERATE_SPARE</c> on the team it is for.
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    public async Task StartSpareAsync(string spareId, CancellationToken ct)
+    {
+        DesktopSpec spec;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var spare = await db.Spares.SingleOrDefaultAsync(x => x.Id == spareId, ct);
+            if (spare is null || spare.Host is not null) return;
+            if (!await scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>().Allows(Operator, Permissions.TeamOperateSpare, Team.ResourceIdFor(spare.TeamId)))
+            {
+                log.LogError("The desktop operator may not keep a spare for team {TeamId}.", spare.TeamId);
+                return;
+            }
+            // Its key opens nothing until a task takes the spare: the account is granted nothing here.
+            var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), spare.Id, spare.TeamId, ct);
+            await db.SaveChangesAsync(ct);
+            spec = new DesktopSpec(DesktopHosting.NameFor(spare.Id), spare.Id, spare.TeamId, spare.Size, options.ApiUrl, key, MachinePurpose.Spare);
+        }
+
+        DesktopPlace place;
+        try
+        {
+            place = await host.CreateAsync(spec, ct);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            log.LogWarning(error, "The spare {SpareId} could not be made.", spareId);
+            await RemoveSpareAsync(spareId, spec.Name, ct);
+            return;
+        }
+
+        var kept = false;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            if (await db.Spares.SingleOrDefaultAsync(x => x.Id == spareId, ct) is { } spare)
+            {
+                spare.Made(place.Host, place.Address);
+                await db.SaveChangesAsync(ct);
+                kept = true;
+            }
+        }
+        // Removed while its machine was being made: the machine goes too.
+        if (!kept)
+        {
+            await host.DeleteAsync(place.Host, ct);
+            return;
+        }
+
+        await FollowAsync(place,
+            on: () => Task.CompletedTask,
+            display: () => Task.CompletedTask,
+            failed: async why =>
+            {
+                log.LogWarning("The spare {SpareId} could not be started: {Why}", spareId, why);
+                await RemoveSpareAsync(spareId, place.Host, ct);
+            },
+            wanted: async () =>
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                return await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Spares.AsNoTracking().AnyAsync(x => x.Id == spareId && x.State == SpareState.Starting, ct);
+            },
+            unwanted: () => Task.CompletedTask,
+            what: $"spare {spareId}", ct);
+    }
+
+    /// <summary>A task took the team's spare: make the next one, when the limits allow.</summary>
+    [AutomaticRetry(Attempts = 0)]
+    public async Task RefillSpareAsync(string teamId, string environmentId, CancellationToken ct)
+    {
+        string? spareId;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var team = await db.Teams.SingleOrDefaultAsync(x => x.Id == teamId, ct);
+            if (team is null || !await scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>().Allows(Operator, Permissions.TeamOperateSpare, team.ResourceId)) return;
+            var environment = await db.Environments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == environmentId && x.TeamId == teamId, ct);
+            spareId = await Operations.EnsureSpareAsync(team, environment, db, options, clock.GetUtcNow(), ct);
+        }
+        if (spareId is not null) await StartSpareAsync(spareId, ct);
+    }
+
+    /// <summary>
+    /// Remove a spare nothing took: its row, its key, its time and its machine. Deleting the row is what
+    /// decides it. A task that took the spare in the same moment deleted the row first, and then the machine is
+    /// that task's and is left alone.
+    /// </summary>
+    async Task RemoveSpareAsync(string spareId, string? machine, CancellationToken ct)
+    {
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            if (await db.Spares.Where(x => x.Id == spareId).ExecuteDeleteAsync(ct) != 1) return;
+            await EndRunAsync(db, spareId, clock.GetUtcNow(), ct);
+            await DesktopKeys.RetireAsync(db, spareId, ct);
+            await db.SaveChangesAsync(ct);
+        }
+        if (machine is not null) await host.DeleteAsync(machine, ct);
     }
 
     /// <summary>Release the machine of a task a person, or the sweep, asked to stop.</summary>
@@ -234,7 +358,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             if (task is not { State: DesktopState.Deleting }) return;
             var now = clock.GetUtcNow();
             await EndRunAsync(db, taskId, now, ct);
-            await DesktopKeys.RetireAsync(db, taskId, ct);
+            await DesktopKeys.RetireForTaskAsync(db, task, ct);
             db.Tasks.Remove(task);
             await db.SaveChangesAsync(ct);
         }
@@ -296,6 +420,32 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             }
         }
         while (cursor is not null);
+
+        // Spares: one nobody on the team has wanted for a while goes, and so does one that never came up. Their
+        // machines are owned while they are here.
+        List<Spare> spares;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            spares = await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Spares.AsNoTracking().ToListAsync(ct);
+        }
+        foreach (var spare in spares)
+        {
+            var machine = spare.Host ?? DesktopHosting.NameFor(spare.Id);
+            owned.Add(machine);
+            var unwanted = now - spare.WantedAt > TimeSpan.FromMinutes(options.Spares.IdleMinutes);
+            var neverCame = spare.State == SpareState.Starting && now - spare.CreatedAt > startTimeout;
+            if (!unwanted && !neverCame) continue;
+            log.LogInformation("Removing the spare {SpareId} of team {TeamId}: {Why}.", spare.Id, spare.TeamId, unwanted ? "nobody has wanted it for a while" : "it never came up");
+            await RemoveSpareAsync(spare.Id, machine, ct);
+        }
+        // A spare's time left open by a spare that is gone: a task claimed it and then could not be saved.
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var open = await db.DesktopRuns.Where(x => x.Purpose == MachinePurpose.Spare && x.EndedAt == null && !db.Spares.Any(spare => spare.Id == x.TaskId)).ToListAsync(ct);
+            foreach (var run in open) run.End(now);
+            if (open.Count > 0) await db.SaveChangesAsync(ct);
+        }
 
         // Deleted tasks are not in the page (their nodes are inactive); a delete job that was lost is run again here.
         List<string> deleting;

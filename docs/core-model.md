@@ -24,8 +24,8 @@ Any column that names an actor holds a principal id.
 | `user` | A person | the SqlOS user id | Made at sign-up. |
 | `group` | A team's people | `group::{teamId}` | Mirrors the team's memberships. Joining the team is joining its group. |
 | `group` | System administrators | `group::system_admins` | Seeded. Its members belong to the platform, not to a team. |
-| `service_account` | A task's desktop | `service_account::desktop-{taskId}` | What the agent on that desktop signs in as, with a key only that desktop holds. It writes the agent's messages and uses the model. |
-| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops. No credential: the jobs run in the API process. |
+| `service_account` | A desktop | `service_account::desktop-{desktopId}` | What the agent on that desktop signs in as, with a key only that desktop holds. The id is the task's for a desktop made for a task, and the spare's own for a spare. The key says which desktop is calling; what it may do is the grant below. |
+| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops and keep a team's spare. No credential: the jobs run in the API process. |
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
 
@@ -64,16 +64,17 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_MANAGE` | task | Rename, stop, start and delete it. |
 | `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model. |
 | `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop. |
+| `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
 
 ## Roles
 
 | Role | Granted on | To | Carries |
 | --- | --- | --- | --- |
 | `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits. Nothing inside a team. |
-| `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP` |
+| `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE` |
 | `team_member` | team | the team's group | `TEAM_VIEW`, `TEAM_VIEW_USAGE`, `TEAM_CREATE_ENVIRONMENT`, `TEAM_CREATE_TASK`, `ENVIRONMENT_VIEW`, `ENVIRONMENT_EDIT`, `TASK_VIEW`, `TASK_USE`, `TASK_MANAGE` |
 | `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS` |
-| `task_desktop` | task | the task's desktop | `TASK_RUN_AGENT` |
+| `task_desktop` | task | the desktop that works on the task | `TASK_RUN_AGENT` |
 
 Everyone on a team can see, use and manage every task and environment in it. Work a person wants to keep to themselves goes in their own team.
 
@@ -87,7 +88,10 @@ Everyone on a team can see, use and manage every task and environment in it. Wor
 | An administrator promotes or demotes someone | `team_admin` is granted or revoked. The last administrator cannot be demoted or removed. |
 | A person is removed or leaves | Their membership is deleted; they leave the group; their `team_admin` on the team is removed. |
 | A desktop is made for a task | The desktop's service account is provisioned and granted `task_desktop` on the task. |
-| A task is deleted | The service account is expired and the task's node is removed, with the grant on it. |
+| A spare is made | Its service account is provisioned and granted nothing. |
+| A task starts on a spare | The spare's service account is granted `task_desktop` on the task. Nothing else changes hands: the machine keeps the key it has. |
+| A spare is removed unused | Its service account is expired. It never held a grant. |
+| A task is deleted | Every desktop account that holds `task_desktop` on the task is expired, and the task's node is removed, with the grants on it. |
 
 Grants are derived from these events. Nothing revokes "the grant this action made".
 
@@ -100,6 +104,7 @@ Grants are derived from these events. Nothing revokes "the grant this action mad
 | A team's environments | `Environments` in the team | `ENVIRONMENT_VIEW` | `Name` |
 | A task's messages | `TaskMessages` of the task, after an id | `TASK_VIEW` | `Id` |
 | Desktops the operator sweeps | `Tasks` | `TASK_OPERATE_DESKTOP` | `Id` |
+| The task a desktop works on | `Tasks` | `TASK_RUN_AGENT`, as the desktop | `Id`, first one |
 
 A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Usage and the administrator's numbers are sums, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
 
@@ -111,7 +116,8 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `Environments` | Name, apps, size, repository, setup script, instructions, protected variables. | Configuration. |
 | `Tasks` | Title, environment, who created it (a principal id, a fact), the desktop's state and address. | The desktop's lifecycle. |
 | `TaskMessages` | The conversation. | Content. |
-| `DesktopRuns` | When each desktop ran. | Usage, and the administrator's graph. |
+| `DesktopRuns` | When each machine ran, what for (a task's desktop, a spare), what a task's start began from, and when each step of it happened. | Usage, cost, and how long starts take. |
+| `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
 | `ModelUsage` | Tokens and cost of each model call. | Usage. |
 
 `Tasks.CreatedBy` records who started a task. It grants nothing.
@@ -136,6 +142,17 @@ The system administrator is the one address the deployment names (`Workstream:Ad
 4. The job, as `agent::desktop-operator`, provisions the desktop's service account, grants it `task_desktop`, and asks the desktop host for a machine carrying two values: the API's address and the desktop's key.
 5. The desktop boots. Its display answers first, and from then the team can watch it; its agent's first exchange with the API marks the desktop `ready`. The agent reads its setup from the API with its key and prepares the desktop.
 
+### A spare desktop
+
+Making a machine takes Azure from fifteen seconds to a minute, and nothing Workstream does shortens that. So while someone is in a team's workspace, the operator keeps one desktop running for the task they may be about to start.
+
+1. The web app says someone is there when the team's pages open and when the new-task dialog opens (`POST /api/teams/{id}/spare`). The check is `TEAM_CREATE_TASK` on the team: whoever may start a task may have one warmed up.
+2. If the team has no spare and the limits allow, the operator (`TEAM_OPERATE_SPARE` on the team) makes one for the environment the team used last. Its service account is granted nothing. Its agent asks the API twice a second what it is for, and is told there is nothing yet.
+3. A task started from an environment of the same size takes the spare in the same transaction that makes the task: the spare's row is deleted, the task records its machine, and the spare's account is granted `task_desktop` on the task. The screen can be watched at once. The agent's next question is answered with the task's setup.
+4. The operator then makes the team's next spare. A spare nobody on the team has wanted for fifteen minutes is removed with its machine and its key.
+
+The limits are settings (`Workstream:Desktops:Spares`): one spare a team, so many running at once over every team, so many hours of spare time a day, and none for a team already at its limit of running desktops. A spare is never given to another team.
+
 ### Talk to the agent
 
 A person's message is a row in `TaskMessages`. The desktop exchanges with the API about once a second: it sends what the agent said and did, and receives what people wrote since its last exchange. The agent's messages are rows written as the desktop's service account. Every model call the agent makes goes to the API's model gateway with the desktop's key; the gateway checks `TASK_RUN_AGENT`, checks the team's allowance, forwards the call to Foundry and records its usage.
@@ -155,7 +172,7 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 ## Decisions
 
 - **Team is the only container.** One grant per person per team keeps every list cheap and the rules short. Private work goes in a team of the person's own.
-- **The desktop is a principal.** The agent's key identifies one service account with one grant on one task, so a key taken from a desktop reaches that task and nothing else, and stops working when the task is deleted.
+- **The desktop is a principal, and its task is a grant.** The agent's key identifies one service account. The account holds `task_desktop` on the one task it works on, so a key taken from a desktop reaches that task and nothing else, and stops working when the task is deleted. The key carries no task: the API finds the task by the grant, which is why a spare can become a task's desktop without being told anything new.
 - **The API is the only way into a desktop.** Desktops have no inbound access from the internet or from each other. The relay authorizes every stream.
 - **All inference goes through the gateway.** The Foundry key never leaves the API. Usage is recorded where it is spent.
 - **The agent is Workstream's own, on the Claude Agent SDK.** Anthropic's terms for hosting Claude Code itself require each end user to bring their own credential; products built on the Agent SDK use the developer's API key or cloud provider. Claude Code is not wired to Workstream's inference.

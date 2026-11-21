@@ -14,7 +14,7 @@
 
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -125,6 +125,13 @@ async function exchange() {
   if (changed) await saveState();
 }
 
+/**
+ * How long to wait before asking again after the API refused. 404: this desktop has no task yet. It is a
+ * spare, kept running so a task can start on it at once, so it asks again twice a second. 401: its key has
+ * ended, because its task was deleted or the spare was not needed; the machine goes with it, so it asks slowly.
+ */
+const again = (error, wait) => (error.status === 404 ? 500 : error.status === 401 ? 30_000 : Math.min(wait * 2, 15_000));
+
 async function exchangeForever() {
   let wait = 1000;
   while (true) {
@@ -132,9 +139,8 @@ async function exchangeForever() {
       await exchange();
       wait = 1000;
     } catch (error) {
-      // 401 or 404: the task was deleted, or this key was replaced. Keep asking, slowly; the machine goes with the task.
-      wait = error.status === 401 || error.status === 404 ? 30_000 : Math.min(wait * 2, 15_000);
-      log("Exchange failed:", error.message);
+      wait = again(error, wait);
+      if (error.status !== 404) log("Exchange failed:", error.message);
     }
     await sleep(wait);
   }
@@ -237,28 +243,57 @@ async function prepareWindows(setup, workspace) {
   }
   state.prepared = true;
   await saveState();
-  // The browser is always there: it is the one the agent's browser tools drive.
-  start("chromium", ["about:blank"], setup.variables);
+  // The browser is always there: it is the one the agent's browser tools drive. A spare opened it while it waited.
+  if (!(await browserAnswers())) start("chromium", ["about:blank"], setup.variables);
   if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
 }
 
-/** The browser is up when its debugging port answers, which is what the agent's browser tools attach to. */
+/** Whether the browser's debugging port answers, which is what the agent's browser tools attach to. */
+const browserAnswers = () => fetch("http://127.0.0.1:9222/json/version", { signal: AbortSignal.timeout(1000) }).then((response) => response.ok, () => false);
+
+/** The browser is up when that port answers. */
 async function browserUp() {
   for (let waited = 0; waited < 300; waited++) {
-    const up = await fetch("http://127.0.0.1:9222/json/version", { signal: AbortSignal.timeout(1000) }).then((response) => response.ok, () => false);
-    if (up) return;
+    if (await browserAnswers()) return;
     await sleep(200);
   }
   log("The browser did not come up in a minute.");
 }
 
+/** The agent's own program, the largest file it will start: the one named `claude` among the harness's packages. */
+function harnessProgram() {
+  const packages = path.join(root, "agent/node_modules/@anthropic-ai");
+  try {
+    return readdirSync(packages).map((name) => path.join(packages, name, "claude")).find((file) => existsSync(file)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A spare has time before it has a task, and uses it: the agent's program is read off the disk once, so
+ * starting it later does not wait on a disk nothing has read yet, and the browser is opened.
+ */
+let warmed = false;
+function warmUp() {
+  if (warmed) return;
+  warmed = true;
+  log("No task yet: this desktop is a spare. Getting ready while it waits.");
+  const program = harnessProgram();
+  if (program) spawn("sh", ["-c", `cat ${shellQuote(program)} > /dev/null`], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+  sessionReady().then(() => start("chromium", ["about:blank"], {})).catch(() => {});
+}
+
 async function setupFromApi() {
+  let wait = 1000;
   while (true) {
     try {
       return await call("GET", "/api/desktop/setup");
     } catch (error) {
-      log("Could not read the setup:", error.message);
-      await sleep(error.status === 401 || error.status === 404 ? 30_000 : 3000);
+      wait = again(error, wait);
+      if (error.status === 404) warmUp();
+      else log("Could not read the setup:", error.message);
+      await sleep(wait);
     }
   }
 }

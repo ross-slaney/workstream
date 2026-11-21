@@ -46,6 +46,8 @@ public sealed class Desktop : IDisposable
 
     public Task<HttpResponseMessage> GetAsync(string path) => http.GetAsync(path);
 
+    public Task<HttpResponseMessage> PostAsync(string path, object body) => http.PostAsJsonAsync(path, body, Person.Json);
+
     /// <summary>A model call, as the agent's harness makes it: Anthropic's Messages API at the gateway's address.</summary>
     /// <param name="chunked">Send the body without saying its length, as some clients do.</param>
     public Task<HttpResponseMessage> AskModelAsync(bool stream = false, string key = "x-api-key", bool chunked = false)

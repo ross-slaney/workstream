@@ -104,6 +104,17 @@ export type TeamNumbers = {
   desktopHours: number;
 };
 
+/** What machines cost this month for one purpose: `task` (tasks' desktops) or `spare`. */
+export type MachineCost = { purpose: string; hours: number; usd: number };
+
+export type SpareNow = { teamId: string; teamName: string; size: string; state: string; since: string };
+
+/** The machines' time this month by purpose, the disks kept now at what that many cost a month, and the spares running now. */
+export type MachineCosts = { thisMonth: MachineCost[]; disks: number; disksMonthlyUsd: number; spares: SpareNow[] };
+
+/** Starts over the last seven days from one source (`image`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
+export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
+
 export type AdminOverview = {
   runningDesktops: number;
   teams: number;
@@ -114,6 +125,8 @@ export type AdminOverview = {
   running: RunningPoint[];
   desktops: RunningDesktop[];
   teamNumbers: TeamNumbers[];
+  machines: MachineCosts;
+  starts: StartTimes[];
 };
 
 const id = encodeURIComponent;
@@ -142,6 +155,11 @@ export const workstream = {
   deleteEnvironment: (environmentId: string) => apiSend<void>("DELETE", `/api/environments/${id(environmentId)}`),
 
   tasks: (teamId: string) => apiJson<ListPage<Task>>(`/api/teams/${id(teamId)}/tasks`),
+  /**
+   * Someone is in the team's workspace: the API keeps a desktop running for the task they may be about to
+   * start, so it starts at once. Nothing comes back, and whether one is made is the API's decision.
+   */
+  wantSpare: (teamId: string, environmentId?: string) => apiSend<void>("POST", `/api/teams/${id(teamId)}/spare`, { environmentId: environmentId ?? null }),
   startTask: (teamId: string, body: { id: string; environmentId: string; prompt: string; promptKey: string }) =>
     apiSend<Task>("POST", `/api/teams/${id(teamId)}/tasks`, body),
   renameTask: (taskId: string, title: string) => apiSend<Task>("PUT", `/api/tasks/${id(taskId)}`, { title }),

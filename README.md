@@ -4,6 +4,8 @@ Workstream gives each task its own cloud desktop with an AI agent working on it.
 
 A team shares its tasks and its environments. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent.
 
+Making a machine takes Azure from fifteen seconds to a minute. While someone is in a team's workspace, Workstream keeps one desktop running ahead of them, so the task they start begins on it at once.
+
 ## What is in this repository
 
 | Folder | What it is |
