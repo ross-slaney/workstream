@@ -53,10 +53,11 @@ const modelEnvironment = (setup, key) => ({
  * @param {(kind: "text" | "activity", text: string) => void} with.say
  * @param {(working: boolean) => void} with.setWorking
  * @param {{ take(signal: AbortSignal): Promise<string>, size: number }} with.prompts
+ * @param {() => Promise<void>} with.browserReady  Resolves when the desktop's browser can be driven.
  * @param {(...args: unknown[]) => void} with.log
  * @returns {{ interrupt(): void }}
  */
-export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, log }) {
+export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log }) {
   let current = null;
 
   const environment = { ...process.env, ...setup.variables, ...modelEnvironment(setup, key) };
@@ -89,8 +90,12 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     stderr: (line) => log("harness:", line.trimEnd()),
   });
 
-  /** The browser window comes to the front as the agent starts to use it. */
+  /**
+   * Before a browser tool runs: the browser is up (the agent may reach for it while the desktop is still
+   * drawing itself), and its window comes to the front.
+   */
   async function showBrowser() {
+    await browserReady();
     spawn("wmctrl", ["-x", "-a", "chromium"], { detached: true, stdio: "ignore", env: environment }).on("error", () => {}).unref();
     return {};
   }

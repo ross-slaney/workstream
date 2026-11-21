@@ -29,6 +29,10 @@ UseMTU=true
 SendHostname=false
 EOF
 
+# The boot loader does not stop to offer a menu nobody is there to see.
+printf 'GRUB_TIMEOUT=0\nGRUB_TIMEOUT_STYLE=hidden\n' > /etc/default/grub.d/99-workstream.cfg
+update-grub
+
 # No SSH: nothing reaches a desktop but the API's relay, on the display's port (infra/foundation.bicep).
 systemctl disable ssh.service
 rm -f /etc/ssh/ssh_host_*

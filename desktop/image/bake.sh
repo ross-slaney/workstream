@@ -19,7 +19,10 @@ export DEBIAN_FRONTEND=noninteractive HOME=/root
 # Azure starts this in a folder only root can read, which the desktop's own user is sent into by sudo.
 cd /
 log=/var/log/workstream-bake.log
-trap 'echo "The image was not built. Its last lines:"; tail -c 2500 "$log"' ERR
+# The steps below write to the log, and a step that fails is inside that redirection: what went wrong is
+# printed to where this script's own output goes, which is what Azure hands back.
+exec 3>&1
+trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >&3' ERR
 
 {
   apt-get update -q

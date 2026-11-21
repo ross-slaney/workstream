@@ -204,41 +204,52 @@ async function showApps(apps) {
   await saveState();
 }
 
-/** Make the desktop what its environment says, once. Answers the folder the agent works in. */
-async function prepare(setup) {
-  preparing = true;
-  try {
-    await writeVariables(setup.variables);
-    let workspace = path.join(home, "work");
-    await mkdir(workspace, { recursive: true });
-    if (setup.repository) {
-      const name = setup.repository.url.replace(/\/+$/, "").split("/").pop().replace(/\.git$/, "") || "repository";
-      const target = path.join(workspace, name);
-      if (!existsSync(target)) {
-        say("activity", `Cloning ${setup.repository.url}`);
-        const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
-        await run("git", args, { timeout: 15 * 60_000 }).catch((error) =>
-          say("text", `I could not clone the repository: ${String(error.stderr || error.message).trim().split("\n").slice(-3).join(" ")}`));
-      }
-      if (existsSync(target)) workspace = target;
+/** The part of preparing that needs no window: the variables and the repository. Answers the folder the agent works in. */
+async function prepareFiles(setup) {
+  await writeVariables(setup.variables);
+  let workspace = path.join(home, "work");
+  await mkdir(workspace, { recursive: true });
+  if (setup.repository) {
+    const name = setup.repository.url.replace(/\/+$/, "").split("/").pop().replace(/\.git$/, "") || "repository";
+    const target = path.join(workspace, name);
+    if (!existsSync(target)) {
+      say("activity", `Cloning ${setup.repository.url}`);
+      const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
+      await run("git", args, { timeout: 15 * 60_000 }).catch((error) =>
+        say("text", `I could not clone the repository: ${String(error.stderr || error.message).trim().split("\n").slice(-3).join(" ")}`));
     }
-    // Everything from here opens a window.
-    await sessionReady();
-    await showApps(setup.apps);
-    if (setup.setupScript && !state.prepared) {
-      say("activity", "Running the setup script");
-      const code = await runSetupScript(setup.setupScript, workspace, setup.variables);
-      if (code !== 0) say("text", `The setup script stopped with an error (exit ${code}). Its output is in ~/.workstream/setup.log.`);
-    }
-    state.prepared = true;
-    await saveState();
-    // The browser is always there: it is the one the agent's browser tools drive.
-    start("chromium", ["about:blank"], setup.variables);
-    if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
-    return workspace;
-  } finally {
-    preparing = false;
+    if (existsSync(target)) workspace = target;
   }
+  return workspace;
+}
+
+/**
+ * The part that opens windows, once XFCE is up: the environment's apps on the panel, the setup script in a
+ * terminal, then the browser and the editor.
+ */
+async function prepareWindows(setup, workspace) {
+  await sessionReady();
+  await showApps(setup.apps);
+  if (setup.setupScript && !state.prepared) {
+    say("activity", "Running the setup script");
+    const code = await runSetupScript(setup.setupScript, workspace, setup.variables);
+    if (code !== 0) say("text", `The setup script stopped with an error (exit ${code}). Its output is in ~/.workstream/setup.log.`);
+  }
+  state.prepared = true;
+  await saveState();
+  // The browser is always there: it is the one the agent's browser tools drive.
+  start("chromium", ["about:blank"], setup.variables);
+  if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
+}
+
+/** The browser is up when its debugging port answers, which is what the agent's browser tools attach to. */
+async function browserUp() {
+  for (let waited = 0; waited < 300; waited++) {
+    const up = await fetch("http://127.0.0.1:9222/json/version", { signal: AbortSignal.timeout(1000) }).then((response) => response.ok, () => false);
+    if (up) return;
+    await sleep(200);
+  }
+  log("The browser did not come up in a minute.");
 }
 
 async function setupFromApi() {
@@ -269,12 +280,22 @@ startWindow({
   onInterrupt: () => harness?.interrupt(),
   log,
 });
-const workspace = await prepare(setup);
+// The desktop is prepared in two parts. The agent waits for the first, which says where it works. It waits
+// for the second only when there is a setup script, whose result it must find in place; otherwise it
+// starts on what the person asked while XFCE is still drawing itself.
+preparing = true;
+const scripted = Boolean(setup.setupScript && !state.prepared);
+const workspace = await prepareFiles(setup);
+const windows = prepareWindows(setup, workspace).catch((error) => log("Preparing the desktop's windows failed:", error));
+if (scripted) await windows;
+preparing = false;
 const { startHarness } = await harnessLoading;
 harness = startHarness({
   setup, key, workspace, state, saveState, say, prompts, log,
   setWorking: (value) => {
     working = value;
   },
+  // A browser tool waits for the browser, which may still be opening when the agent first reaches for it.
+  browserReady: () => windows.then(browserUp),
 });
 log(`Ready. Working in ${workspace}.`);
