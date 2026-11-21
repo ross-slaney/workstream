@@ -30,22 +30,38 @@ public sealed class ModelOptions
 
     /// <summary>
     /// What each model costs, in US dollars per million tokens: input, output, and reading from the prompt
-    /// cache. Writing to the cache costs 1.25 times input. Foundry bills Claude at Anthropic's own rates.
-    /// Change these when the deployments change.
+    /// cache. Writing to the cache costs 1.25 times input when kept five minutes and twice input when kept an
+    /// hour. Haiku has a second, higher rate for a prompt over 100,000 tokens. Foundry bills Claude at
+    /// Anthropic's own rates. Change these when the deployments change.
     /// </summary>
-    static readonly Dictionary<string, (decimal Input, decimal Output, decimal CacheRead)> Prices = new(StringComparer.OrdinalIgnoreCase)
+    static readonly Dictionary<string, Price> Prices = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["claude-opus-5-5"] = (4m, 20m, 0.20m),
-        ["claude-sonnet-5-5"] = (2m, 10m, 0.10m),
-        ["claude-haiku-5-5"] = (0.10m, 0.50m, 0.01m),
+        ["claude-opus-5-5"] = new(4m, 20m, 0.20m),
+        ["claude-sonnet-5-5"] = new(2m, 10m, 0.10m),
+        ["claude-haiku-5-5"] = new(0.10m, 0.50m, 0.01m) { LongPrompt = new(0.50m, 2.50m, 0.05m) },
     };
 
-    /// <summary>A call's cost. A model this table does not know is priced as the most expensive one it does.</summary>
-    public decimal CostOf(string model, long input, long output, long cacheRead, long cacheWrite)
+    const long LongPromptTokens = 100_000;
+
+    sealed record Price(decimal Input, decimal Output, decimal CacheRead)
     {
-        var price = Prices.FirstOrDefault(x => model.StartsWith(x.Key, StringComparison.OrdinalIgnoreCase)).Value;
-        if (price == default) price = Prices["claude-opus-5-5"];
-        var cost = (input * price.Input + output * price.Output + cacheRead * price.CacheRead + cacheWrite * price.Input * 1.25m) / 1_000_000m;
+        /// <summary>The rate for a prompt longer than <see cref="LongPromptTokens"/>, where the model has one.</summary>
+        public Price? LongPrompt { get; init; }
+    }
+
+    /// <summary>
+    /// A call's cost. <paramref name="cacheWrite"/> is every token written to the cache, of which
+    /// <paramref name="cacheWriteHour"/> were written to be kept an hour. A model this table does not know is
+    /// priced as the most expensive one it does.
+    /// </summary>
+    public decimal CostOf(string model, long input, long output, long cacheRead, long cacheWrite, long cacheWriteHour = 0)
+    {
+        var price = Prices.FirstOrDefault(x => model.StartsWith(x.Key, StringComparison.OrdinalIgnoreCase)).Value ?? Prices["claude-opus-5-5"];
+        // The prompt is everything sent: what was read new, what came from the cache and what was written to it.
+        if (price.LongPrompt is { } longer && input + cacheRead + cacheWrite > LongPromptTokens) price = longer;
+        var hour = Math.Clamp(cacheWriteHour, 0, cacheWrite);
+        var cost = (input * price.Input + output * price.Output + cacheRead * price.CacheRead
+            + (cacheWrite - hour) * price.Input * 1.25m + hour * price.Input * 2m) / 1_000_000m;
         return decimal.Round(cost * Markup, 6);
     }
 }
@@ -178,7 +194,7 @@ public static class ModelGateway
             await using var scope = scopes.CreateAsyncScope();
             var record = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
             var model = usage.Model ?? options.Main;
-            var cost = options.CostOf(model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite);
+            var cost = options.CostOf(model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite, usage.CacheWriteHour);
             record.ModelUsage.Add(ModelUsage.Record(task.TeamId, task.Id, model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite, cost, clock.GetUtcNow()));
             await record.SaveChangesAsync(CancellationToken.None);
             if (cache.TryGetValue(AllowanceKey(task.TeamId), out decimal left)) cache.Set(AllowanceKey(task.TeamId), left - cost, AllowanceFor);
@@ -204,6 +220,8 @@ public static class ModelGateway
         public long Output { get; private set; }
         public long CacheRead { get; private set; }
         public long CacheWrite { get; private set; }
+        /// <summary>Of <see cref="CacheWrite"/>, the tokens written to be kept an hour, which cost more.</summary>
+        public long CacheWriteHour { get; private set; }
         public bool Any => Input + Output + CacheRead + CacheWrite > 0;
 
         public void Take(ReadOnlySpan<byte> bytes, bool events)
@@ -257,6 +275,8 @@ public static class ModelGateway
             if (Number(usage, "output_tokens") is { } output) Output = output;
             if (Number(usage, "cache_read_input_tokens") is { } cacheRead) CacheRead = cacheRead;
             if (Number(usage, "cache_creation_input_tokens") is { } cacheWrite) CacheWrite = cacheWrite;
+            if (usage.TryGetProperty("cache_creation", out var written) && written.ValueKind == JsonValueKind.Object
+                && Number(written, "ephemeral_1h_input_tokens") is { } hour) CacheWriteHour = hour;
         }
 
         static long? Number(JsonElement parent, string name) =>
