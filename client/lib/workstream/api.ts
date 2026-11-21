@@ -104,6 +104,17 @@ export type TeamNumbers = {
   desktopHours: number;
 };
 
+/** What machines cost this month for one purpose: `task` (tasks' desktops) or `spare`. */
+export type MachineCost = { purpose: string; hours: number; usd: number };
+
+export type SpareNow = { teamId: string; teamName: string; size: string; state: string; since: string };
+
+/** The machines' time this month by purpose, the disks kept now at what that many cost a month, and the spares running now. */
+export type MachineCosts = { thisMonth: MachineCost[]; disks: number; disksMonthlyUsd: number; spares: SpareNow[] };
+
+/** Starts over the last seven days from one source (`image`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
+export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
+
 export type AdminOverview = {
   runningDesktops: number;
   teams: number;
@@ -114,6 +125,8 @@ export type AdminOverview = {
   running: RunningPoint[];
   desktops: RunningDesktop[];
   teamNumbers: TeamNumbers[];
+  machines: MachineCosts;
+  starts: StartTimes[];
 };
 
 const id = encodeURIComponent;
