@@ -1,4 +1,4 @@
-import { credentialEnabled } from "@sqlos/headless";
+import { credentialEnabled, type HeadlessAuthorization, type UseHeadlessAuthResult } from "@sqlos/headless";
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -24,21 +24,54 @@ import type { SignInScreenProps } from "@/src/auth/sign-in-screen";
  *
  * A person on several teams is asked by SqlOS which one the session is for. The app does not care: every
  * request names its team in its address and is checked against it, so the first is chosen without asking.
+ *
+ * The steps themselves (`useSignInSteps`) are also how the command line's sign-in is approved
+ * (hooks/use-device-sign-in.ts): the same form over a flow that SqlOS began for the command line.
  */
 
 const words = translator("auth");
 
 type Intent = "login" | "signup";
+type Invitation = { teamId: string; teamName: string; email: string };
 
 const VERIFY_VIEWS = ["email-otp-verify", "invite-email-otp-verify"];
 
 export function useSignIn(initialIntent: Intent, after: string, invitationToken?: string): SignInScreenProps {
   const router = useRouter();
-  const { flow, status, view, viewModel, error, fieldErrors, authorization } = useHeadlessAuth({
+  const auth = useHeadlessAuth({
     issuer: getAuthServerUrl(),
     clientId: getSqlOsClientId(),
     redirectUri: getRedirectUri(),
   });
+  return useSignInSteps(auth, initialIntent, {
+    invitationToken,
+    // Given a token and no view, SqlOS answers with the invitation.
+    begin: (next) => auth.flow.start(invitationToken ? { scope: AUTH_SCOPE, invitationToken } : { scope: AUTH_SCOPE, view: next }),
+    // SqlOS ended the flow with a code: exchange it, keep the session, go on.
+    finish: async (authorization, invitation) => {
+      if (!authorization) throw new Error("Sign-in ended without a code.");
+      // A session this browser already holds (someone else's, or this person's from before) ends first.
+      if (getSession()) await signOut();
+      await completeAuthorization(authorization);
+      router.replace(invitation ? `/t/${encodeURIComponent(invitation.teamId)}` : after);
+    },
+  });
+}
+
+export type SignInSteps = {
+  /** Starts the flow the form steps through, and starts it again for another address or the other form. */
+  begin: (intent: Intent) => Promise<unknown>;
+  /** SqlOS ended the flow with a redirect, with a code or without one. A throw shows that sign-in did not work. */
+  finish: (authorization: HeadlessAuthorization | null, invitation: Invitation | null) => Promise<void>;
+  invitationToken?: string;
+};
+
+/** The sign-in form's steps over a headless flow: which fields are on screen, what submitting does, and when it is done. */
+export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Intent, steps: SignInSteps): SignInScreenProps {
+  const { flow, status, view, viewModel, error, fieldErrors, authorization } = auth;
+  const { invitationToken } = steps;
+  const latest = useRef(steps);
+  latest.current = steps;
   const [intent, setIntent] = useState<Intent>(initialIntent);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -47,14 +80,12 @@ export function useSignIn(initialIntent: Intent, after: string, invitationToken?
   const [localError, setLocalError] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
   // The invitation SqlOS resolved from the token, kept once known: later views do not repeat it.
-  const [invitation, setInvitation] = useState<{ teamId: string; teamName: string; email: string } | null>(null);
+  const [invitation, setInvitation] = useState<Invitation | null>(null);
   const started = useRef(false);
   const exchanging = useRef(false);
   const choosing = useRef(false);
 
   const invited = invitationToken ? { invitationToken } : {};
-  // Given a token and no view, SqlOS answers with the invitation.
-  const begin = (next: Intent) => flow.start(invitationToken ? { scope: AUTH_SCOPE, invitationToken } : { scope: AUTH_SCOPE, view: next });
   const restart = async (next: Intent) => {
     setIntent(next);
     setCode("");
@@ -63,13 +94,13 @@ export function useSignIn(initialIntent: Intent, after: string, invitationToken?
     setFinishing(false);
     exchanging.current = false;
     choosing.current = false;
-    await begin(next);
+    await latest.current.begin(next);
   };
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void begin(intent);
+    void latest.current.begin(intent);
     // The flow starts once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow]);
@@ -79,22 +110,17 @@ export function useSignIn(initialIntent: Intent, after: string, invitationToken?
     if (found) setInvitation({ teamId: found.organizationId, teamName: found.organizationName, email: found.email });
   }, [viewModel?.invitation]);
 
-  // SqlOS ended the flow with a code: exchange it, keep the session, go on.
+  // SqlOS ended the flow: whoever began it says what that means.
   useEffect(() => {
-    if (status !== "redirect" || !authorization || exchanging.current) return;
+    if (status !== "redirect" || exchanging.current) return;
     exchanging.current = true;
     setFinishing(true);
-    void (async () => {
-      // A session this browser already holds (someone else's, or this person's from before) ends first.
-      if (getSession()) await signOut();
-      await completeAuthorization(authorization);
-      router.replace(invitation ? `/t/${encodeURIComponent(invitation.teamId)}` : after);
-    })().catch(() => {
+    void latest.current.finish(authorization, invitation).catch(() => {
       setLocalError(words("errors.failed"));
       setFinishing(false);
       exchanging.current = false;
     });
-  }, [status, authorization, router, after, invitation]);
+  }, [status, authorization, invitation]);
 
   // On several teams: the session is for the one that invited them, else the first. The app asks for a team
   // by its address, not by the session.

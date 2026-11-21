@@ -29,6 +29,8 @@ Any column that names an actor holds a principal id.
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
 
+A person's command line (`cli/workstream.mjs`) is not a principal of its own. It holds a SqlOS session of the person's, made by the `workstream-cli` client, so it is the `user` with the person's grants and nothing more; what tells it apart is the scope its token carries (below).
+
 ## Resource tree: what, and under what
 
 ```text
@@ -65,6 +67,16 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model. |
 | `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
+
+## Scopes
+
+A scope is the client's ceiling, not a decision about a node: a token without a scope is refused that kind of route before anything is loaded, and a token with it still needs the permission on the node. SqlOS grants a sign-in the scopes both requested and allowed for its client.
+
+| Scope | Allows | Clients |
+| --- | --- | --- |
+| `workstream.read` | Every `GET` under `/api`. Required on every token. | `workstream-app`, `workstream-cli` |
+| `workstream.write` | Every other route under `/api`, and the desktop's display (`/api/tasks/{id}/desktop`), which carries the mouse and the keyboard. | `workstream-app` |
+| `workstream.start` | Starting a task (`POST /api/teams/{id}/tasks`), and no other change. | `workstream-cli` |
 
 ## Roles
 
@@ -153,13 +165,25 @@ Making a machine takes Azure from fifteen seconds to a minute, and nothing Works
 
 The limits are settings (`Workstream:Desktops:Spares`): one spare a team, so many running at once over every team, so many hours of spare time a day, and none for a team already at its limit of running desktops. A spare is never given to another team.
 
+### The command line
+
+A person's own computer, a local Claude Code for instance, starts tasks with `cli/workstream.mjs`, as the person.
+
+1. `workstream login --api <the API>` reads `GET /cli` (public: the issuer, the `workstream-cli` client, its scopes, the token's audience and the web app's address) and checks that the issuer and the audience are that API's own. It asks SqlOS for a device code (`/sqlos/auth/device_authorization`) and prints the link and the code.
+2. The link opens SqlOS, which hands the browser to the web app's device page (`/device?request=…`, `client/app/device.tsx`). Signed out, the person signs in there with the same form as the sign-in page, inside the device request. The page shows the code and what the command line may do; the person allows it or not.
+3. The command line's next poll of `/sqlos/auth/token` gets an access token and a refresh token for a new session of the person's, with `workstream.read` and `workstream.start`. They are kept in `~/.config/workstream/`, readable by that user alone, and refreshed there.
+4. `workstream start` lists the person's teams and the team's environments (reads), starts the task (`TEAM_CREATE_TASK` on the team, `ENVIRONMENT_VIEW` on the environment, as from the web app), prints the task's link in the web app and follows the task until its desktop is ready. `CreatedBy` is the person.
+5. `workstream logout` ends the session at SqlOS (`/sqlos/auth/logout`), so its tokens stop working everywhere at once. Like any of the person's sessions, it also ends when it goes unused past SqlOS's idle limit, and when the person leaves the team it was approved for.
+
+The device page sends SqlOS's session cookie with its requests (the app's own sign-in does not), because approving a device needs SqlOS to know who is approving. The command line's tokens never reach the browser.
+
 ### Talk to the agent
 
 A person's message is a row in `TaskMessages`. The desktop exchanges with the API about once a second: it sends what the agent said and did, and receives what people wrote since its last exchange. The agent's messages are rows written as the desktop's service account. Every model call the agent makes goes to the API's model gateway with the desktop's key; the gateway checks `TASK_RUN_AGENT`, checks the team's allowance, forwards the call to Foundry and records its usage.
 
 ### Watch and use the desktop
 
-The browser opens a WebSocket to `GET /api/tasks/{id}/desktop`, carrying the person's access token. The API validates the token, checks `TASK_USE` on the task, connects to the desktop's display on its private address, and relays bytes both ways, from the moment the display answers until the desktop is asked to stop. It checks again every minute and closes the stream when access is gone. Desktops accept connections only from the API.
+The browser opens a WebSocket to `GET /api/tasks/{id}/desktop`, carrying the person's access token. The API validates the token, which must carry `workstream.write` (the command line's cannot open a desktop), checks `TASK_USE` on the task, connects to the desktop's display on its private address, and relays bytes both ways, from the moment the display answers until the desktop is asked to stop. It checks again every minute and closes the stream when access is gone. Desktops accept connections only from the API.
 
 ### Stop, start, delete
 
@@ -175,8 +199,9 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 - **The desktop is a principal, and its task is a grant.** The agent's key identifies one service account. The account holds `task_desktop` on the one task it works on, so a key taken from a desktop reaches that task and nothing else, and stops working when the task is deleted. The key carries no task: the API finds the task by the grant, which is why a spare can become a task's desktop without being told anything new.
 - **The API is the only way into a desktop.** Desktops have no inbound access from the internet or from each other. The relay authorizes every stream.
 - **All inference goes through the gateway.** The Foundry key never leaves the API. Usage is recorded where it is spent.
+- **The command line signs in through the browser with SqlOS's device flow, not with an API key and not with a loopback redirect.** SqlOS has a client for exactly this (`SeedCliClient`: public, no secret, the device and refresh grants, an allow-list of scopes and one audience), and its headless flow has the device steps (`/headless/device/resolve`, `approve`, `deny`), so the approval is one more page of the web app over the sign-in it already has. The token is the person's own session, so the command line has the person's grants as they are now, and loses them when the person does. An API key in SqlOS is a machine client bound to a service account, a principal of its own: to act as the person it would need grants copied from theirs on every team and kept in step with their memberships, a stored copy of access that the rules forbid. Authorization code with PKCE on a loopback address would also work in SqlOS, but it needs a free local port and a browser on the same machine, and the web app's sign-in would have to finish another client's request; the device flow needs neither, so it also works over SSH, in a container or on a dev VM. A scope of its own (`workstream.start`) keeps the command line to reading and starting tasks: a token taken from a laptop cannot stop, delete, rename or write to a task, change a team, or open a desktop.
 - **The agent is Workstream's own, on the Claude Agent SDK.** Anthropic's terms for hosting Claude Code itself require each end user to bring their own credential; products built on the Agent SDK use the developer's API key or cloud provider. Claude Code is not wired to Workstream's inference.
 
 ## Not built yet
 
-Payments, API keys for integrations, single sign-on, a private task inside a shared team, view-only watching, Windows desktops.
+Payments, API keys for integrations, single sign-on, a private task inside a shared team, view-only watching, Windows desktops, a list in the web app of the command lines a person has signed in, to sign one out from there.

@@ -15,8 +15,8 @@ namespace Workstream.Api.Desktops;
 /// client speaks to the desktop's display through it, and this relay copies bytes both ways without reading
 /// them. What it does read is who is asking: a browser cannot put a bearer token on a WebSocket, so the token
 /// rides in the requested subprotocols as <c>bearer.{token}</c> beside <c>binary</c>, and is validated the way
-/// SqlOS validates it on any request. Then <c>TASK_USE</c> on the task, checked again every minute for as long
-/// as the stream stays open.
+/// SqlOS validates it on any request, and must carry the write scope. Then <c>TASK_USE</c> on the task, checked
+/// again every minute for as long as the stream stays open.
 /// </summary>
 public static class DesktopRelay
 {
@@ -44,7 +44,9 @@ public static class DesktopRelay
         var raw = http.WebSockets.WebSocketRequestedProtocols.FirstOrDefault(p => p.StartsWith(TokenProtocol, StringComparison.Ordinal))?[TokenProtocol.Length..];
         var token = raw is null ? null : await services.GetRequiredService<SqlOSAuthService>().ValidateAccessTokenAsync(raw, app.Resource, http.RequestAborted);
         if (token is not { UserId.Length: > 0, SessionId.Length: > 0 }
-            || !(token.Scope ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(WorkstreamApp.ReadScope))
+            // Watching is also using: the stream carries the mouse and the keyboard. So it takes the web app's
+            // write scope, and the command line's token, which reads and starts tasks, cannot open it.
+            || !(token.Scope ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(WorkstreamApp.WriteScope))
         {
             http.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
