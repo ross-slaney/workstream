@@ -49,9 +49,6 @@ export function LandingPage({ signInHref, startHref }: LandingPageProps) {
               </a>
             </div>
           </div>
-          <figure className="mt-12 overflow-hidden rounded-xl border border-border bg-canvas shadow-[0_24px_60px_-30px_rgba(15,23,42,0.35)]">
-            <img src="/images/dashboard.png" alt={t("hero.pictureAlt")} width={2400} height={1400} className="block h-auto w-full" />
-          </figure>
         </section>
 
         <section id="how" className="border-y border-border bg-canvas">
