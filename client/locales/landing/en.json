@@ -62,8 +62,8 @@
         "body": "Everyone on the team can open a running task, read what the agent did, and take over its desktop. Reviews start before the pull request."
       },
       "control": {
-        "title": "Limits you set, usage you can see",
-        "body": "Each task runs on its own isolated machine. An administrator sets how many run at once and what the team may spend on models, and sees what was used."
+        "title": "Limits, and usage everyone can see",
+        "body": "Each task runs on its own isolated machine. A team has a limit on how many run at once and a monthly allowance for AI models, and anyone on the team can see what has been used."
       }
     }
   },
