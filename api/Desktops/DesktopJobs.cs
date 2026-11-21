@@ -59,6 +59,17 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 task.Fail(WordsFor(error), now);
                 await EndRunAsync(db, task.Id, now, ct);
             }, ct);
+            // A desktop that failed costs nothing: whatever part of a new machine was made is removed, and a
+            // machine that would not start again is released. Starting the task again begins from there.
+            try
+            {
+                if (spec is not null) await host.DeleteAsync(spec.Name, ct);
+                else await host.StopAsync(existing!, ct);
+            }
+            catch (Exception cleanup) when (cleanup is not OperationCanceledException)
+            {
+                log.LogWarning(cleanup, "The machine of task {TaskId} could not be cleared after its start failed.", taskId);
+            }
             return;
         }
 

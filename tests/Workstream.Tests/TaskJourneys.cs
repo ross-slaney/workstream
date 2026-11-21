@@ -196,8 +196,9 @@ public sealed class TaskJourneys
         var failed = await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}");
         Assert.AreEqual("failed", failed.State);
         Assert.IsFalse(string.IsNullOrWhiteSpace(failed.Failure));
-        // A failed desktop holds no place against the limit.
+        // A failed desktop holds no place against the limit, and whatever was made of its machine is removed.
         Assert.AreEqual(0, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).RunningDesktops);
+        CollectionAssert.Contains(Stack.Desktops.Deleted.ToList(), DesktopHosting.NameFor(task.Id));
 
         Stack.Desktops.Refuse.TryRemove(task.Id, out _);
         Assert.AreEqual("starting", (await ada.PostAsync<TaskDto>($"/api/tasks/{task.Id}/start")).State);

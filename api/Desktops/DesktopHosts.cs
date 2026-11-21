@@ -225,10 +225,17 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
 
     static string NicName(string machine) => $"{machine}-nic";
 
-    /// <summary>The machine's private address, read from Azure and never from the machine itself.</summary>
+    /// <summary>
+    /// The machine's private address, read from Azure and never from the machine itself. Azure names the
+    /// network interface it makes with a machine itself, starting from the name asked for, so the interface is
+    /// found through the machine.
+    /// </summary>
     async Task<string> AddressAsync(string machine, CancellationToken ct)
     {
-        using var response = await SendAsync(HttpMethod.Get, $"{Group}/providers/Microsoft.Network/networkInterfaces/{NicName(machine)}?api-version={NetworkApi}", null, ct);
+        using var found = await SendAsync(HttpMethod.Get, $"{Machine(machine)}?api-version={ComputeApi}", null, ct);
+        var interfaceId = JsonNode.Parse(await found.Content.ReadAsStringAsync(ct))!["properties"]?["networkProfile"]?["networkInterfaces"]?[0]?["id"]?.GetValue<string>()
+            ?? throw new InvalidOperationException($"The machine {machine} has no network interface.");
+        using var response = await SendAsync(HttpMethod.Get, $"https://management.azure.com{interfaceId}?api-version={NetworkApi}", null, ct);
         var nic = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
         var address = nic["properties"]?["ipConfigurations"]?[0]?["properties"]?["privateIPAddress"]?.GetValue<string>()
             ?? throw new InvalidOperationException($"The machine {machine} has no private address yet.");
