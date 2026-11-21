@@ -10,6 +10,7 @@ This document defines who can do what to what. It is written in SqlOS terms firs
 | --- | --- |
 | Team | A group of people who share tasks and environments. A person who signs up gets a team of their own. Someone who creates their account from an invitation joins that team and gets none of their own. Anyone can create another. |
 | Environment | What a desktop comes with: its apps and, optionally, a repository, a setup script, variables and instructions for the agent. |
+| Saved setup | An environment's repository cloned and setup script run once, on a machine made only for that, whose disk is kept. A task's desktop starts from it with the setup already done. |
 | Task | One piece of work. It has a desktop and a conversation with the agent on that desktop. |
 | Desktop | The task's cloud computer: a Linux virtual machine with a graphical desktop. |
 | Agent | The program on the desktop that does the work. It is built on the Claude Agent SDK and calls models only through Workstream. |
@@ -25,7 +26,8 @@ Any column that names an actor holds a principal id.
 | `group` | A team's people | `group::{teamId}` | Mirrors the team's memberships. Joining the team is joining its group. |
 | `group` | System administrators | `group::system_admins` | Seeded. Its members belong to the platform, not to a team. |
 | `service_account` | A desktop | `service_account::desktop-{desktopId}` | What the agent on that desktop signs in as, with a key only that desktop holds. The id is the task's for a desktop made for a task, and the spare's own for a spare. The key says which desktop is calling; what it may do is the grant below. |
-| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops and keep a team's spare. No credential: the jobs run in the API process. |
+| `service_account` | The machine preparing an environment | `service_account::desktop-{setupId}` | One for each environment, with an id made from the environment's id (`EnvironmentSetup.DesktopIdFor`), so it is never a task's or a spare's. Each attempt to prepare gives it a new key, so a machine from an earlier attempt cannot speak for the current one. |
+| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare and prepare environments. No credential: the jobs run in the API process. |
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
 
@@ -36,7 +38,7 @@ root                          system_admin    -> group::system_admins
 │                             desktop_operator -> agent::desktop-operator
 └── team::{teamId}            team_member     -> group::{teamId}
     │                         team_admin      -> each administrator
-    ├── environment::{id}
+    ├── environment::{id}     environment_setup -> service_account::desktop-{setupId}
     └── task::{id}            task_desktop    -> service_account::desktop-{taskId}
 ```
 
@@ -58,23 +60,26 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TEAM_CREATE_ENVIRONMENT` | team | Add an environment. |
 | `TEAM_CREATE_TASK` | team | Start a task. |
 | `ENVIRONMENT_VIEW` | environment | See an environment and start tasks from it. Variable values are never returned. |
-| `ENVIRONMENT_EDIT` | environment | Change or delete it, including its variables. |
+| `ENVIRONMENT_EDIT` | environment | Change or delete it, including its variables, and ask for its setup to be prepared again. |
 | `TASK_VIEW` | task | See the task and read its conversation. |
 | `TASK_USE` | task | Send messages, interrupt the agent, and watch and control the desktop. |
 | `TASK_MANAGE` | task | Rename, stop, start and delete it. |
 | `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model. |
 | `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
+| `ENVIRONMENT_RUN_SETUP` | environment | The preparing desktop's own: read the environment's setup, with its variables, and say how it went. |
+| `ENVIRONMENT_OPERATE_SETUP` | environment | The operator's own: make the machine that prepares the environment, save its disk, and remove both. |
 
 ## Roles
 
 | Role | Granted on | To | Carries |
 | --- | --- | --- | --- |
 | `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits. Nothing inside a team. |
-| `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE` |
+| `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE`, `ENVIRONMENT_OPERATE_SETUP` |
 | `team_member` | team | the team's group | `TEAM_VIEW`, `TEAM_VIEW_USAGE`, `TEAM_CREATE_ENVIRONMENT`, `TEAM_CREATE_TASK`, `ENVIRONMENT_VIEW`, `ENVIRONMENT_EDIT`, `TASK_VIEW`, `TASK_USE`, `TASK_MANAGE` |
 | `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS` |
 | `task_desktop` | task | the desktop that works on the task | `TASK_RUN_AGENT` |
+| `environment_setup` | environment | the environment's preparing account | `ENVIRONMENT_RUN_SETUP` |
 
 Everyone on a team can see, use and manage every task and environment in it. Work a person wants to keep to themselves goes in their own team.
 
@@ -92,6 +97,9 @@ Everyone on a team can see, use and manage every task and environment in it. Wor
 | A task starts on a spare | The spare's service account is granted `task_desktop` on the task. Nothing else changes hands: the machine keeps the key it has. |
 | A spare is removed unused | Its service account is expired. It never held a grant. |
 | A task is deleted | Every desktop account that holds `task_desktop` on the task is expired, and the task's node is removed, with the grants on it. |
+| An environment is prepared | Its preparing account is provisioned the first time and granted `environment_setup` on the environment, once; each attempt issues it a new key. |
+| An attempt to prepare ends (saved, failed, too long) | The preparing account is expired. Its grant stays, and opens nothing while the account is expired. |
+| An environment is deleted | Its preparing account is expired, and the environment's node is removed, with the grant on it. |
 
 Grants are derived from these events. Nothing revokes "the grant this action made".
 
@@ -105,6 +113,7 @@ Grants are derived from these events. Nothing revokes "the grant this action mad
 | A task's messages | `TaskMessages` of the task, after an id | `TASK_VIEW` | `Id` |
 | Desktops the operator sweeps | `Tasks` | `TASK_OPERATE_DESKTOP` | `Id` |
 | The task a desktop works on | `Tasks` | `TASK_RUN_AGENT`, as the desktop | `Id`, first one |
+| The environment a desktop prepares | `Environments` | `ENVIRONMENT_RUN_SETUP`, as the desktop | `Id`, first one |
 
 A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Usage and the administrator's numbers are sums, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
 
@@ -113,10 +122,11 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | Table | Holds | Why it is app data |
 | --- | --- | --- |
 | `Teams` | The node, the month's model allowance, the limit on running desktops. | Limits are numbers, not access. |
-| `Environments` | Name, apps, size, repository, setup script, instructions, protected variables. | Configuration. |
+| `Environments` | Name, apps, size, repository, setup script, instructions, protected variables, and `SetupInputs`: a SHA-256 of the repository, branch, script, variables and apps, written where the environment is written, because that is the one place the variables are readable. | Configuration. |
+| `EnvironmentSetups` | An environment's saved setup (the snapshot's name, the inputs and image version it was made for, its commit, its size, when it was made and last used) and the attempt to prepare it in progress or how the last one failed. One row an environment, deleted with it. | The operator's stock and a lifecycle, like `Spares`: nobody is granted on it, and seeing it is seeing the environment. |
 | `Tasks` | Title, environment, who created it (a principal id, a fact), the desktop's state and address. | The desktop's lifecycle. |
 | `TaskMessages` | The conversation. | Content. |
-| `DesktopRuns` | When each machine ran, what for (a task's desktop, a spare), what a task's start began from, and when each step of it happened. | Usage, cost, and how long starts take. |
+| `DesktopRuns` | When each machine ran, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own stopped machine), and when each step of it happened. | Usage, cost, and how long starts take. |
 | `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
 | `ModelUsage` | Tokens and cost of each model call. | Usage. |
 
@@ -153,6 +163,18 @@ Making a machine takes Azure from fifteen seconds to a minute, and nothing Works
 
 The limits are settings (`Workstream:Desktops:Spares`): one spare a team, so many running at once over every team, so many hours of spare time a day, and none for a team already at its limit of running desktops. A spare is never given to another team.
 
+### Prepare an environment
+
+Cloning a repository and running a setup script can take minutes on every new desktop. An environment with a repository or a setup script is prepared instead: the setup is done once, on a machine of its own, and that machine's disk is saved for the environment's tasks to start from.
+
+1. Something asks for it: the environment is added with a setup, or its setup inputs change; someone presses "Prepare again" (`POST /api/environments/{id}/setup`, `ENVIRONMENT_EDIT`); or a task starts and finds no save it can use (it is not asked again for settings whose last attempt failed), or finds one older than a week (the task uses the old one, and the new one is made behind it).
+2. The operator (`ENVIRONMENT_OPERATE_SETUP` on the environment) makes a machine when the limits allow (`Workstream:Desktops:Saves`: one preparing at once, four hours of preparing a day, 45 minutes at most each). The machine is told the API's address and a new key for the environment's preparing account, which holds `environment_setup` on the environment and nothing else. Its time is a `DesktopRun` with the purpose `prepare`.
+3. The machine's agent reads its setup (`GET /api/desktop/setup`, found by its page of environments with `ENVIRONMENT_RUN_SETUP`), which says it is preparing and carries no task and no model. It clones the repository, runs the setup script, and says how it is going (`POST /api/desktop/setup`). Before it says it is done it removes everything of the preparing from the disk: the variables, the git token, the logs and the browser's profile. It leaves one file saying when and at which commit it was prepared.
+4. Only when the script exits 0, the operator stops the machine, saves its disk as a snapshot, removes the machine, ends the key, and removes the save it replaces: an environment keeps one. A failed attempt keeps nothing, and its machine is removed.
+5. A save is used only for the setup inputs it was made from and the desktops' image version it was made on (`Workstream:Desktops:Azure:ImageId`). A task whose environment has such a save gets a machine made from it; its run's source is `save`, its agent pulls the branch's newer commits and does not run the setup script, and its first line says where it started from. Any other task starts from the image and does the setup itself, as before.
+
+A save nothing has started from for 30 days is deleted. Deleting the environment deletes its save, and ends a preparing machine's key. The sweep deletes any snapshot no environment knows and any machine no task and no attempt knows.
+
 ### Talk to the agent
 
 A person's message is a row in `TaskMessages`. The desktop exchanges with the API about once a second: it sends what the agent said and did, and receives what people wrote since its last exchange. The agent's messages are rows written as the desktop's service account. Every model call the agent makes goes to the API's model gateway with the desktop's key; the gateway checks `TASK_RUN_AGENT`, checks the team's allowance, forwards the call to Foundry and records its usage.
@@ -179,4 +201,4 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 
 ## Not built yet
 
-Payments, API keys for integrations, single sign-on, a private task inside a shared team, view-only watching, Windows desktops.
+Payments, API keys for integrations, single sign-on, a private task inside a shared team, view-only watching, Windows desktops, a saved setup for a spare.

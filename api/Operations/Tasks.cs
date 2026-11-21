@@ -30,10 +30,14 @@ public sealed record DesktopRepository(string Url, string? Branch);
 /// <summary>Where the agent calls models, and which: every call goes through this API with the desktop's key.</summary>
 public sealed record DesktopModel(string BaseUrl, string Main, string Sonnet, string Small);
 
-/// <summary>Everything a desktop needs to set itself up, read with its key each time it starts.</summary>
+/// <summary>
+/// Everything a desktop needs to set itself up, read with its key each time it starts. A desktop that
+/// <see cref="Prepare"/>s is doing an environment's setup to be saved: it has no task (<see cref="TaskId"/> is
+/// empty), no instructions and no model, and <see cref="Title"/> is the environment's name.
+/// </summary>
 public sealed record DesktopSetup(
     string TaskId, string Title, IReadOnlyList<string> Apps, DesktopRepository? Repository, string? SetupScript,
-    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel Model);
+    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false);
 
 public static partial class Operations
 {
@@ -97,8 +101,12 @@ public static partial class Operations
             // The team's spare, when it has one that is up and fits: the task starts on a desktop that is
             // already running. Taking it and making the task are one transaction, so a machine is never
             // between owners where the sweep could see it as nobody's.
+            // What a new machine for the task would start from: the environment's saved setup when it is good
+            // for these settings and these desktops, otherwise the image. The start job decides it again.
+            var setup = await db.Setups.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentId == environment.Id, ct);
+            var save = options.Saves.Enabled && setup?.Serves(environment, options.ImageVersion) == true ? setup.Save : null;
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var spare = await TakeSpareAsync(db, teamId, environment, options, now, ct);
+            var spare = await TakeSpareAsync(db, teamId, environment, save, options, now, ct);
             db.Tasks.Add(task);
             var run = DesktopRun.Begin(task, now, spare is null ? StartSource.Image : StartSource.Spare);
             db.DesktopRuns.Add(run);
@@ -259,6 +267,7 @@ public static partial class Operations
     {
         if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is not { } task)
         {
+            if (await PreparingAsync(desktop, db, ct) is { } preparing) return Outcome<DesktopSetup>.Ok(PrepareSetupOf(preparing.Environment, protection));
             await SpareAskedAsync(desktop, db, ct);
             return Outcome<DesktopSetup>.NotFound();
         }

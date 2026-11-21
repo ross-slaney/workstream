@@ -146,7 +146,8 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             setup.Property(x => x.SaveImage).HasMaxLength(40);
             setup.Property(x => x.SaveCommit).HasMaxLength(64);
             setup.Property(x => x.SaveCommitPending).HasMaxLength(64);
-            setup.Property(x => x.RunId).HasMaxLength(36);
+            // Whoever begins or ends an attempt changes this, and only from what it read: two never both win.
+            setup.Property(x => x.RunId).HasMaxLength(36).IsConcurrencyToken();
             setup.Property(x => x.RunHost).HasMaxLength(100);
             setup.Property(x => x.RunInputs).HasMaxLength(64);
             setup.Property(x => x.RunImage).HasMaxLength(40);

@@ -6,7 +6,7 @@ import { CheckField, SelectField, TextArea, TextField } from "@/components/kit/f
 import { EmptyState, ErrorNote, ReadState } from "@/components/kit/status";
 import { useTheme } from "@/components/theme/theme";
 import { useT } from "@/lib/i18n";
-import type { DesktopSize, Environment } from "@/lib/workstream/api";
+import type { DesktopSize, Environment, EnvironmentSetup } from "@/lib/workstream/api";
 import { SettingsPage } from "../page";
 import type { EnvironmentDraft, EnvironmentsScreenProps } from "./props";
 
@@ -45,6 +45,7 @@ function EnvironmentRow({ environment, onEdit }: { environment: Environment; onE
     environment.repositoryUrl ? t("environments.hasRepository", { repository: environment.repositoryUrl.replace(/^https:\/\/(www\.)?/, "") }) : null,
     environment.setupScript ? t("environments.hasSetup") : null,
     environment.variableNames.length > 0 ? t("environments.variablesCount", { count: environment.variableNames.length }) : null,
+    environment.setup.state === "nothing" ? null : t(`environments.setupFact.${environment.setup.state}`),
   ].filter(Boolean);
   return (
     <button type="button" onClick={onEdit} className="flex w-full flex-col gap-1 rounded-lg border border-border bg-card px-4 py-3 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
@@ -166,7 +167,71 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
           <TextArea label={t("environments.editor.instructions")} hint={t("environments.editor.instructionsHint")} placeholder={t("environments.editor.instructionsPlaceholder")} value={draft.instructions} onChangeText={(instructions) => set({ instructions })} rows={4} />
         </div>
       </details>
+      {p.editor.setup ? <SetupSection setup={p.editor.setup} preparing={p.editor.preparing} error={p.editor.prepareError} onPrepare={p.onPrepare} /> : null}
       <ErrorNote message={error} />
     </Dialog>
+  );
+}
+
+const moment = (at: string) => new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const dollars = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+const gigabytes = (bytes: number) => (Math.round((bytes / 1024 ** 3) * 10) / 10).toLocaleString();
+
+/** What the Setup section says, from how the setup stands. */
+function setupWords(t: ReturnType<typeof useT<"settings">>, setup: EnvironmentSetup): string {
+  switch (setup.state) {
+    case "nothing":
+      return t("environments.setup.nothing");
+    case "not_prepared":
+      return t("environments.setup.notPrepared");
+    case "preparing":
+      return setup.startedAt ? t("environments.setup.preparing", { since: moment(setup.startedAt) }) : t("environments.setup.waiting");
+    case "prepared":
+      return setup.commit
+        ? t("environments.setup.preparedAt", { when: moment(setup.preparedAt ?? ""), commit: setup.commit.slice(0, 7) })
+        : t("environments.setup.prepared", { when: moment(setup.preparedAt ?? "") });
+    case "out_of_date":
+      return setup.because === "desktop" ? t("environments.setup.outOfDateDesktop") : t("environments.setup.outOfDateSetup");
+    case "failed":
+      return t("environments.setup.failed", { failure: setup.failure ?? "" });
+  }
+}
+
+/**
+ * The environment's prepared setup, as it stands: the repository cloned and the setup script run once on a
+ * desktop of its own, whose disk its tasks start from. What it says is the saved environment's, not the draft's.
+ */
+function SetupSection({ setup, preparing, error, onPrepare }: { setup: EnvironmentSetup; preparing: boolean; error: string | null; onPrepare: () => void }) {
+  const t = useT("settings");
+  const output = setup.state === "preparing" || setup.state === "failed" ? setup.output : null;
+  const canPrepare = setup.state !== "nothing" && setup.state !== "preparing";
+  return (
+    <section aria-labelledby="environment-setup" className="flex flex-col gap-2 rounded-lg border border-border px-4 py-3">
+      <h3 id="environment-setup" className="text-sm font-semibold text-foreground">
+        {t("environments.setup.title")}
+      </h3>
+      <p className="text-[13px] text-muted-foreground">{t("environments.setup.hint")}</p>
+      <p className="text-sm text-foreground" role="status">
+        {setupWords(t, setup)}
+      </p>
+      {setup.state === "prepared" && setup.bytes > 0 ? (
+        <p className="text-[13px] text-muted-foreground">{t("environments.setup.kept", { gigabytes: gigabytes(setup.bytes), cost: dollars(setup.monthlyUsd) })}</p>
+      ) : null}
+      {output ? (
+        <pre aria-label={t("environments.setup.output")} className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground">
+          {output.split("\n").slice(-12).join("\n")}
+        </pre>
+      ) : null}
+      {canPrepare ? (
+        <Button
+          label={setup.state === "not_prepared" ? t("environments.setup.prepare") : t("environments.setup.prepareAgain")}
+          size="small"
+          className="self-start"
+          busy={preparing}
+          onClick={onPrepare}
+        />
+      ) : null}
+      <ErrorNote message={error} />
+    </section>
   );
 }

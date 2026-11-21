@@ -7,7 +7,7 @@ public enum SetupStanding
     NothingToPrepare,
     /// <summary>Never prepared, or its save is gone. Tasks clone and run the setup themselves, each time.</summary>
     NotPrepared,
-    /// <summary>A machine is doing the setup now, or its disk is being saved.</summary>
+    /// <summary>A machine is doing the setup now, or its disk is being saved, or one is wanted and waits for a machine.</summary>
     Preparing,
     /// <summary>Tasks start from the save.</summary>
     Prepared,
@@ -88,7 +88,7 @@ public sealed class EnvironmentSetup
     public SetupStanding StandingFor(WorkEnvironment environment, string image)
     {
         if (!environment.HasSetup) return SetupStanding.NothingToPrepare;
-        if (IsPreparing) return SetupStanding.Preparing;
+        if (IsPreparing || WantedAt is not null) return SetupStanding.Preparing;
         if (Serves(environment, image)) return SetupStanding.Prepared;
         if (Failure is not null) return SetupStanding.Failed;
         return Save is not null ? SetupStanding.OutOfDate : SetupStanding.NotPrepared;
@@ -100,8 +100,25 @@ public sealed class EnvironmentSetup
         : SaveInputs != environment.SetupInputs ? "setup"
         : "desktop";
 
-    /// <summary>Someone asked for it to be prepared, or something found it needs to be.</summary>
+    /// <summary>
+    /// Someone asked for it to be prepared, or something found it needs to be. Asked while an attempt runs, it
+    /// is wanted again once that one ends, because what was asked for may be newer than what it is doing.
+    /// </summary>
     public void Want(DateTimeOffset now) => WantedAt ??= now;
+
+    /// <summary>Whether a save made at <see cref="SavedAt"/> is old enough to be made again behind the task that uses it.</summary>
+    public bool IsStale(DateTimeOffset now, int refreshDays) => SavedAt is { } saved && now - saved > TimeSpan.FromDays(refreshDays);
+
+    /// <summary>
+    /// The desktop id the environment's preparing machine signs in as: one service account for the
+    /// environment, holding <c>environment_setup</c> on it, whose key is made again for each attempt. It is
+    /// made from the environment's id and cannot be chosen, so it is never a task's or a spare's.
+    /// </summary>
+    public static string DesktopIdFor(string environmentId) =>
+        new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("workstream-setup:" + environmentId))[..16]).ToString("D");
+
+    /// <summary>The name a save made by this attempt has at the desktop host: known before it exists, so nothing mistakes it for a stray.</summary>
+    public static string SaveNameFor(string runId) => "wss-" + Guid.Parse(runId).ToString("N");
 
     /// <summary>An attempt begins: a machine is being made to do the setup.</summary>
     public void Begin(string runId, WorkEnvironment environment, string image, DateTimeOffset now)
@@ -127,6 +144,7 @@ public sealed class EnvironmentSetup
     /// <summary>The setup ended well: what is left is to stop the machine and save its disk.</summary>
     public void SetupDone(string? output, string? commit, long bytes)
     {
+        if (!IsPreparing || RunSaving) throw new DomainRuleException("Nothing is being prepared.");
         Output = Tail(output);
         SaveCommitPending = commit is { Length: > 0 } ? commit[..Math.Min(commit.Length, 64)] : null;
         SaveBytesPending = Math.Max(0, bytes);
@@ -158,7 +176,6 @@ public sealed class EnvironmentSetup
         Failure = why.Length <= 500 ? why : why[..500];
         FailedInputs = RunInputs;
         if (output is not null) Output = Tail(output);
-        WantedAt = null;
         EndRun();
     }
 

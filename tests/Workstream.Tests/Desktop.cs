@@ -38,7 +38,18 @@ public sealed class Desktop : IDisposable
         return new Desktop(spec.Key, spec.Name);
     }
 
+    /// <summary>Speak as the machine preparing an environment now, with the key it was made with.</summary>
+    public static Desktop Preparing(string environmentId)
+    {
+        var spec = Stack.Desktops.Preparing(environmentId) ?? throw new AssertFailedException("No machine is preparing the environment.");
+        return new Desktop(spec.Key, spec.Name);
+    }
+
     public Task<DesktopSetup> SetupAsync() => ReadAsync<DesktopSetup>(http.GetAsync("/api/desktop/setup"));
+
+    /// <summary>The preparing desktop says how the setup is going.</summary>
+    public Task<HttpResponseMessage> ReportAsync(string state, int? exit = null, string? output = null, string? commit = null, long? bytes = null) =>
+        http.PostAsJsonAsync("/api/desktop/setup", new SetupReport(state, exit, output, commit, bytes), Person.Json);
 
     /// <summary>One turn of the agent's loop: what it wrote since last time, and what people wrote to it.</summary>
     public Task<DesktopReply> ExchangeAsync(bool working = false, long after = 0, params DesktopMessage[] messages) =>

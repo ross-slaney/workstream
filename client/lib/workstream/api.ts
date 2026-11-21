@@ -30,6 +30,26 @@ export type DesktopApp = { id: string; name: string; description: string; launch
 
 export type DesktopSize = "small" | "standard" | "large";
 
+/**
+ * How an environment's prepared setup stands: its repository cloned and its setup script run once on a
+ * machine of its own, whose disk tasks then start from. `because` says why a save is out of date: the
+ * environment's `setup` changed, or the `desktop`s are newer than it. `startedAt` is null while a preparation
+ * waits for a machine.
+ */
+export type SetupState = "nothing" | "not_prepared" | "preparing" | "prepared" | "out_of_date" | "failed";
+
+export type EnvironmentSetup = {
+  state: SetupState;
+  because: "setup" | "desktop" | null;
+  preparedAt: string | null;
+  commit: string | null;
+  bytes: number;
+  monthlyUsd: number;
+  startedAt: string | null;
+  output: string | null;
+  failure: string | null;
+};
+
 export type Environment = {
   id: string;
   teamId: string;
@@ -42,6 +62,7 @@ export type Environment = {
   instructions: string | null;
   variableNames: string[];
   updatedAt: string;
+  setup: EnvironmentSetup;
 };
 
 /** A variable as it is sent: a null value keeps the value the environment already has for that name. */
@@ -104,15 +125,15 @@ export type TeamNumbers = {
   desktopHours: number;
 };
 
-/** What machines cost this month for one purpose: `task` (tasks' desktops) or `spare`. */
+/** What machines cost this month for one purpose: `task` (tasks' desktops), `spare` or `prepare` (machines preparing an environment's setup). */
 export type MachineCost = { purpose: string; hours: number; usd: number };
 
 export type SpareNow = { teamId: string; teamName: string; size: string; state: string; since: string };
 
-/** The machines' time this month by purpose, the disks kept now at what that many cost a month, and the spares running now. */
-export type MachineCosts = { thisMonth: MachineCost[]; disks: number; disksMonthlyUsd: number; spares: SpareNow[] };
+/** The machines' time this month by purpose, the disks and the saved setups kept now at what they cost a month, and the spares running now. */
+export type MachineCosts = { thisMonth: MachineCost[]; disks: number; disksMonthlyUsd: number; saves: number; savesMonthlyUsd: number; spares: SpareNow[] };
 
-/** Starts over the last seven days from one source (`image`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
+/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
 
 export type AdminOverview = {
@@ -153,6 +174,8 @@ export const workstream = {
     apiSend<Environment>("POST", `/api/teams/${id(teamId)}/environments`, { id: environmentId, ...body }),
   changeEnvironment: (environmentId: string, body: WriteEnvironment) => apiSend<Environment>("PUT", `/api/environments/${id(environmentId)}`, body),
   deleteEnvironment: (environmentId: string) => apiSend<void>("DELETE", `/api/environments/${id(environmentId)}`),
+  /** "Prepare again": the environment's setup is done again on a machine of its own, and saved for its tasks. */
+  prepareEnvironment: (environmentId: string) => apiSend<Environment>("POST", `/api/environments/${id(environmentId)}/setup`),
 
   tasks: (teamId: string) => apiJson<ListPage<Task>>(`/api/teams/${id(teamId)}/tasks`),
   /**

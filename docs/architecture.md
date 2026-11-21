@@ -46,6 +46,17 @@ Step 2 is the slow one, and it is Azure's: between fifteen seconds and a minute 
 
 A spare is a running machine nobody is using yet, so what it can cost is limited by settings (`Workstream:Desktops:Spares`, set in `infra/api.bicep`): one a team, two at once over every team, six hours of spare time a day, and none for a team already at its limit of running desktops. With nobody in the app there are none.
 
+## A saved setup, so a task starts with its setup done
+
+Cloning the repository and running the setup script is the slow part of a new desktop once it is up, and it is the same work for every task of an environment. So it is done once (`EnvironmentSetup`, the `PrepareAsync` and `SavePreparedAsync` jobs in `api/Desktops/DesktopJobs.cs`):
+
+- The operator makes a machine for the environment, told the API's address and a key for the environment's preparing account. Its agent sees from `GET /api/desktop/setup` that it is preparing (`prepare`), clones the repository and runs the setup script out of sight, and posts what the script writes to `POST /api/desktop/setup` every few seconds, which the environment's page shows. It never exchanges and never calls a model.
+- When the script exits 0 the agent removes everything in `~/.workstream` (the variables, the logs, the browser's profile), the git token and the shell's history, writes `~/.workstream/prepared.json` (when, and at which commit), and says it is done with the commit and how much is on the disk. The operator deallocates the machine, saves its disk (`IDesktopHost.SaveAsync`: a full snapshot on Azure, a committed image in Docker) and deletes the machine.
+- A task's machine is made from the save while the save is for the environment's setup inputs (a fingerprint of the repository, branch, script, variables and apps) and for this release's image version. On Azure a disk is made from the snapshot with `createOption: Copy`, stating no security profile because it inherits Trusted Launch from the snapshot, and the machine attaches it (`createOption: Attach`). Making the snapshot took about 13 seconds when measured, and a machine made from one booted like one made from the image. The task's agent finds `prepared.json`, pulls the branch, skips the setup script, and says "Started from the setup prepared 2 days ago (main at a1b2c3d), 14 commits newer now."
+- Anything else starts from the image and does the setup itself, as before: an environment never prepared, a save out of date, a preparation that failed.
+
+What it can cost is limited by settings (`Workstream:Desktops:Saves`): one machine preparing at once over every team, four hours of preparing a day, 45 minutes at most each, one save an environment, deleted after 30 days nothing started from it. Its time is a line of its own on the system administrator's page, and so are the saves kept.
+
 Stopping a task deallocates its machine and keeps its disk. Starting it again brings the same desktop back, and the agent resumes the same conversation. Deleting a task deletes the machine, its disk and its network interface, and ends its key. A desktop nobody watches or writes to, whose agent is idle, is stopped after half an hour by a sweep that also fails a desktop that never arrived, and deletes a machine no task knows once it has been there half an hour (a newer one may belong to a task that has just started).
 
 ## The display
@@ -77,6 +88,7 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 - It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
 - It has no Azure identity.
 - A spare is a desktop with no task. Its key authenticates and nothing more until a task takes it, and it is never given to another team.
+- A machine preparing an environment holds a key that reads that environment's setup and says how it went, and nothing else: no task, no conversation, no model. Its disk is saved for the environment's tasks only after it has removed the variables, the git token, the logs and the browser's profile, and its key is in its user data, never on the disk. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
 - An environment's variables are stored protected and are sent only to a desktop made from that environment. They are on that desktop in plain text, because the work needs them there: anyone on the team can read them by opening the desktop.
 
 ## What is kept where
@@ -86,4 +98,5 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
 | The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars). |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session. It goes with the task. |
+| A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |
 | The browser | The session's tokens, and which team was open last. |

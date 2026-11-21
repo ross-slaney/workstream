@@ -107,6 +107,9 @@ public static class Stack
         builder.Configuration["Workstream:Desktops:Spares:Enabled"] = "true";
         builder.Configuration["Workstream:Desktops:Spares:Max"] = "1000";
         builder.Configuration["Workstream:Desktops:Spares:HoursPerDay"] = "100000";
+        // The same for machines preparing environments: every journey's environments can prepare at once.
+        builder.Configuration["Workstream:Desktops:Saves:AtOnce"] = "1000";
+        builder.Configuration["Workstream:Desktops:Saves:HoursPerDay"] = "100000";
         // The model: Foundry is played in this process, under the gateway's own client.
         builder.Configuration["Workstream:Model:Endpoint"] = "http://foundry.test/anthropic";
         builder.Configuration["Workstream:Model:Key"] = ModelKey;

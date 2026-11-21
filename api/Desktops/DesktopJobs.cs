@@ -52,7 +52,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), task.Id, task.TeamId, ct);
                 await DesktopKeys.GrantAsync(db, task.Id, task, ct);
                 await db.SaveChangesAsync(ct);
-                spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key);
+                spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key,
+                    Save: await SaveForAsync(scope, db, task, ct));
             }
         }
         var machine = spec?.Name ?? existing!;
@@ -307,6 +308,250 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         if (machine is not null) await host.DeleteAsync(machine, ct);
     }
 
+    /// <summary>
+    /// What a task's new machine starts from: the environment's saved setup when it is good for the
+    /// environment's settings now and for these desktops, otherwise the image (null). Starting from a save
+    /// writes that down on the run, and a save older than a week is made again behind the task, which uses the
+    /// old one. Finding no save to start from, when there is a setup, asks for one.
+    /// </summary>
+    async Task<string?> SaveForAsync(AsyncServiceScope scope, WorkstreamDbContext db, WorkTask task, CancellationToken ct)
+    {
+        if (!options.Saves.Enabled) return null;
+        var environment = await db.Environments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == task.EnvironmentId, ct);
+        if (environment is not { HasSetup: true }) return null;
+        var now = clock.GetUtcNow();
+        string? save = null;
+        var prepare = false;
+        await Operations.ChangeSetupAsync(db, environment, setup =>
+        {
+            save = null;
+            if (setup.Serves(environment, options.ImageVersion))
+            {
+                save = setup.Save;
+                setup.Used(now);
+                prepare = setup.IsStale(now, options.Saves.RefreshDays) && setup.WorthPreparing(environment) && setup.WantedAt is null;
+            }
+            else
+            {
+                prepare = setup.WorthPreparing(environment);
+            }
+            if (prepare) setup.Want(now);
+        }, ct);
+        if (save is not null)
+        {
+            var run = await db.DesktopRuns.Where(x => x.TaskId == task.Id && x.EndedAt == null).OrderByDescending(x => x.StartedAt).FirstOrDefaultAsync(ct);
+            run?.FromSave();
+            await db.SaveChangesAsync(ct);
+        }
+        var environmentId = environment.Id;
+        if (prepare) scope.ServiceProvider.GetRequiredService<IBackgroundJobClient>().Enqueue<DesktopJobs>(job => job.PrepareAsync(environmentId, CancellationToken.None));
+        return save;
+    }
+
+    /// <summary>
+    /// Prepare an environment that is wanted (docs/core-model.md, "Prepare an environment"): a machine of its
+    /// own, as the environment's preparing account, which holds <c>environment_setup</c> on the environment
+    /// and nothing else, with a key made for this attempt. The machine's agent does the setup and says how it
+    /// went (<see cref="Operations.ReportSetupAsync"/>); this job only makes the machine. Nothing begins while
+    /// as many are preparing as may at once, or the day's hours of preparing are used: what is wanted waits for
+    /// the sweep. The operator checks <c>ENVIRONMENT_OPERATE_SETUP</c> on the environment.
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    public async Task PrepareAsync(string environmentId, CancellationToken ct)
+    {
+        if (!options.Saves.Enabled) return;
+        DesktopSpec spec;
+        string runId;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var environment = await db.Environments.SingleOrDefaultAsync(x => x.Id == environmentId, ct);
+            if (environment is not { HasSetup: true }) return;
+            if (!await scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>().Allows(Operator, Permissions.EnvironmentOperateSetup, environment.ResourceId))
+            {
+                log.LogError("The desktop operator may not prepare environment {EnvironmentId}.", environmentId);
+                return;
+            }
+            var setup = await db.Setups.SingleOrDefaultAsync(x => x.EnvironmentId == environmentId, ct);
+            if (setup is null || setup.WantedAt is null || setup.IsPreparing) return;
+            var now = clock.GetUtcNow();
+            if (!await Operations.RoomToPrepareAsync(db, options, now, ct)) return;
+
+            runId = Guid.NewGuid().ToString("D");
+            var desktopId = EnvironmentSetup.DesktopIdFor(environmentId);
+            setup.Begin(runId, environment, options.ImageVersion, now);
+            db.DesktopRuns.Add(DesktopRun.BeginPrepare(runId, environment, now));
+            // One account for the environment's preparing, granted once; each attempt is given a key of its own,
+            // so a machine from an earlier attempt can no longer speak for this one.
+            var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), desktopId, environment.TeamId, ct);
+            await db.GrantRoleAsync(DesktopKeys.SubjectIdFor(desktopId), environment, Roles.EnvironmentSetup, ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException)
+            {
+                // Another job began it in the same moment.
+                return;
+            }
+            spec = new DesktopSpec(DesktopHosting.NameFor(runId), desktopId, environment.TeamId, environment.Size, options.ApiUrl, key, MachinePurpose.Prepare);
+        }
+
+        DesktopPlace place;
+        try
+        {
+            place = await host.CreateAsync(spec, ct);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            log.LogWarning(error, "The machine to prepare environment {EnvironmentId} on could not be made.", environmentId);
+            await EndPreparingAsync(environmentId, runId, "The machine to prepare on could not be made. Prepare it again.", spec.Name, ct);
+            return;
+        }
+
+        var kept = false;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            if (await db.Setups.SingleOrDefaultAsync(x => x.EnvironmentId == environmentId && x.RunId == runId, ct) is { } setup)
+            {
+                setup.RunMade(place.Host);
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                    kept = true;
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // The attempt ended while its machine was being made.
+                }
+            }
+        }
+        if (!kept) await host.DeleteAsync(place.Host, ct);
+    }
+
+    /// <summary>
+    /// The setup ended well on the preparing machine: stop it, keep its disk as the environment's save, and
+    /// remove the machine. The save it replaces is removed: an environment keeps one. The machine is stopped
+    /// first, so the disk is saved whole.
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    public async Task SavePreparedAsync(string environmentId, string runId, CancellationToken ct)
+    {
+        string machine;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var environment = await db.Environments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == environmentId, ct);
+            var setup = await db.Setups.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentId == environmentId && x.RunId == runId && x.RunSaving, ct);
+            if (environment is null || setup is null) return;
+            if (!await scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>().Allows(Operator, Permissions.EnvironmentOperateSetup, environment.ResourceId)) return;
+            machine = setup.RunHost ?? DesktopHosting.NameFor(runId);
+        }
+        var name = EnvironmentSetup.SaveNameFor(runId);
+        try
+        {
+            await host.StopAsync(machine, ct);
+            await host.SaveAsync(machine, name, ct);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            log.LogWarning(error, "The prepared disk of environment {EnvironmentId} could not be saved.", environmentId);
+            await EndPreparingAsync(environmentId, runId, "The setup ran, but its desktop could not be saved. Prepare it again.", machine, ct);
+            return;
+        }
+
+        var removed = new List<string>();
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var environment = await db.Environments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == environmentId, ct);
+            var setup = await db.Setups.SingleOrDefaultAsync(x => x.EnvironmentId == environmentId && x.RunId == runId, ct);
+            if (environment is null || setup is null)
+            {
+                removed.Add(name);
+            }
+            else
+            {
+                var now = clock.GetUtcNow();
+                if (setup.Saved(name, now) is { } replaced) removed.Add(replaced);
+                // Its settings moved on to nothing to prepare while it ran: the save would be nobody's.
+                if (!environment.HasSetup && setup.Forget() is { } unused) removed.Add(unused);
+                await EndRunAsync(db, runId, now, ct);
+                await DesktopKeys.RetireAsync(db, EnvironmentSetup.DesktopIdFor(environmentId), ct);
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // The attempt was ended while the disk was being saved (it took too long): the save is nobody's.
+                    removed = [name];
+                }
+            }
+        }
+        foreach (var save in removed.Distinct()) await host.DeleteSaveAsync(save, ct);
+        await host.DeleteAsync(machine, ct);
+        await PrepareWantedAsync(ct);
+    }
+
+    /// <summary>An attempt ends without a save: why, the machine removed, its key and its time ended. The save there was, if any, stays.</summary>
+    async Task EndPreparingAsync(string environmentId, string runId, string why, string machine, CancellationToken ct)
+    {
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            if (await db.Setups.SingleOrDefaultAsync(x => x.EnvironmentId == environmentId && x.RunId == runId, ct) is { } setup)
+            {
+                setup.Fail(why, null);
+                await EndRunAsync(db, runId, clock.GetUtcNow(), ct);
+                await DesktopKeys.RetireAsync(db, EnvironmentSetup.DesktopIdFor(environmentId), ct);
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // It ended another way in the same moment.
+                }
+            }
+        }
+        await host.DeleteAsync(machine, ct);
+        await PrepareWantedAsync(ct);
+    }
+
+    /// <summary>A preparing machine whose attempt is over: its setup failed, or its environment was deleted.</summary>
+    [AutomaticRetry(Attempts = 2)]
+    public async Task RemovePreparingMachineAsync(string machine, CancellationToken ct)
+    {
+        await host.DeleteAsync(machine, ct);
+        await PrepareWantedAsync(ct);
+    }
+
+    /// <summary>A save nothing will start from again: its environment was deleted, or has nothing to prepare now.</summary>
+    [AutomaticRetry(Attempts = 2)]
+    public Task DeleteSaveAsync(string save, CancellationToken ct) => host.DeleteSaveAsync(save, ct);
+
+    /// <summary>Begin preparing what is wanted, oldest first, while the limits leave room.</summary>
+    async Task PrepareWantedAsync(CancellationToken ct)
+    {
+        if (!options.Saves.Enabled) return;
+        List<string> wanted;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            wanted = await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Setups.AsNoTracking()
+                .Where(x => x.WantedAt != null && x.RunId == null).OrderBy(x => x.WantedAt).Select(x => x.EnvironmentId).Take(20).ToListAsync(ct);
+        }
+        foreach (var environmentId in wanted)
+        {
+            await using (var scope = scopes.CreateAsyncScope())
+            {
+                if (!await Operations.RoomToPrepareAsync(scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>(), options, clock.GetUtcNow(), ct)) return;
+            }
+            await PrepareAsync(environmentId, ct);
+        }
+    }
+
     /// <summary>Release the machine of a task a person, or the sweep, asked to stop.</summary>
     [AutomaticRetry(Attempts = 2)]
     public async Task StopAsync(string taskId, CancellationToken ct)
@@ -461,6 +706,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }
         foreach (var id in deleting) await DeleteAsync(id, ct);
 
+        // Saved setups: an attempt that took too long fails, a save nobody has started from for a month goes,
+        // and so does any save no environment knows. A preparing machine is owned while its attempt lasts.
+        await SweepSetupsAsync(owned, now, ct);
+
         // A machine no task owns is a stray once it has been there a while. A newer one may belong to a task
         // started after this sweep read the tasks, which can be minutes ago when it had desktops to stop.
         foreach (var stray in (await host.ListAsync(ct)).Where(machine =>
@@ -469,6 +718,71 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             log.LogWarning("Deleting the machine {Machine}: no task owns it.", stray.Name);
             await host.DeleteAsync(stray.Name, ct);
         }
+    }
+
+    async Task SweepSetupsAsync(HashSet<string> owned, DateTimeOffset now, CancellationToken ct)
+    {
+        List<EnvironmentSetup> setups;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            setups = await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Setups.AsNoTracking().ToListAsync(ct);
+        }
+        foreach (var setup in setups.Where(x => x.IsPreparing))
+        {
+            var machine = setup.RunHost ?? DesktopHosting.NameFor(setup.RunId!);
+            owned.Add(machine);
+            if (now - setup.RunStartedAt > TimeSpan.FromMinutes(options.Saves.MaxMinutes))
+            {
+                log.LogWarning("Environment {EnvironmentId} took too long to prepare.", setup.EnvironmentId);
+                await EndPreparingAsync(setup.EnvironmentId, setup.RunId!, $"The setup did not finish in {options.Saves.MaxMinutes} minutes.", machine, ct);
+            }
+        }
+        foreach (var setup in setups.Where(x => x.Save is not null && now - (x.UsedAt ?? x.SavedAt ?? now) > TimeSpan.FromDays(options.Saves.UnusedDays)))
+        {
+            log.LogInformation("Removing the saved setup of environment {EnvironmentId}: nothing has started from it for {Days} days.", setup.EnvironmentId, options.Saves.UnusedDays);
+            string? removed = null;
+            await using (var scope = scopes.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+                if (await db.Setups.SingleOrDefaultAsync(x => x.EnvironmentId == setup.EnvironmentId && x.Save == setup.Save, ct) is { } current)
+                {
+                    removed = current.Forget();
+                    try
+                    {
+                        await db.SaveChangesAsync(ct);
+                    }
+                    catch (DbUpdateConcurrencyException)
+                    {
+                        removed = null;
+                    }
+                }
+            }
+            if (removed is not null) await host.DeleteSaveAsync(removed, ct);
+        }
+        // A preparing machine's time left open by an attempt that is gone: its environment was deleted.
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var open = await db.DesktopRuns.Where(x => x.Purpose == MachinePurpose.Prepare && x.EndedAt == null && !db.Setups.Any(setup => setup.RunId == x.TaskId)).ToListAsync(ct);
+            foreach (var run in open) run.End(now);
+            if (open.Count > 0) await db.SaveChangesAsync(ct);
+        }
+
+        // Read again just before the host is asked, so a save an attempt has just made is known by its name.
+        HashSet<string> known;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var rows = await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Setups.AsNoTracking()
+                .Where(x => x.Save != null || x.RunId != null).Select(x => new { x.Save, x.RunId }).ToListAsync(ct);
+            known = [.. rows.SelectMany(x => new[] { x.Save, x.RunId is null ? null : EnvironmentSetup.SaveNameFor(x.RunId) }).OfType<string>()];
+        }
+        foreach (var stray in (await host.ListSavesAsync(ct)).Where(save => save.Name.StartsWith("wss-", StringComparison.Ordinal) && !known.Contains(save.Name)))
+        {
+            log.LogWarning("Deleting the saved setup {Save}: no environment knows it.", stray.Name);
+            await host.DeleteSaveAsync(stray.Name, ct);
+        }
+
+        await PrepareWantedAsync(ct);
     }
 
     /// <summary>The task, when it is in the state the job was queued for and the operator may act on it.</summary>

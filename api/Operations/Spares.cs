@@ -65,7 +65,8 @@ public static partial class Operations
         if (await db.Spares.CountAsync(ct) >= options.Spares.Max) return null;
         if (await SpareHoursAsync(db, now.AddHours(-24), now, ct) >= options.Spares.HoursPerDay) return null;
 
-        var spare = Spare.For(team, environment, now);
+        // A spare is always made from the image: it serves a task only when the task would start from the image too.
+        var spare = Spare.For(team, environment, null, now);
         db.Spares.Add(spare);
         db.DesktopRuns.Add(DesktopRun.Begin(spare, now));
         try
@@ -93,11 +94,12 @@ public static partial class Operations
     /// to take. Taking is deleting its row, which only one caller can do. What makes it the task's desktop, the
     /// grant and the task's own fields, is the caller's to save with the task, in the same transaction.
     /// </summary>
-    static async Task<Spare?> TakeSpareAsync(WorkstreamDbContext db, string teamId, WorkEnvironment environment, DesktopOptions options, DateTimeOffset now, CancellationToken ct)
+    /// <param name="save">The saved setup a new machine for the task would start from, or null for the image.</param>
+    static async Task<Spare?> TakeSpareAsync(WorkstreamDbContext db, string teamId, WorkEnvironment environment, string? save, DesktopOptions options, DateTimeOffset now, CancellationToken ct)
     {
         if (!options.Spares.Enabled) return null;
         var spare = await db.Spares.AsNoTracking().SingleOrDefaultAsync(x => x.TeamId == teamId, ct);
-        if (spare is null || !spare.Serves(environment, now)) return null;
+        if (spare is null || !spare.Serves(environment, save, now)) return null;
         return await db.Spares.Where(x => x.Id == spare.Id).ExecuteDeleteAsync(ct) == 1 ? spare : null;
     }
 }
