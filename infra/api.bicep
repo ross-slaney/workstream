@@ -28,7 +28,7 @@ param administratorPassword string = ''
 param desktopsGroup string
 param desktopsSubnetId string
 @description('Spares: how many may run at once over every team, and how many hours of spare time there may be in a day. A spare is a running machine nobody is using yet, so these two are what it can cost (api/Desktops/DesktopHosts.cs, SpareOptions). 0 at once turns spares off.')
-param sparesAtOnce int = 2
+param sparesAtOnce int = 0
 param spareHoursADay int = 6
 @description('The image version a desktop is made from: the one this deployment was made with.')
 param desktopImageId string

@@ -193,9 +193,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             {
                 await Task.WhenAll(answered, hosted);
             }
-            catch (Exception error) when (error is OperationCanceledException or HttpRequestException or InvalidOperationException)
+            catch (Exception error) when (error is not OutOfMemoryException)
             {
-                // The one that was not first, stopped.
+                // The one that was not first, stopped where it was. What it was doing no longer matters.
+                log.LogDebug(error, "The following of {What} ended.", what);
             }
         }
     }

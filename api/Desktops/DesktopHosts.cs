@@ -184,7 +184,8 @@ public sealed class DesktopOptions
     /// </summary>
     public sealed class SpareOptions
     {
-        public bool Enabled { get; set; } = true;
+        /// <summary>Off unless a deployment turns it on: no spare machine is ever made by default.</summary>
+        public bool Enabled { get; set; }
         /// <summary>Spares running at once, over every team. A team has one at most.</summary>
         public int Max { get; set; } = 2;
         /// <summary>A spare nobody on the team has wanted for this long is removed.</summary>
