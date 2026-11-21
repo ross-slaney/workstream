@@ -8,6 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
+import { noteBackground, noteFile } from "./restore.mjs";
+import { projectWork } from "./instructions.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,12 +26,13 @@ You are the agent on a Workstream desktop: a Linux computer (Debian with the XFC
 - You have sudo without a password. Install what the task needs.
 - When you finish, say what you did and what is on screen for the person to look at.
 - The person reads your messages in a narrow panel beside the desktop. Write plain, short paragraphs.
+- When this desktop is stopped and started again, Workstream reruns the commands you left running in the background and reopens the browser's pages and VS Code.
 
 Working on a project:
 - The repository's own rules apply. Its CLAUDE.md is read for you. If it has an AGENTS.md, read that first and follow it the same way. Its skills (in .claude/skills, often linked from .agents/skills) are yours: when one covers what you are asked to do, such as running the app locally, implementing an issue or opening a pull request, use it and follow its steps instead of working them out yourself.
 - Run the project the way it says to: its skill, its scripts or its README. Docker (it starts with the first docker command), the .NET SDK, Node, Java 17, sqlcmd, Playwright's system libraries and the Android SDK are installed. An Android emulator is set up as "Phone": start it with \`emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot\` in the background. iPhone and iPad builds and the iOS simulator need a Mac and cannot run here: say so when a task asks for them, and do the rest.
 - Builds, installs and a first start of a stack can take many minutes. Give such commands a long timeout, or start them in the background with their output in a log file and read the log.
-- Your changes go on a branch of their own and reach the repository as a pull request: commit, push the branch and open the pull request with \`gh pr create\`. Never push to the default branch, and never merge, unless you are asked to. git and gh are signed in to GitHub when the environment has a GITHUB_TOKEN variable; \`gh auth status\` says whether they are.
+- Your changes go on a branch of their own and reach the repository as a pull request: commit, push the branch and open the pull request with \`gh pr create\`. Never push to the default branch, and never merge, unless you are asked to. git and gh sign in to GitHub by themselves, through the team's GitHub connection or the environment's GITHUB_TOKEN; \`gh auth status\` says whether they can.
 - On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
 
@@ -61,7 +64,8 @@ const longCommands = { BASH_DEFAULT_TIMEOUT_MS: String(10 * 60_000), BASH_MAX_TI
  * @param {object} with.setup      What the API says this desktop is set up from.
  * @param {string} with.key        The desktop's key.
  * @param {string} with.workspace  The folder the agent works in.
- * @param {object} with.state      Kept across restarts: `sessionId` is the conversation to resume.
+ * @param {object} with.state      Kept across restarts: `sessionId` is the conversation to resume, and what to bring back after a stop.
+ * @param {string | null} with.restored  One line about what was brought back after a stop, for the agent to know; null otherwise.
  * @param {() => Promise<void>} with.saveState
  * @param {(kind: "text" | "activity", text: string) => void} with.say
  * @param {(working: boolean) => void} with.setWorking
@@ -70,10 +74,11 @@ const longCommands = { BASH_DEFAULT_TIMEOUT_MS: String(10 * 60_000), BASH_MAX_TI
  * @param {(...args: unknown[]) => void} with.log
  * @returns {{ interrupt(): void }}
  */
-export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log }) {
+export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log, restored = null }) {
   let current = null;
 
-  const environment = { ...process.env, ...setup.variables, ...modelEnvironment(setup, key), ...longCommands };
+  // gh's wrapper first on the PATH (shims/gh), so the agent's gh signs itself in.
+  const environment = { ...process.env, PATH: `${path.join(here, "shims")}:${process.env.PATH}`, ...setup.variables, ...modelEnvironment(setup, key), ...longCommands };
   const options = () => ({
     cwd: workspace,
     env: environment,
@@ -84,7 +89,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: [onThisDesktop(workspace), setup.instructions].filter(Boolean).join("\n\n"),
+      append: [onThisDesktop(workspace), restored, projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
     },
     // The repository's own instructions and skills (CLAUDE.md, .claude/skills) apply, as they would on a laptop.
     settingSources: ["user", "project", "local"],
@@ -97,7 +102,8 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
       // What the agent is working in is what the person sees: the browser comes to the front when the agent
       // uses it, and a file the agent changes opens in the editor.
       PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [showBrowser] }],
-      PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }],
+      // And what is left running, and open, is kept to bring back after a stop (restore.mjs).
+      PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }, { matcher: "Bash", hooks: [keepBackground] }],
     },
     resume: state.sessionId ?? undefined,
     stderr: (line) => log("harness:", line.trimEnd()),
@@ -118,7 +124,14 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     const file = input.tool_input?.file_path;
     if (file && setup.apps.includes("vscode")) {
       spawn("code", ["--reuse-window", file], { detached: true, stdio: "ignore", env: environment }).on("error", () => {}).unref();
+      if (noteFile(state, file)) await saveState();
     }
+    return {};
+  }
+
+  /** A command the agent left running in the background is kept, to run again after a stop. */
+  async function keepBackground(input) {
+    if (noteBackground(state, input)) await saveState();
     return {};
   }
 

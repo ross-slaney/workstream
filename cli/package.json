@@ -1,0 +1,20 @@
+{
+  "name": "@agenetix/workstream",
+  "version": "0.1.0",
+  "description": "Start and follow Workstream tasks from a terminal.",
+  "type": "module",
+  "bin": {
+    "workstream": "./workstream.mjs"
+  },
+  "files": [
+    "workstream.mjs",
+    "args.mjs"
+  ],
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "private": true
+}

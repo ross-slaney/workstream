@@ -1,7 +1,7 @@
 {
   "name": "workstream-client",
   "main": "expo-router/entry",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "web": "expo start --web",

@@ -35,7 +35,7 @@ EOF
 
 # The agent and its packages.
 (cd "$ROOT/agent" && npm ci --omit=dev --no-audit --no-fund && npm cache clean --force >/dev/null 2>&1)
-chmod +x "$ROOT/start.sh" "$ROOT/session.sh" "$ROOT/panel.sh"
+chmod +x "$ROOT/start.sh" "$ROOT/session.sh" "$ROOT/panel.sh" "$ROOT/agent/shims/gh"
 
 # What the person's programs start with: no trust or telemetry questions in VS Code, the environment's
 # variables in every shell, a plain window manager and a plain background, which are quick to stream, and

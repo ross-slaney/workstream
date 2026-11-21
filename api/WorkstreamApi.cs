@@ -17,6 +17,13 @@ public sealed record ListPage<T>(IReadOnlyList<T> Data, string? NextCursor);
 public sealed record MeDto(string UserId, string Name, string? Email, bool SystemAdmin);
 
 /// <summary>
+/// What the command line needs to sign in to this deployment and to link to a task: SqlOS's issuer, the
+/// command line's client and scopes, the token's audience, and the web app's origin. Public: it names nothing
+/// that SqlOS's own discovery document and the web app's address do not already say.
+/// </summary>
+public sealed record CliSettings(string Issuer, string ClientId, string Resource, string Scope, string Web);
+
+/// <summary>
 /// The plain REST API. Every route resolves the caller from the validated credential, loads the row and its
 /// real parent, checks SqlOS on the target node (creates check the parent), calls the domain and saves. Lists
 /// are authorized pages. The verbs themselves live in <see cref="Operations"/>; these handlers adapt them.
@@ -37,6 +44,9 @@ public static partial class WorkstreamApi
                 ? Results.Ok(new { status = "ready", revision = configuration["SOURCE_COMMIT_SHA"] ?? "local" })
                 : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
         app.MapOpenApi();
+        app.MapGet("/cli", (WorkstreamApp workstream) => Results.Ok(new CliSettings(
+                workstream.Issuer, WorkstreamApp.CliClientId, workstream.Resource, string.Join(' ', workstream.CliScopes), workstream.WebOrigin)))
+            .WithName("get_cli_settings").WithTags("Command line").Produces<CliSettings>();
         // CORS first, then who is calling. Left to itself the host puts authentication and authorization
         // before everything written here, and a refusal (401, 403) then leaves without the CORS headers: the
         // browser reports it to the web app as a failed connection, so the app could neither refresh its
@@ -49,11 +59,15 @@ public static partial class WorkstreamApi
         // People, with SqlOS's token.
         var api = app.MapGroup("/api").RequireAuthorization().AddEndpointFilter(WriteScopeForChanges);
         api.MapGet("/me", GetMe).WithName("get_me").WithTags("Me").Produces<MeDto>();
+        api.MapGet("/me/settings", GetMySettings).WithName("get_my_settings").WithTags("Me").Produces<MySettings>();
+        api.MapPut("/me/settings", PutMySettings).WithName("change_my_settings").WithTags("Me").Produces<MySettings>();
         api.MapGet("/apps", () => Results.Ok(AppCatalog.All)).WithName("list_apps").WithTags("Environments").Produces<IReadOnlyList<DesktopApp>>();
         MapTeams(api);
         MapEnvironments(api);
         MapTasks(api);
         MapAdmin(api);
+        MapGitHub(api);
+        MapGitHubCallbacks(app);
 
         // A person watching a desktop: a WebSocket, authorized inside (Desktops/DesktopRelay.cs).
         app.Map(DesktopRelay.Route, DesktopRelay.HandleAsync).ExcludeFromDescription();
@@ -71,16 +85,41 @@ public static partial class WorkstreamApi
         return Results.Ok(new MeDto(caller.PrincipalId, user?.DisplayName ?? "", user?.DefaultEmail, await fga.HasCapabilityAsync(caller.PrincipalId, Permissions.AdminView)));
     }
 
+    static async Task<IResult> GetMySettings(HttpContext http, WorkstreamDbContext db, CancellationToken ct)
+    {
+        var outcome = await Operations.MySettingsAsync(CallerOf(http), db, ct);
+        return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
+    }
+
+    static async Task<IResult> PutMySettings(MySettings body, HttpContext http, WorkstreamDbContext db, CancellationToken ct)
+    {
+        var outcome = await Operations.ChangeMySettingsAsync(CallerOf(http), body, db, ct);
+        return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
+    }
+
     /// <summary>The person calling; never what the request says.</summary>
     static Caller CallerOf(HttpContext http) => Caller.Of(http);
 
-    /// <summary>A token without the write scope can look and not touch: every route that is not a GET needs it.</summary>
+    /// <summary>
+    /// A route that changes something and may also be called with a narrower scope than
+    /// <see cref="WorkstreamApp.WriteScope"/>: starting a task, with the command line's
+    /// <see cref="WorkstreamApp.StartScope"/>.
+    /// </summary>
+    public sealed record AllowsScope(string Scope);
+
+    /// <summary>
+    /// A token without the write scope can look and not touch: every route that is not a GET needs it, unless
+    /// the route names another scope that is enough for it (<see cref="AllowsScope"/>). The scope is the
+    /// client's ceiling; what the person may do to the node is still SqlOS's answer in the handler.
+    /// </summary>
     static async ValueTask<object?> WriteScopeForChanges(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var http = context.HttpContext;
-        if (!HttpMethods.IsGet(http.Request.Method) && !CallerOf(http).HasScope(WorkstreamApp.WriteScope))
+        var caller = CallerOf(http);
+        if (!HttpMethods.IsGet(http.Request.Method) && !caller.HasScope(WorkstreamApp.WriteScope)
+            && !(http.GetEndpoint()?.Metadata.GetMetadata<AllowsScope>() is { } allows && caller.HasScope(allows.Scope)))
         {
-            return Forbidden("This connection can only read.");
+            return Forbidden(caller.HasScope(WorkstreamApp.StartScope) ? "This connection can only read and start tasks." : "This connection can only read.");
         }
         return await next(context);
     }

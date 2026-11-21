@@ -25,8 +25,12 @@
       "advanced": "Advanced",
       "advancedHint": "For a project that needs its code, tools and keys in place before the agent starts.",
       "repository": "Repository",
+      "repositoryPick": "Repository on GitHub",
+      "repositoryPickNone": "Another address",
+      "repositoryPickPrivate": "{name} (private)",
       "repositoryPlaceholder": "https://github.com/acme/app",
-      "repositoryHint": "Cloned when the desktop is made. For a private GitHub repository, add a variable named GITHUB_TOKEN. It also signs in git and gh, so the agent can push a branch and open a pull request.",
+      "repositoryHint": "Cloned when the desktop is made. For a private GitHub repository, an administrator connects GitHub on the Team page.",
+      "repositoryHintConnected": "Desktops clone it, push branches and open pull requests through the team's GitHub connection.",
       "branch": "Branch",
       "branchPlaceholder": "main",
       "setupScript": "Setup script",
@@ -79,7 +83,31 @@
       "expires": "Expires {date}",
       "emailedBody": "We emailed {email} an invitation. You can also send them this link yourself. It works once, and only for that address."
     },
-    "adminOnly": "Only an administrator can invite people or change who is on the team."
+    "adminOnly": "Only an administrator can invite people or change who is on the team.",
+    "email": {
+      "title": "Email",
+      "taskEmails": "Email me when a task I started or wrote in is finished or needs me",
+      "taskEmailsHint": "Not while you have its desktop on screen, and at most once every ten minutes for each task. This is your own setting and applies on every team you are on."
+    },
+    "github": {
+      "title": "GitHub",
+      "notSetUp": "GitHub is not set up for Workstream yet.",
+      "body": "Connect GitHub and the team's desktops can clone its repositories, push branches and open pull requests. Each desktop gets a token for its own repository that lasts an hour.",
+      "connect": "Connect GitHub",
+      "adminOnly": "An administrator can connect GitHub.",
+      "connectedTo": "Connected to {account}",
+      "organization": "Organization",
+      "personal": "Personal account",
+      "connectedBy": "Connected by {name} on {date}",
+      "connectedOn": "Connected on {date}",
+      "manage": "Choose repositories on GitHub",
+      "disconnect": "Disconnect",
+      "repositories": "Repositories it reaches",
+      "private": "Private",
+      "noRepositories": "It reaches no repositories yet. Choose some on GitHub.",
+      "disconnectTitle": "Disconnect GitHub?",
+      "disconnectBody": "The team's desktops stop getting GitHub tokens. Workstream stays installed on {account} on GitHub until someone removes it there."
+    }
   },
   "usage": {
     "metaTitle": "Usage · Workstream",
@@ -97,5 +125,13 @@
       "running": "{running} of {limit} running now",
       "body": "A desktop counts from when it starts until it stops. Idle desktops stop by themselves."
     }
+  },
+  "github": {
+    "metaTitle": "GitHub · Workstream",
+    "connecting": "Connecting GitHub",
+    "requestedTitle": "Waiting for GitHub",
+    "requestedBody": "GitHub sent your request to install Workstream to the account's owners. Once one of them approves it, connect GitHub again from the team's page.",
+    "failedTitle": "GitHub was not connected",
+    "backToTeam": "Back to the team"
   }
 }

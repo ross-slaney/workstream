@@ -1,34 +1,77 @@
-// GitHub on the desktop, from the environment's variables: a GITHUB_TOKEN (or GH_TOKEN) signs in both git and
-// gh, and commits are made as the token's own account. gh reads GH_TOKEN first and git reads neither, so the
-// agent writes both names and tells git the token (agent.mjs).
+#!/usr/bin/env node
+// GitHub for the desktop's git and gh. The token is one the API mints for the environment's repository from the
+// team's GitHub connection (GET /api/desktop/github/token, with the desktop's key): it reaches that repository
+// alone, lasts an hour, and is asked for again each time it is needed, so nothing here writes it anywhere.
+//
+//   node github.mjs credential get   git's credential helper, for https://github.com (agent.mjs sets it up)
+//   node github.mjs token            prints a token, for gh (shims/gh)
+//
+// A token someone put in the environment's variables as GITHUB_TOKEN or GH_TOKEN is used as it is, without
+// asking the API, as it was before the team could connect GitHub.
 
-/** The token the environment gives for GitHub, if any. */
-export const gitHubToken = (variables) => variables.GH_TOKEN || variables.GITHUB_TOKEN || null;
+import { pathToFileURL } from "node:url";
+import { toldNow } from "./told.mjs";
 
-/** The variables with the token under both names, so every program that looks for one finds it. */
-export function withGitHub(variables) {
-  const token = gitHubToken(variables);
-  return token ? { ...variables, GITHUB_TOKEN: variables.GITHUB_TOKEN || token, GH_TOKEN: variables.GH_TOKEN || token } : { ...variables };
+/** git's credential request: `key=value` lines, ended by a blank line. */
+export function parseCredentialRequest(text) {
+  const request = {};
+  for (const line of String(text ?? "").split("\n")) {
+    const at = line.indexOf("=");
+    if (at > 0) request[line.slice(0, at)] = line.slice(at + 1).trim();
+  }
+  return request;
 }
 
+/** Whether git is asking about GitHub over https, the only thing this helper answers for. */
+export const isGitHub = (request) => request.protocol === "https" && /^(www\.)?github\.com$/i.test(request.host ?? "");
+
+/** What git is told: a GitHub token goes as the password of the user `x-access-token`. */
+export const credentialAnswer = (token) => `username=x-access-token\npassword=${token}\n`;
+
+/** A token pasted into the environment's variables. */
+export const pastedToken = (env) => env.GITHUB_TOKEN || env.GH_TOKEN || null;
+
 /**
- * Who commits: the token's own GitHub account, with the private address GitHub gives every account, unless
- * the environment names someone (GIT_AUTHOR_NAME and GIT_AUTHOR_EMAIL, which git reads itself). Null when
- * GitHub does not say.
+ * A token for the environment's repository: the pasted one, or one the API mints now. Null when there is
+ * neither: the task has no GitHub repository, the team has not connected GitHub, or the API cannot be reached.
  */
-export async function gitIdentity(variables, { fetch = globalThis.fetch } = {}) {
-  const token = gitHubToken(variables);
-  if (!token || (variables.GIT_AUTHOR_NAME && variables.GIT_AUTHOR_EMAIL)) return null;
+export async function tokenFor({ env = process.env, told = toldNow, fetch: get = fetch } = {}) {
+  const pasted = pastedToken(env);
+  if (pasted) return pasted;
+  const { api, key } = await told(env);
+  if (!api || !key) return null;
   try {
-    const response = await fetch("https://api.github.com/user", {
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "workstream-desktop" },
-      signal: AbortSignal.timeout(10_000),
-    });
+    const response = await get(`${api}/api/desktop/github/token`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
     if (!response.ok) return null;
-    const user = await response.json();
-    if (!user?.login || !user?.id) return null;
-    return { name: user.name || user.login, email: `${user.id}+${user.login}@users.noreply.github.com` };
+    const answer = await response.json();
+    return typeof answer?.token === "string" && answer.token ? answer.token : null;
   } catch {
     return null;
   }
 }
+
+async function readStdin() {
+  let text = "";
+  for await (const chunk of process.stdin) text += chunk;
+  return text;
+}
+
+async function main([mode, operation]) {
+  if (mode === "token") {
+    const token = await tokenFor();
+    if (token) process.stdout.write(token + "\n");
+    return;
+  }
+  if (mode === "credential") {
+    // git also says `store` and `erase`: nothing is kept, so there is nothing to do for either.
+    const request = parseCredentialRequest(await readStdin());
+    if (operation !== "get" || !isGitHub(request)) return;
+    const token = await tokenFor();
+    if (token) process.stdout.write(credentialAnswer(token));
+    return;
+  }
+  process.stderr.write("Use: github.mjs credential get | github.mjs token\n");
+  process.exitCode = 2;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main(process.argv.slice(2));

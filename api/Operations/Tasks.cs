@@ -6,6 +6,7 @@ using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using Workstream.Api.Desktops;
 using Workstream.Api.Domain;
+using Workstream.Api.Email;
 using Workstream.Api.Model;
 using static Workstream.Api.WorkstreamAuthorization;
 
@@ -56,7 +57,7 @@ public static partial class Operations
     }
 
     /// <summary>The task, when the caller may see it and also holds <paramref name="permission"/> on it: 404, then 403.</summary>
-    static async Task<Outcome<WorkTask>> TaskWithAsync(Caller caller, string id, string permission, string refusal, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    internal static async Task<Outcome<WorkTask>> TaskWithAsync(Caller caller, string id, string permission, string refusal, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
         var seen = await ViewTaskAsync(caller, id, db, fga, ct);
         if (!seen.IsOk) return seen;
@@ -196,7 +197,7 @@ public static partial class Operations
     /// <summary>Ask the agent to stop what it is doing. The desktop sees the count change at its next exchange.</summary>
     public static async Task<Outcome<bool>> InterruptAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
-        var allowed = await TaskWithAsync(caller, id, Permissions.TaskUse, "You can't use this task.", db, fga, ct);
+        var allowed = await TaskWithAsync(caller, id, Permissions.TaskPrompt, "You can watch this task but not stop its agent.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<bool>();
         allowed.Value!.Interrupt();
         await db.SaveChangesAsync(ct);
@@ -206,7 +207,7 @@ public static partial class Operations
     /// <summary>A person writes in the conversation. A send tried again answers that it already exists.</summary>
     public static async Task<Outcome<TaskMessage>> SayAsync(Caller caller, string taskId, string? text, string? clientKey, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
-        var allowed = await TaskWithAsync(caller, taskId, Permissions.TaskUse, "You can't write in this task.", db, fga, ct);
+        var allowed = await TaskWithAsync(caller, taskId, Permissions.TaskPrompt, "You can watch this task but not write to its agent.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<TaskMessage>();
         var task = allowed.Value!;
         if (clientKey is not null && await db.TaskMessages.AnyAsync(x => x.ResourceId == task.ResourceId && x.ClientKey == clientKey, ct))
@@ -273,9 +274,10 @@ public static partial class Operations
     /// <summary>
     /// The desktop's exchange, about once a second: it hands over what the agent said and did, says whether the
     /// agent is working, and takes what people wrote since the message it last read. The first exchange is what
-    /// makes a starting desktop ready.
+    /// makes a starting desktop ready. An exchange that ends the agent's turn queues the email to the task's
+    /// people (<see cref="TaskEmails"/>), which decides whether anyone hears about it.
     /// </summary>
-    public static async Task<Outcome<DesktopReply>> ExchangeAsync(Caller desktop, DesktopExchange body, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    public static async Task<Outcome<DesktopReply>> ExchangeAsync(Caller desktop, DesktopExchange body, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
         if (await DesktopTaskAsync(desktop, db, ct) is not { } task)
         {
@@ -303,12 +305,18 @@ public static partial class Operations
             }
             task.Active(now);
         }
+        var turnEnded = task.EndsTurn(body.Working);
         if (task.DesktopSeen(body.Working, now))
         {
             // The first exchange of this start: how long the agent took is kept with the run.
             foreach (var run in await db.DesktopRuns.Where(x => x.TaskId == task.Id && x.EndedAt == null).ToListAsync(ct)) run.Ready(now);
         }
         await db.SaveChangesAsync(ct);
+        if (turnEnded)
+        {
+            var taskId = task.Id;
+            jobs.Schedule<TaskEmails>(job => job.SendAsync(taskId, CancellationToken.None), TaskEmails.After);
+        }
 
         // What people wrote since: the desktop's own page of the conversation, read as its service account.
         var after = Math.Max(0, body.After);

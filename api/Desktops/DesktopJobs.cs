@@ -1,5 +1,6 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using SqlOS.Fga.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Extensions;
 using SqlOS.Fga.Extensions;
@@ -328,7 +329,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }, ct);
     }
 
-    /// <summary>Remove a deleted task for good: its machine, its key, its conversation, then the row and its node.</summary>
+    /// <summary>Remove a deleted task for good: its machine, its key, its conversation, who watched it, then the row and its node.</summary>
     [AutomaticRetry(Attempts = 2)]
     public async Task DeleteAsync(string taskId, CancellationToken ct)
     {
@@ -359,6 +360,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             var now = clock.GetUtcNow();
             await EndRunAsync(db, taskId, now, ct);
             await DesktopKeys.RetireForTaskAsync(db, task, ct);
+            // Invitations nobody took, and the shares of those who did.
+            db.TaskInvitations.RemoveRange(await db.TaskInvitations.Where(x => x.TaskId == taskId).ToListAsync(ct));
+            db.RemoveRange(await db.Set<SqlOSFgaGrant>().Where(g => g.ResourceId == task.ResourceId && TaskShareRoles.All.Contains(g.RoleId)).ToListAsync(ct));
+            await db.TaskWatchers.Where(x => x.TaskId == taskId).ExecuteDeleteAsync(ct);
             db.Tasks.Remove(task);
             await db.SaveChangesAsync(ct);
         }

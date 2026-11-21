@@ -1,0 +1,12 @@
+#!/bin/sh
+# gh on a Workstream desktop, first on every shell's PATH and the agent's (agent.mjs, harness.mjs). It signs gh in
+# with a token for the environment's repository, asked for each time gh runs (../github.mjs), so a token never
+# runs out in the middle of a task and none is written down. A GH_TOKEN or GITHUB_TOKEN already set wins.
+if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+  token=$(node "$(dirname "$0")/../github.mjs" token 2>/dev/null)
+  if [ -n "$token" ]; then
+    GH_TOKEN=$token
+    export GH_TOKEN
+  fi
+fi
+exec /usr/bin/gh "$@"

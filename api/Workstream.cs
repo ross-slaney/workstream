@@ -5,31 +5,46 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
 using Workstream.Api.Desktops;
+using Workstream.Api.GitHub;
 using Workstream.Api.Model;
 
 namespace Workstream.Api;
 
 /// <summary>
-/// The two origins the product lives on, and the one OAuth client the app uses. The API (this host, SqlOS
-/// included) answers on <see cref="Origin"/>; the web app is served from <see cref="WebOrigin"/> and signs in
-/// against this issuer with SqlOS's headless flow.
+/// The two origins the product lives on, and the two OAuth clients: the web app's and the command line's. The
+/// API (this host, SqlOS included) answers on <see cref="Origin"/>; the web app is served from
+/// <see cref="WebOrigin"/> and signs in against this issuer with SqlOS's headless flow. The command line
+/// (cli/workstream.mjs) signs in with SqlOS's device flow, approved in the web app's <see cref="DevicePath"/>.
 /// </summary>
 public sealed class WorkstreamApp
 {
     public const string Name = "Workstream";
     /// <summary>The app's client. Keep in sync with EXPO_PUBLIC_SQLOS_CLIENT_ID (client/.env).</summary>
     public const string AppClientId = "workstream-app";
+    /// <summary>The command line's client: public, device flow only, reading and starting tasks. Keep in sync with cli/workstream.mjs.</summary>
+    public const string CliClientId = "workstream-cli";
     /// <summary>Where the web app lands after a provider redirect, under <see cref="WebOrigin"/>.</summary>
     public const string WebRedirectPath = "/auth/callback";
     /// <summary>The web app's sign-in (client/app/sign-in.tsx), under <see cref="WebOrigin"/>.</summary>
     public const string SignInPath = "/sign-in";
     /// <summary>Where an invitation is accepted (client/app/invite.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
     public const string InvitePath = "/invite";
+    /// <summary>Where a person approves the command line's sign-in (client/app/device.tsx), under <see cref="WebOrigin"/>, with <c>?request=</c>.</summary>
+    public const string DevicePath = "/device";
+    /// <summary>Where an invitation to a shared task is taken (client/app/share.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
+    public const string SharePath = "/share";
+    /// <summary>Where the browser lands back from installing the GitHub App (client/app/(app)/github.tsx), under <see cref="WebOrigin"/>.</summary>
+    public const string GitHubReturnPath = "/github";
     public const string ApiPath = "/api";
     /// <summary>Required by every /api route. Keep in sync with AUTH_SCOPE in client/lib/auth.ts.</summary>
     public const string ReadScope = "workstream.read";
     /// <summary>Required by every /api route that changes something.</summary>
     public const string WriteScope = "workstream.write";
+    /// <summary>
+    /// Starting a task and nothing else that changes something: the command line's one change
+    /// (<see cref="WorkstreamApi.AllowsScope"/> on the route).
+    /// </summary>
+    public const string StartScope = "workstream.start";
 
     /// <summary>The API's own origin (PUBLIC_ORIGIN).</summary>
     public string Origin { get; }
@@ -46,7 +61,12 @@ public sealed class WorkstreamApp
     /// <summary>Token audience: {Origin}/api, which SqlOS derives from the application's Api path.</summary>
     public string Resource { get; }
     public string Issuer { get; }
+    /// <summary>Every scope the application knows.</summary>
     public IReadOnlyList<string> Scopes { get; }
+    /// <summary>The web app's: read and change everything the person may.</summary>
+    public IReadOnlyList<string> AppScopes { get; }
+    /// <summary>The command line's: read what the person may, and start tasks.</summary>
+    public IReadOnlyList<string> CliScopes { get; }
     /// <summary>
     /// Sign in with an email and a password beside the emailed code (<c>Workstream:Auth:PasswordSignIn</c>).
     /// On in development and the tests, so nobody needs an inbox; off in production.
@@ -72,7 +92,9 @@ public sealed class WorkstreamApp
         AdministratorPassword = passwordSignIn && administratorEmail is not null && !string.IsNullOrEmpty(administratorPassword) ? administratorPassword : null;
         Resource = $"{origin}{ApiPath}";
         Issuer = $"{origin}/sqlos/auth";
-        Scopes = ["openid", "profile", "email", "offline_access", ReadScope, WriteScope];
+        AppScopes = ["openid", "profile", "email", "offline_access", ReadScope, WriteScope];
+        CliScopes = ["openid", "profile", "email", "offline_access", ReadScope, StartScope];
+        Scopes = [.. AppScopes.Union(CliScopes)];
     }
 
     public static WorkstreamApp From(IConfiguration configuration)
@@ -93,7 +115,7 @@ public sealed class WorkstreamApp
         client.Description = "The web app.";
         client.Audience = Resource;
         client.RedirectUris.Add($"{WebOrigin}{WebRedirectPath}");
-        client.AllowedScopes.AddRange(Scopes);
+        client.AllowedScopes.AddRange(AppScopes);
         client.ClientType = "public_pkce";
         client.RequirePkce = true;
         client.IsFirstParty = true;
@@ -101,13 +123,31 @@ public sealed class WorkstreamApp
     }
 
     /// <summary>
-    /// Where SqlOS sends a browser that reaches one of its hosted views: the web app's invite page for an
-    /// invitation email's link, its sign-in for anything else.
+    /// The command line's client, a public one with no secret and no redirect: SqlOS's device flow. The person
+    /// opens the link it prints, signs in on the web app's device page and approves; the command line then holds
+    /// a session of the person's own, for this API, that can read and start tasks (docs/core-model.md, "The
+    /// command line").
     /// </summary>
-    public string SignInUiUrl(SqlOSHeadlessUiRouteContext ui) =>
-        ui.View == "invite" && ui.UiContext?["invitationToken"]?.GetValue<string>() is { Length: > 0 } token
-            ? $"{WebOrigin}{InvitePath}?token={Uri.EscapeDataString(token)}"
-            : $"{WebOrigin}{SignInPath}";
+    public void SeedCliClient(SqlOSAuthServerOptions auth) =>
+        auth.SeedCliClient(CliClientId, "Workstream command line", Resource, [.. CliScopes]);
+
+    /// <summary>
+    /// Where SqlOS sends a browser that reaches one of its hosted views: the web app's invite page for an
+    /// invitation email's link, its device page for the command line's sign-in, its sign-in for anything else.
+    /// </summary>
+    public string SignInUiUrl(SqlOSHeadlessUiRouteContext ui)
+    {
+        if (ui.View == "invite" && ui.UiContext?["invitationToken"]?.GetValue<string>() is { Length: > 0 } token)
+        {
+            return $"{WebOrigin}{InvitePath}?token={Uri.EscapeDataString(token)}";
+        }
+        if (ui.View.StartsWith("device", StringComparison.Ordinal))
+        {
+            var request = string.IsNullOrEmpty(ui.RequestId) ? "" : $"request={Uri.EscapeDataString(ui.RequestId)}&";
+            return $"{WebOrigin}{DevicePath}?{request}view={Uri.EscapeDataString(ui.View)}";
+        }
+        return $"{WebOrigin}{SignInPath}";
+    }
 
     public void BrandAuthPage(SqlOSAuthPageSeedOptions page)
     {
@@ -158,6 +198,7 @@ public static class WorkstreamHosting
 
         builder.AddDesktops();
         builder.AddModelGateway();
+        builder.AddGitHub();
         builder.AddWorkstreamJobs(connectionString);
         return builder.AddWorkstreamSqlOS(app, connectionString);
     }
@@ -219,6 +260,7 @@ public static class WorkstreamHosting
                     application.Authorization(WorkstreamAuthorization.Seed);
                 });
                 options.AuthServer.SeedClient(app.ConfigureAppClient);
+                app.SeedCliClient(options.AuthServer);
             });
 
         // After SqlOS's own bootstrap: the system administrators and the desktop operator.
