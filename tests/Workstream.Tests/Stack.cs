@@ -104,6 +104,7 @@ public static class Stack
         builder.Configuration["Workstream:Desktops:Host"] = "none";
         builder.Configuration["Workstream:Desktops:ApiUrl"] = Origin.GetLeftPart(UriPartial.Authority);
         // Room for every spare a journey makes; the journeys about the limits lower them.
+        builder.Configuration["Workstream:Desktops:Spares:Enabled"] = "true";
         builder.Configuration["Workstream:Desktops:Spares:Max"] = "1000";
         builder.Configuration["Workstream:Desktops:Spares:HoursPerDay"] = "100000";
         // The model: Foundry is played in this process, under the gateway's own client.
