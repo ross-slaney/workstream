@@ -61,7 +61,7 @@ runs:
       env:
         STAGE: ${{ inputs.stage }}
         GROUP: workstream
-        LOCATION: eastus2
+        LOCATION: westus3
       run: |
         set -euo pipefail
         [[ -z "$STAGE" || "$STAGE" =~ ^[a-z][a-z0-9]{1,15}$ ]] || { echo "::error::A stage is a short lowercase name"; exit 1; }
@@ -127,8 +127,8 @@ runs:
         # Once more on failure: a fresh installation's SQL administrators group (data.bicep) cannot take its
         # members in the same second Entra makes it, and the deployment is idempotent.
         for attempt in 1 2; do
-          az deployment sub create -l eastus2 -n "$NAME" -f infra/main.bicep -o none --only-show-errors \
-            -p stage="$STAGE" image="$IMAGE" webImage="$WEB_IMAGE" sourceSha="$SHA" releaseTag="$RELEASE_TAG" \
+          az deployment sub create -l westus3 -n "$NAME" -f infra/main.bicep -o none --only-show-errors \
+            -p location=westus3 stage="$STAGE" image="$IMAGE" webImage="$WEB_IMAGE" sourceSha="$SHA" releaseTag="$RELEASE_TAG" \
                administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
                modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" && break
           [ "$attempt" = 1 ] || exit 1

@@ -4,7 +4,7 @@ Everything in Azure is declared here and deployed by `.github/workflows/release.
 
 ## What is deployed
 
-`main.bicep` is one subscription-scoped deployment in East US 2.
+`main.bicep` is one subscription-scoped deployment in West US 3. (East US 2 was tried first: on the day this was built it left a network-integrated container apps environment waiting for twenty minutes without making it, twice, where West US 3 made one in under four.)
 
 | Group | What | File |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ Add a firewall rule for your address, connect with Entra sign-in, and remove bot
 
 ## What it costs with nobody using it
 
-An estimate from list prices in East US 2, not a bill: about $105 a month at most, less while the two apps sit idle, because an idle replica is charged a lower rate.
+An estimate from list prices, not a bill: about $105 a month at most, less while the two apps sit idle, because an idle replica is charged a lower rate.
 
 | | A month |
 | --- | --- |

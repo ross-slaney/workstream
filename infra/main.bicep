@@ -22,7 +22,8 @@ param webImage string
 param sourceSha string
 @description('Validated published release tag from release.yml; a stage has none.')
 param releaseTag string = ''
-param location string = 'eastus2'
+@description('Where everything runs. The Foundry resource is elsewhere and does not move with this.')
+param location string = 'westus3'
 @description('The system administrator: the one address that reaches /admin, the GitHub variable ADMINISTRATOR_EMAIL. In production they sign in by emailed code like everyone else. Empty leaves nobody as administrator.')
 param administratorEmail string = ''
 @description('A stage only: the administrator\'s password, the secret ADMINISTRATOR_PASSWORD on the GitHub environment `staging`. Never passed on in production.')
