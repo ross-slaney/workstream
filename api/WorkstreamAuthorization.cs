@@ -29,8 +29,13 @@ public static class WorkstreamAuthorization
         public const string EnvironmentView = "ENVIRONMENT_VIEW";
         public const string EnvironmentEdit = "ENVIRONMENT_EDIT";
 
+        /// <summary>See the task, read its conversation and watch its desktop.</summary>
         public const string TaskView = "TASK_VIEW";
-        public const string TaskUse = "TASK_USE";
+        /// <summary>Write to the agent and interrupt it.</summary>
+        public const string TaskPrompt = "TASK_PROMPT";
+        /// <summary>The mouse and keyboard on the desktop, and its clipboard.</summary>
+        public const string TaskDrive = "TASK_DRIVE";
+        /// <summary>Rename, stop, start and delete it, and share it.</summary>
         public const string TaskManage = "TASK_MANAGE";
         /// <summary>The desktop's own: read its setup, exchange messages, call the model.</summary>
         public const string TaskRunAgent = "TASK_RUN_AGENT";
@@ -50,7 +55,7 @@ public static class WorkstreamAuthorization
             AdminView,
             TeamView, TeamViewUsage, TeamManageMembers, TeamManageSettings, TeamCreateEnvironment, TeamCreateTask,
             EnvironmentView, EnvironmentEdit,
-            TaskView, TaskUse, TaskManage, TaskRunAgent, TaskOperateDesktop, TeamOperateSpare, TaskNotify,
+            TaskView, TaskPrompt, TaskDrive, TaskManage, TaskRunAgent, TaskOperateDesktop, TeamOperateSpare, TaskNotify,
             EnvironmentRunSetup, EnvironmentOperateSetup,
         ];
     }
@@ -63,6 +68,12 @@ public static class WorkstreamAuthorization
         public const string TeamMember = "team_member";
         public const string TeamAdmin = "team_admin";
         public const string TaskDesktop = "task_desktop";
+        /// <summary>Someone outside the team the task is shared with: they watch it.</summary>
+        public const string TaskWatcher = "task_watcher";
+        /// <summary>They watch it and write to the agent.</summary>
+        public const string TaskPrompter = "task_prompter";
+        /// <summary>They watch it, write to the agent and use the desktop's mouse and keyboard.</summary>
+        public const string TaskDriver = "task_driver";
         public const string EnvironmentSetup = "environment_setup";
     }
 
@@ -84,9 +95,10 @@ public static class WorkstreamAuthorization
         seed.Permission(Permissions.EnvironmentView, "See an environment", ResourceTypes.Environment);
         seed.Permission(Permissions.EnvironmentEdit, "Change an environment", ResourceTypes.Environment);
 
-        seed.Permission(Permissions.TaskView, "See a task", ResourceTypes.Task);
-        seed.Permission(Permissions.TaskUse, "Talk to the agent and use the desktop", ResourceTypes.Task);
-        seed.Permission(Permissions.TaskManage, "Rename, stop, start and delete a task", ResourceTypes.Task);
+        seed.Permission(Permissions.TaskView, "See a task and watch its desktop", ResourceTypes.Task);
+        seed.Permission(Permissions.TaskPrompt, "Write to the task's agent and interrupt it", ResourceTypes.Task);
+        seed.Permission(Permissions.TaskDrive, "Use the desktop's mouse and keyboard", ResourceTypes.Task);
+        seed.Permission(Permissions.TaskManage, "Rename, stop, start, delete and share a task", ResourceTypes.Task);
         seed.Permission(Permissions.TaskRunAgent, "Run the task's agent", ResourceTypes.Task);
         seed.Permission(Permissions.TaskOperateDesktop, "Start, stop and delete the task's desktop", ResourceTypes.Task);
         seed.Permission(Permissions.TeamOperateSpare, "Make and remove the team's spare desktop", ResourceTypes.Team);
@@ -103,8 +115,13 @@ public static class WorkstreamAuthorization
         seed.Role(Roles.TeamMember, "Team member").Can(
             Permissions.TeamView, Permissions.TeamViewUsage, Permissions.TeamCreateEnvironment, Permissions.TeamCreateTask,
             Permissions.EnvironmentView, Permissions.EnvironmentEdit,
-            Permissions.TaskView, Permissions.TaskUse, Permissions.TaskManage);
+            Permissions.TaskView, Permissions.TaskPrompt, Permissions.TaskDrive, Permissions.TaskManage);
         seed.Role(Roles.TeamAdmin, "Team administrator").Can(Permissions.TeamManageMembers, Permissions.TeamManageSettings);
         seed.Role(Roles.TaskDesktop, "The task's desktop").Can(Permissions.TaskRunAgent);
+        // A task shared with someone outside the team, granted on the task alone with an end the sharer chose.
+        // Nothing here reaches the team, its environments or its other tasks, and none of them manages the task.
+        seed.Role(Roles.TaskWatcher, "Watches a shared task").Can(Permissions.TaskView);
+        seed.Role(Roles.TaskPrompter, "Writes to a shared task's agent").Can(Permissions.TaskView, Permissions.TaskPrompt);
+        seed.Role(Roles.TaskDriver, "Uses a shared task's desktop").Can(Permissions.TaskView, Permissions.TaskPrompt, Permissions.TaskDrive);
     }
 }

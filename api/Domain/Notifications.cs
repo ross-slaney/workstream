@@ -34,7 +34,7 @@ public sealed class PersonSettings
 /// <summary>
 /// When a person last had a task's desktop on screen: the relay writes it when it lets them in and each minute
 /// while the stream stays open (Desktops/DesktopRelay.cs). A fact about what someone did, like
-/// <see cref="WorkTask.CreatedBy"/>, and never a permission: whether they may watch is <c>TASK_USE</c>. Read
+/// <see cref="WorkTask.CreatedBy"/>, and never a permission: whether they may watch is <c>TASK_VIEW</c>. Read
 /// only to keep from emailing someone about a task they are looking at. Removed with the task.
 /// </summary>
 public sealed class TaskWatcher

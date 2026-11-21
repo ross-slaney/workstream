@@ -61,7 +61,7 @@ public static partial class Operations
     }
 
     /// <summary>The task, when the caller may see it and also holds <paramref name="permission"/> on it: 404, then 403.</summary>
-    static async Task<Outcome<WorkTask>> TaskWithAsync(Caller caller, string id, string permission, string refusal, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    internal static async Task<Outcome<WorkTask>> TaskWithAsync(Caller caller, string id, string permission, string refusal, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
         var seen = await ViewTaskAsync(caller, id, db, fga, ct);
         if (!seen.IsOk) return seen;
@@ -205,7 +205,7 @@ public static partial class Operations
     /// <summary>Ask the agent to stop what it is doing. The desktop sees the count change at its next exchange.</summary>
     public static async Task<Outcome<bool>> InterruptAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
-        var allowed = await TaskWithAsync(caller, id, Permissions.TaskUse, "You can't use this task.", db, fga, ct);
+        var allowed = await TaskWithAsync(caller, id, Permissions.TaskPrompt, "You can watch this task but not stop its agent.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<bool>();
         allowed.Value!.Interrupt();
         await db.SaveChangesAsync(ct);
@@ -215,7 +215,7 @@ public static partial class Operations
     /// <summary>A person writes in the conversation. A send tried again answers that it already exists.</summary>
     public static async Task<Outcome<TaskMessage>> SayAsync(Caller caller, string taskId, string? text, string? clientKey, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
-        var allowed = await TaskWithAsync(caller, taskId, Permissions.TaskUse, "You can't write in this task.", db, fga, ct);
+        var allowed = await TaskWithAsync(caller, taskId, Permissions.TaskPrompt, "You can watch this task but not write to its agent.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<TaskMessage>();
         var task = allowed.Value!;
         if (clientKey is not null && await db.TaskMessages.AnyAsync(x => x.ResourceId == task.ResourceId && x.ClientKey == clientKey, ct))

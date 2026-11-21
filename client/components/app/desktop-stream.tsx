@@ -7,11 +7,12 @@ import { useT } from "@/lib/i18n";
 
 /*
  * A task's live desktop: the picture of its screen, and the mouse and keyboard when the person clicks into
- * it. The browser's remote-desktop client (noVNC) speaks to the desktop's display through the API's relay,
+ * it, for whoever may use them. The browser's remote-desktop client (noVNC) speaks to the desktop's display through the API's relay,
  * `GET /api/tasks/{id}/desktop` as a WebSocket. A browser cannot put a bearer token on a WebSocket, so the
  * token rides in the requested subprotocols beside `binary` (api/Desktops/DesktopRelay.cs), fresh each time
  * the stream connects. The picture is scaled to fit and keeps its shape, which it reports so the screen can
- * give it exactly the room it needs; a dropped stream reconnects.
+ * give it exactly the room it needs; a dropped stream reconnects. Someone a task is shared with to watch gets
+ * the picture with the mouse and keyboard off (`viewOnly`); the relay drops what they would send anyway.
  *
  * This is a browser component: it draws into a DOM element and loads its client only in the browser.
  */
@@ -19,6 +20,7 @@ import { useT } from "@/lib/i18n";
 type Status = "connecting" | "connected" | "lost";
 
 type RemoteDesktop = {
+  viewOnly: boolean;
   scaleViewport: boolean;
   resizeSession: boolean;
   focusOnClick: boolean;
@@ -27,7 +29,7 @@ type RemoteDesktop = {
   disconnect: () => void;
 };
 
-export function DesktopStream({ taskId, label, onShape }: { taskId: string; label: string; onShape?: (widthOverHeight: number) => void }) {
+export function DesktopStream({ taskId, label, viewOnly = false, onShape }: { taskId: string; label: string; viewOnly?: boolean; onShape?: (widthOverHeight: number) => void }) {
   const t = useT("workspace");
   const { colors } = useTheme();
   const screen = useRef<HTMLDivElement>(null);
@@ -36,6 +38,16 @@ export function DesktopStream({ taskId, label, onShape }: { taskId: string; labe
   // Kept in a ref so a new callback from the controller does not reconnect the stream.
   const shape = useRef(onShape);
   shape.current = onShape;
+  // Kept in a ref too: a share that changes while the stream is open changes the client, not the connection.
+  const watching = useRef(viewOnly);
+  watching.current = viewOnly;
+  const live = useRef<RemoteDesktop | null>(null);
+  useEffect(() => {
+    if (live.current) {
+      live.current.viewOnly = viewOnly;
+      live.current.focusOnClick = !viewOnly;
+    }
+  }, [viewOnly]);
 
   useEffect(() => {
     let remote: RemoteDesktop | null = null;
@@ -58,9 +70,11 @@ export function DesktopStream({ taskId, label, onShape }: { taskId: string; labe
         const url = `${getApiUrl().replace(/^http/, "ws")}/api/tasks/${encodeURIComponent(taskId)}/desktop`;
         const client: RemoteDesktop = new RFB(screen.current, url, { wsProtocols: ["binary", `bearer.${token}`], shared: true });
         remote = client;
+        live.current = client;
+        client.viewOnly = watching.current;
         client.scaleViewport = true;
         client.resizeSession = false;
-        client.focusOnClick = true;
+        client.focusOnClick = !watching.current;
         client.background = stage;
         client.addEventListener("connect", () => {
           attempts = 0;
@@ -72,6 +86,7 @@ export function DesktopStream({ taskId, label, onShape }: { taskId: string; labe
         });
         client.addEventListener("disconnect", () => {
           if (remote === client) remote = null;
+          if (live.current === client) live.current = null;
           again();
         });
       } catch {

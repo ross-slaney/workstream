@@ -51,6 +51,9 @@ public sealed record CodeTemplate(string Key, string DisplayName, string Subject
         ["message"] = "The sign-in page works again. Should I also add a test for it?",
         ["link"] = "https://workstream.example/t/team/?open=task",
         ["settingsLink"] = "https://workstream.example/t/team/team",
+        ["sharer"] = "Ada Lovelace",
+        ["access"] = "You can watch its desktop and write to its agent.",
+        ["ends"] = "It ends 28 November 2026, 14:00 UTC.",
     };
 }
 
@@ -102,10 +105,12 @@ public static class TaskEmailTemplates
     /// </summary>
     public static async Task<IReadOnlyList<string>> ReconcileAsync(WorkstreamDbContext db, SqlOSEmailAdminService admin, CancellationToken ct)
     {
-        var keys = All.Select(x => x.Key).ToList();
+        // These and the emails that share a task (ShareEmails.cs): every email the API sends.
+        IReadOnlyList<CodeTemplate> owned = [.. All, .. ShareEmailTemplates.All];
+        var keys = owned.Select(x => x.Key).ToList();
         var existing = await db.Set<SqlOSEmailTemplate>().AsNoTracking().Where(x => keys.Contains(x.Key)).ToDictionaryAsync(x => x.Key, ct);
         var written = new List<string>();
-        foreach (var template in All)
+        foreach (var template in owned)
         {
             if (!existing.TryGetValue(template.Key, out var row))
             {
@@ -194,8 +199,20 @@ public sealed class TaskEmails(IServiceScopeFactory scopes, ISqlOSEmailSender se
         var sent = 0;
         foreach (var (id, address) in recipients)
         {
+            // Someone the task is shared with is not on its team: the task opens in their own workspace, and the
+            // switch is on their own team's page.
+            var theirs = variables;
+            if (!await db.Set<SqlOSMembership>().AnyAsync(x => x.OrganizationId == task.TeamId && x.UserId == id && x.IsActive, ct))
+            {
+                var own = await db.Set<SqlOSMembership>().AsNoTracking().Where(x => x.UserId == id && x.IsActive).OrderBy(x => x.CreatedAt).Select(x => x.OrganizationId).FirstOrDefaultAsync(ct);
+                theirs = new Dictionary<string, object?>(variables)
+                {
+                    ["link"] = $"{app.WebOrigin}/home?open={Uri.EscapeDataString(task.Id)}",
+                    ["settingsLink"] = own is null ? $"{app.WebOrigin}/home" : $"{app.WebOrigin}/t/{Uri.EscapeDataString(own)}/team",
+                };
+            }
             // One email a person a turn, however many times the job runs.
-            var result = await email.SendAsync(new SqlOSSendEmailRequest(template, address, variables, $"task:{task.Id}:turn:{last.Id}:to:{id}"), ct);
+            var result = await email.SendAsync(new SqlOSSendEmailRequest(template, address, theirs, $"task:{task.Id}:turn:{last.Id}:to:{id}"), ct);
             if (result.Status == SqlOSEmailDeliveryStatuses.Failed) log.LogWarning("The email about task {TaskId} could not be sent: {Error}", taskId, result.SanitizedError);
             else sent++;
         }

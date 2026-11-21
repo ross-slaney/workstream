@@ -17,8 +17,8 @@ export type ShellTask = {
 export type ShellPlace = "tasks" | "environments" | "team" | "usage";
 
 /**
- * The frame around every signed-in page of a team: its tasks down the side, the ways to the team's other
- * pages, and the page itself. A task in the list can be opened by itself, opened beside the others, or
+ * The frame around every signed-in page of a team: its tasks down the side, then the tasks other teams share
+ * with the person, the ways to the team's other pages, and the page itself. A task in the list can be opened by itself, opened beside the others, or
  * dragged onto the screens.
  */
 export type AppShellProps = {
@@ -28,6 +28,8 @@ export type AppShellProps = {
   person: { name: string; email: string | null; systemAdmin: boolean };
   place: ShellPlace;
   tasks: Online<ShellTask[]>;
+  /** Tasks of other teams shared with the person; the list shows only when there are some. They open like the team's own. */
+  shared: ShellTask[];
   onRetryTasks: () => void;
   /** Show this task by itself. */
   onOpenTask: (taskId: string) => void;
