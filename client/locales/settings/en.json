@@ -26,7 +26,7 @@
       "advancedHint": "For a project that needs its code, tools and keys in place before the agent starts.",
       "repository": "Repository",
       "repositoryPlaceholder": "https://github.com/acme/app",
-      "repositoryHint": "Cloned when the desktop is made. For a private GitHub repository, add a variable named GITHUB_TOKEN.",
+      "repositoryHint": "Cloned when the desktop is made. For a private GitHub repository, add a variable named GITHUB_TOKEN. It also signs in git and gh, so the agent can push a branch and open a pull request.",
       "branch": "Branch",
       "branchPlaceholder": "main",
       "setupScript": "Setup script",

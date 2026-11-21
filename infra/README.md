@@ -125,7 +125,7 @@ The prices are Azure's list prices in West US 3, kept in one place (`DesktopOpti
 | | |
 | --- | --- |
 | A task's desktop, running | $0.091 (Small), $0.182 (Standard) or $0.364 (Large) an hour |
-| A desktop's disk, running or stopped, until its task is deleted | $4.80 a month (Standard SSD, 64 GB) |
+| A desktop's disk, running or stopped, until its task is deleted | $4.80 a month (Standard SSD, 64 GB: Small and Standard) or $9.60 (128 GB: Large) |
 | A spare, while someone is in a team's workspace | the same hourly price as a desktop of its size |
 
 Spares are the one cost that is not somebody's task. Their limits are two settings in `infra/api.bicep`: `sparesAtOnce` (2) and `spareHoursADay` (6). At those, spares cost at most 6 × $0.182 = $1.09 a day, about $33 in a month in which the limit is reached every day, and nothing on a day nobody opens the app. A spare nobody takes is removed after 15 minutes, which is $0.05.

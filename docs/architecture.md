@@ -62,6 +62,22 @@ The agent has its own window on the desktop, the Agent button on the panel, whic
 
 Another harness would replace `harness.mjs` and nothing else: the rest of the agent only hands it prompts and takes what it said and did.
 
+## A project's whole stack on a desktop
+
+A team's real project usually runs as several programs at once: a database in a container, an API, a bundler, a browser driving it. The image has what such a stack needs (`desktop/image/install.sh`): Docker Engine, the .NET 10 SDK (Aspire 9 and later is a NuGet package of the project, with no workload), Node 22, sqlcmd, Playwright's system libraries (the browsers themselves are the project's own version), Java 17, and the Android SDK with an emulator set up as `Phone`. The ASP.NET Core development certificate is made and trusted for the desktop's person, and the limits a big project reaches (watched files, open files) are raised.
+
+| Size | Machine | Disk |
+| --- | --- | --- |
+| Small | 2 cores, 8 GB (`Standard_D2as_v7`) | 64 GB |
+| Standard | 4 cores, 16 GB (`Standard_D4as_v7`) | 64 GB |
+| Large | 8 cores, 32 GB (`Standard_D8as_v7`) | 128 GB |
+
+The disk of each size is a setting (`Workstream:Desktops:Azure:DiskSizesGb`) priced beside the machines (`DesktopOptions.Prices`). The image is 64 GB, so a machine with a larger disk grows its file system to it when it first boots (`image/grow-disk.sh`). A project with a database, an API and a web bundler wants Large.
+
+Every Dasv7 size exposes the processor's virtualization to the machine (AMD-V, `/dev/kvm`), so the Android emulator runs with hardware acceleration; the image checks this when it is baked (`emulator -accel-check`). iPhone and iPad builds and the iOS simulator need macOS and Apple's tools, which no Linux desktop can run; the agent is told so and does the rest of a task.
+
+The agent is told how to work on a project the way a developer does (`harness.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, and deliver changes on a branch of their own as a pull request opened with `gh`. A `GITHUB_TOKEN` variable on the environment (`agent/github.mjs`) signs in git and gh (gh reads it as `GH_TOKEN`, so the desktop sets both), and commits are made as the token's GitHub account at its private noreply address.
+
 ## Models
 
 The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.
