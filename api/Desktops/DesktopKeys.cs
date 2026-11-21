@@ -107,9 +107,9 @@ public static class DesktopKeys
 
     /// <summary>
     /// Resolves a key to its desktop. Every failure is one generic 401. Wrong secrets are counted per task, never
-    /// per address (every desktop reaches the API from the same address), so guessing at one task's key costs
-    /// only that task; a verified secret is remembered for a minute by its hash so the slow hash runs once, while
-    /// the account's expiry is read fresh on every request.
+    /// per address (every desktop reaches the API from the same address), and the count stops only keys not yet
+    /// verified; a verified secret is remembered by its hash for as long as it keeps being used, so the slow hash
+    /// runs once, while the account's expiry and its current secret are read fresh on every request.
     /// </summary>
     public sealed class Handler(
         IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder,
@@ -121,20 +121,23 @@ public static class DesktopKeys
             if (ReadKey(Request) is not { } raw || !raw.StartsWith(Prefix, StringComparison.Ordinal)) return AuthenticateResult.NoResult();
 
             if (!TryParse(raw, out var taskId, out var secret)) return AuthenticateResult.Fail("The key is not a desktop's.");
-            if (cache.TryGetValue(FailureKey(taskId), out int failures) && failures >= FailuresPerMinute)
-            {
-                return AuthenticateResult.Fail("Too many wrong keys for this desktop.");
-            }
 
             var clientId = ClientIdFor(taskId);
             var account = await db.Set<SqlOSFgaServiceAccount>().AsNoTracking().SingleOrDefaultAsync(x => x.ClientId == clientId, Context.RequestAborted);
             if (account is null || account.ExpiresAt is { } expiry && expiry <= DateTime.UtcNow) return AuthenticateResult.Fail("The key is not a desktop's.");
 
+            // A key verified a moment ago is taken as it is, and stays remembered while its desktop keeps calling
+            // (about once a second). So someone guessing at a task's key cannot lock the real desktop out: the
+            // limit below only ever stops keys that have not been verified.
             var verifiedKey = "wsd:" + crypto.HashToken(raw);
             if (!cache.TryGetValue(verifiedKey, out string? hash) || hash != account.ClientSecretHash)
             {
+                if (cache.TryGetValue(FailureKey(taskId), out int failures) && failures >= FailuresPerMinute)
+                {
+                    return AuthenticateResult.Fail("Too many wrong keys for this desktop.");
+                }
                 if (!crypto.VerifyPassword(account.ClientSecretHash, secret)) return Refuse(taskId);
-                cache.Set(verifiedKey, account.ClientSecretHash, VerifiedFor);
+                cache.Set(verifiedKey, account.ClientSecretHash, new MemoryCacheEntryOptions { SlidingExpiration = VerifiedFor });
             }
 
             var caller = new Caller(account.SubjectId, null, taskId);

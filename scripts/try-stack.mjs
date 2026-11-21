@@ -118,7 +118,8 @@ function safeJson(text) {
  */
 function openDisplay(taskId, token) {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(`${api.replace(/^http/, "ws")}/api/tasks/${taskId}/desktop`, ["binary", `bearer.${token}`]);
+    // The relay takes this stream only from the web app's own pages, so the script says where it came from as a browser would.
+    const socket = new WebSocket(`${api.replace(/^http/, "ws")}/api/tasks/${taskId}/desktop`, { protocols: ["binary", `bearer.${token}`], headers: { Origin: web } });
     socket.binaryType = "arraybuffer";
     let buffer = Buffer.alloc(0);
     let phase = "version";
