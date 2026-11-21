@@ -1,4 +1,4 @@
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import Head from "expo-router/head";
 import { useState } from "react";
 import { Button } from "@/components/kit/button";
@@ -13,19 +13,22 @@ import { CreateTeamDialog } from "@/src/workspace/dialogs";
 
 /**
  * /home: where signing in lands. It goes straight to the team the person was last in, or their first; someone
- * on no team (they left their last one) is offered to create one.
+ * on no team (they left their last one) is offered to create one. `?open=` carries a task to put on screen
+ * there: the link to a task shared with them, which may be another team's.
  */
 export default function HomeRoute() {
   const t = useT("workspace");
   const common = useT("common");
   const router = useRouter();
+  const params = useLocalSearchParams<{ open?: string }>();
   const teams = useOnlineRead(() => workstream.teams(), "teams");
   const [creating, setCreating] = useState(false);
   const action = useAction();
   if (teams.kind === "ready" && teams.value.data.length > 0) {
     const remembered = lastTeam();
     const team = teams.value.data.find((candidate) => candidate.id === remembered) ?? teams.value.data[0];
-    return <Redirect href={`/t/${encodeURIComponent(team.id)}`} />;
+    const open = typeof params.open === "string" && params.open ? `?open=${encodeURIComponent(params.open)}` : "";
+    return <Redirect href={`/t/${encodeURIComponent(team.id)}${open}`} />;
   }
   return (
     <main className="flex h-full items-center justify-center bg-canvas text-foreground">

@@ -32,7 +32,8 @@ public enum StartStep
 
 /// <summary>
 /// A task: one piece of work, with a desktop and a conversation with the agent on it (docs/core-model.md).
-/// A node under its team; everyone on the team can see and use it through the team's one grant. This row also
+/// A node under its team; everyone on the team can see and use it through the team's one grant, and someone outside
+/// the team it is shared with through a grant on this node alone (Operations/Sharing.cs). This row also
 /// keeps the desktop's lifecycle. (The class is not named Task because System.Threading.Tasks.Task is.)
 /// </summary>
 public sealed class WorkTask : ISqlOSResourceEntity
@@ -77,6 +78,8 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public bool AgentWorking { get; private set; }
     /// <summary>How many times a person has asked the agent to stop what it is doing. The desktop acts when it changes.</summary>
     public int Interrupts { get; private set; }
+    /// <summary>When the task last emailed people that it was finished or needed them. Null until it first did.</summary>
+    public DateTimeOffset? EmailedAt { get; private set; }
 
     /// <summary>Whether the machine is in use and counts toward the team's limit.</summary>
     public bool IsRunning => State is DesktopState.Starting or DesktopState.Ready or DesktopState.Stopping;
@@ -169,6 +172,21 @@ public sealed class WorkTask : ISqlOSResourceEntity
         return true;
     }
 
+    /// <summary>
+    /// Whether the desktop's exchange, saying the agent is or is not working, ends the agent's turn: it was
+    /// working and now is not. Asked before <see cref="DesktopSeen"/> records the exchange.
+    /// </summary>
+    public bool EndsTurn(bool agentWorking) => State == DesktopState.Ready && AgentWorking && !agentWorking;
+
+    /// <summary>
+    /// Whether the task may email people about a turn now: at most one email every <paramref name="gap"/>,
+    /// however many turns end in between.
+    /// </summary>
+    public bool MayEmail(DateTimeOffset now, TimeSpan gap) => EmailedAt is not { } last || now - last >= gap;
+
+    /// <summary>The task emailed people about a turn.</summary>
+    public void Emailed(DateTimeOffset now) => EmailedAt = now;
+
     public void Stop(DateTimeOffset now)
     {
         if (State is not (DesktopState.Starting or DesktopState.Ready)) throw new DomainRuleException("Only a running desktop can be stopped.");
@@ -245,7 +263,7 @@ public enum MessageKind
 }
 
 /// <summary>
-/// One entry in a task's conversation. Not a node: a message is never granted on its own, so <c>TASK_USE</c> on
+/// One entry in a task's conversation. Not a node: a message is never granted on its own, so <c>TASK_PROMPT</c> on
 /// the task writes one and <c>TASK_VIEW</c> reads them. <see cref="ResourceId"/> is the task's node, so the
 /// conversation is one authorized page over this table. <see cref="Id"/> is also the conversation's order.
 /// </summary>

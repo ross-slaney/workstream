@@ -19,9 +19,12 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<WorkEnvironment> Environments => Set<WorkEnvironment>();
     public DbSet<WorkTask> Tasks => Set<WorkTask>();
     public DbSet<TaskMessage> TaskMessages => Set<TaskMessage>();
+    public DbSet<TaskInvitation> TaskInvitations => Set<TaskInvitation>();
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
     public DbSet<Spare> Spares => Set<Spare>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
+    public DbSet<PersonSettings> PersonSettings => Set<PersonSettings>();
+    public DbSet<TaskWatcher> TaskWatchers => Set<TaskWatcher>();
 
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
     internal static decimal DefaultModelAllowanceUsd { get; set; } = 20m;
@@ -101,6 +104,24 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             message.Property(x => x.ClientKey).HasMaxLength(36);
         });
 
+        // A task shared with someone who has no account yet. Not a protected row: the share dialog reads a
+        // task's after one TASK_MANAGE check, and a link finds its own by the token's hash.
+        model.Entity<TaskInvitation>(invitation =>
+        {
+            invitation.ToTable("TaskInvitations");
+            invitation.Property(x => x.Id).HasMaxLength(36);
+            invitation.Property(x => x.TaskId).HasMaxLength(36);
+            invitation.Property(x => x.Email).HasMaxLength(320);
+            invitation.Property(x => x.NormalizedEmail).HasMaxLength(320);
+            invitation.Property(x => x.Role).HasMaxLength(50);
+            invitation.Property(x => x.TokenHash).HasMaxLength(64);
+            invitation.Property(x => x.InvitedBy).HasMaxLength(450);
+            invitation.HasIndex(x => x.TokenHash).IsUnique();
+            // One waiting invitation per address per task: sharing again replaces it.
+            invitation.HasIndex(x => new { x.TaskId, x.NormalizedEmail }).IsUnique();
+            invitation.HasOne<WorkTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         model.Entity<DesktopRun>(run =>
         {
             run.ToTable("DesktopRuns");
@@ -141,6 +162,22 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             usage.Property(x => x.Model).HasMaxLength(100);
             usage.Property(x => x.CostUsd).HasPrecision(18, 6);
             usage.HasIndex(x => new { x.TeamId, x.At });
+        });
+
+        model.Entity<PersonSettings>(settings =>
+        {
+            settings.ToTable("PersonSettings");
+            settings.HasKey(x => x.UserId);
+            settings.Property(x => x.UserId).HasMaxLength(450);
+        });
+
+        model.Entity<TaskWatcher>(watcher =>
+        {
+            watcher.ToTable("TaskWatchers");
+            watcher.HasKey(x => new { x.TaskId, x.UserId });
+            watcher.HasOne<WorkTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
+            watcher.Property(x => x.TaskId).HasMaxLength(36);
+            watcher.Property(x => x.UserId).HasMaxLength(450);
         });
     }
 

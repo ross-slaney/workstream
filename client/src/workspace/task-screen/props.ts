@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Task } from "@/lib/workstream/api";
+import type { Task, TaskAccess } from "@/lib/workstream/api";
 
 /** One entry in the conversation as the screen draws it. */
 export type ChatEntry = {
@@ -23,6 +23,11 @@ export type ChatEntry = {
 export type TaskScreenProps = {
   /** Null until the first read answers. */
   task: Task | null;
+  /**
+   * What the person may do with it, null until the first read answers. Someone it is shared with to watch
+   * writes nothing and sees no menu; the team may do everything, sharing included.
+   */
+  access: TaskAccess | null;
   /** The task is not there any more: deleted here or by a teammate. */
   missing: boolean;
   entries: ChatEntry[];
@@ -37,6 +42,8 @@ export type TaskScreenProps = {
   onStopDesktop: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
+  /** Open who has this task, to share it or take it back. */
+  onShare: () => void;
   /** Take this screen off the screens. */
   onClose: () => void;
   /** An action on the task is under way. */

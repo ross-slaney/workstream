@@ -59,6 +59,8 @@ public static partial class WorkstreamApi
         // People, with SqlOS's token.
         var api = app.MapGroup("/api").RequireAuthorization().AddEndpointFilter(WriteScopeForChanges);
         api.MapGet("/me", GetMe).WithName("get_me").WithTags("Me").Produces<MeDto>();
+        api.MapGet("/me/settings", GetMySettings).WithName("get_my_settings").WithTags("Me").Produces<MySettings>();
+        api.MapPut("/me/settings", PutMySettings).WithName("change_my_settings").WithTags("Me").Produces<MySettings>();
         api.MapGet("/apps", () => Results.Ok(AppCatalog.All)).WithName("list_apps").WithTags("Environments").Produces<IReadOnlyList<DesktopApp>>();
         MapTeams(api);
         MapEnvironments(api);
@@ -79,6 +81,18 @@ public static partial class WorkstreamApi
         var caller = CallerOf(http);
         var user = await db.Set<SqlOSUser>().AsNoTracking().Where(x => x.Id == caller.PrincipalId).Select(x => new { x.DisplayName, x.DefaultEmail }).SingleOrDefaultAsync(ct);
         return Results.Ok(new MeDto(caller.PrincipalId, user?.DisplayName ?? "", user?.DefaultEmail, await fga.HasCapabilityAsync(caller.PrincipalId, Permissions.AdminView)));
+    }
+
+    static async Task<IResult> GetMySettings(HttpContext http, WorkstreamDbContext db, CancellationToken ct)
+    {
+        var outcome = await Operations.MySettingsAsync(CallerOf(http), db, ct);
+        return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
+    }
+
+    static async Task<IResult> PutMySettings(MySettings body, HttpContext http, WorkstreamDbContext db, CancellationToken ct)
+    {
+        var outcome = await Operations.ChangeMySettingsAsync(CallerOf(http), body, db, ct);
+        return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
     /// <summary>The person calling; never what the request says.</summary>

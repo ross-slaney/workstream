@@ -8,7 +8,8 @@
 //   3. prepares the desktop from its environment, where the person can see it: the variables, the
 //      repository, the apps on the panel, the setup script in a terminal window;
 //   4. runs the agent (harness.mjs) and feeds it what people write;
-//   5. serves the agent's own window on the desktop (window.mjs), which shows the same conversation.
+//   5. serves the agent's own window on the desktop (window.mjs), which shows the same conversation;
+//   6. after a stop, brings back what was running and what was open (restore.mjs).
 //
 // Everything but the two things it is told comes from the API.
 
@@ -21,6 +22,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { panelFor } from "./panel.mjs";
+import { localPort, machineStarted, noteTabs, restartScript, restoredLine, restorePlan } from "./restore.mjs";
 import { told } from "./told.mjs";
 import { startWindow } from "./window.mjs";
 
@@ -40,6 +42,11 @@ await mkdir(dir, { recursive: true });
 /** Kept across restarts of the desktop: where it is in the conversation, and what it has already prepared. */
 const state = { after: 0, interrupts: 0, sessionId: null, prepared: false, ...(existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, "utf8")) : {}) };
 const saveState = () => writeFile(stateFile, JSON.stringify(state));
+/**
+ * What to bring back: only on the first start of the machine after a stop, when this desktop was already
+ * prepared once. The agent starting again on a running desktop finds the programs still there.
+ */
+const restoring = machineStarted(process.env.WORKSTREAM_MACHINE_MARK ?? "/dev/shm/workstream-agent") && state.prepared ? restorePlan(state) : null;
 
 /** The conversation as this desktop has seen it, for the agent's window. */
 const conversation = existsSync(conversationFile)
@@ -243,9 +250,65 @@ async function prepareWindows(setup, workspace) {
   }
   state.prepared = true;
   await saveState();
+  if (restoring) {
+    await restore(restoring, setup, workspace);
+    return;
+  }
   // The browser is always there: it is the one the agent's browser tools drive. A spare opened it while it waited.
   if (!(await browserAnswers())) start("chromium", ["about:blank"], setup.variables);
   if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
+  watchTabs();
+}
+
+/**
+ * After a stop: the commands that were running start again in a terminal window, VS Code opens on the
+ * workspace with the files the agent had open, and the browser opens the pages it had. A page on one of this
+ * desktop's own servers opens once the server answers, or after a minute and a half.
+ */
+async function restore(plan, setup, workspace) {
+  log(`Started again after a stop: ${plan.commands.length} commands, ${plan.tabs.length} pages, ${plan.files.length} files.`);
+  if (plan.commands.length > 0) {
+    const script = path.join(dir, "restore.sh");
+    await writeFile(script, restartScript(plan.commands, path.join(dir, "env.sh")), { mode: 0o700 });
+    const terminal = spawn("xfce4-terminal", ["--title", "Restored", "--geometry", "110x24", "-x", "bash", script], {
+      detached: true, stdio: "ignore", env: { ...process.env, ...setup.variables },
+    });
+    terminal.on("error", () => spawn("bash", [script], { detached: true, stdio: "ignore", env: { ...process.env, ...setup.variables } }).on("error", () => {}).unref());
+    terminal.unref();
+  }
+  if (setup.apps.includes("vscode")) start("code", [workspace, ...plan.files.filter((file) => existsSync(file))], setup.variables);
+  const here = plan.tabs.filter((url) => localPort(url) !== null);
+  const away = plan.tabs.filter((url) => localPort(url) === null);
+  if (await browserAnswers()) away.forEach((url) => start("chromium", [url], setup.variables));
+  else start("chromium", away.length > 0 ? away : ["about:blank"], setup.variables);
+  say("activity", "Started again what was running before the desktop stopped");
+  // Pages are recorded again once every page that was open is back, so a quick second stop loses none.
+  Promise.all(here.map(async (url) => {
+    for (let waited = 0; waited < 90 && !(await pageAnswers(url)); waited++) await sleep(1000);
+    await browserUp();
+    start("chromium", [url], setup.variables);
+  })).finally(() => setTimeout(watchTabs, 5000));
+}
+
+/** Whether a page answers at all, which is what a server that is up does. */
+const pageAnswers = (url) => fetch(url, { signal: AbortSignal.timeout(2000), redirect: "manual" }).then(() => true, () => false);
+
+/** Every fifteen seconds, the pages open in the browser are kept, to open again after a stop. */
+let watchingTabs = false;
+function watchTabs() {
+  if (watchingTabs) return;
+  watchingTabs = true;
+  (async () => {
+    while (true) {
+      try {
+        const response = await fetch("http://127.0.0.1:9222/json", { signal: AbortSignal.timeout(2000) });
+        if (response.ok && noteTabs(state, await response.json())) await saveState();
+      } catch {
+        // The browser is closed for now: what was open last is what is kept.
+      }
+      await sleep(15_000);
+    }
+  })();
 }
 
 /** Whether the browser's debugging port answers, which is what the agent's browser tools attach to. */
@@ -327,6 +390,7 @@ preparing = false;
 const { startHarness } = await harnessLoading;
 harness = startHarness({
   setup, key, workspace, state, saveState, say, prompts, log,
+  restored: restoredLine(restoring, workspace),
   setWorking: (value) => {
     working = value;
   },

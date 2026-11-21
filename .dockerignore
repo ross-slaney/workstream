@@ -8,4 +8,9 @@ api/obj
 !desktop/
 desktop/**
 !desktop/apps.json
+!client/
+client/**
+!client/locales/
+!client/locales/emails/
+!client/locales/emails/**
 **/.env*

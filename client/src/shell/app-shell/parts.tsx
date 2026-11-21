@@ -10,7 +10,7 @@ import type { AppShellProps, ShellPlace, ShellTask } from "./props";
 
 const CREATE_TEAM = "__create__";
 
-/** Everything down the side: the team, the tasks, the team's other pages and the person. The same on every surface. */
+/** Everything down the side: the team, the tasks, those shared with the person, the team's other pages and the person. The same on every surface. */
 export function Sidebar(p: AppShellProps) {
   const t = useT("workspace");
   const common = useT("common");
@@ -66,6 +66,16 @@ export function Sidebar(p: AppShellProps) {
               <ReadState read={p.tasks} onRetry={p.onRetryTasks} />
             </div>
           )}
+          {p.shared.length > 0 ? (
+            <>
+              <h2 className="px-2 pb-1 pt-4 text-[11.5px] font-semibold text-muted-foreground">{t("sidebar.shared")}</h2>
+              <ul aria-label={t("sidebar.shared")} className="flex flex-col gap-0.5">
+                {p.shared.map((task) => (
+                  <TaskRow key={task.id} task={task} onOpen={() => p.onOpenTask(task.id)} onOpenBeside={() => p.onOpenBeside(task.id)} />
+                ))}
+              </ul>
+            </>
+          ) : null}
         </div>
       </div>
 

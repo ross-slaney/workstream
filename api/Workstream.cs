@@ -30,6 +30,8 @@ public sealed class WorkstreamApp
     public const string InvitePath = "/invite";
     /// <summary>Where a person approves the command line's sign-in (client/app/device.tsx), under <see cref="WebOrigin"/>, with <c>?request=</c>.</summary>
     public const string DevicePath = "/device";
+    /// <summary>Where an invitation to a shared task is taken (client/app/share.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
+    public const string SharePath = "/share";
     public const string ApiPath = "/api";
     /// <summary>Required by every /api route. Keep in sync with AUTH_SCOPE in client/lib/auth.ts.</summary>
     public const string ReadScope = "workstream.read";

@@ -101,8 +101,13 @@ public sealed class PlayedDisplay : IDisposable
         }
     }
 
-    static async Task GreetAsync(TcpClient client)
+    /// <summary>What each viewer sent, connection by connection, so a journey can see what the relay let through.</summary>
+    public ConcurrentBag<Viewer> Viewers { get; } = [];
+
+    async Task GreetAsync(TcpClient client)
     {
+        var viewer = new Viewer();
+        Viewers.Add(viewer);
         using (client)
         {
             try
@@ -110,7 +115,9 @@ public sealed class PlayedDisplay : IDisposable
                 var stream = client.GetStream();
                 await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(Greeting));
                 // Held open until the other side goes, as a display holds its viewers.
-                while (await stream.ReadAsync(new byte[256]) > 0) { }
+                var buffer = new byte[4096];
+                int read;
+                while ((read = await stream.ReadAsync(buffer)) > 0) viewer.Add(buffer.AsSpan(0, read));
             }
             catch (Exception error) when (error is IOException or SocketException)
             {
@@ -120,4 +127,23 @@ public sealed class PlayedDisplay : IDisposable
     }
 
     public void Dispose() => listener.Stop();
+}
+
+/// <summary>The bytes one viewer's connection brought the played display.</summary>
+public sealed class Viewer
+{
+    readonly List<byte> received = [];
+
+    public void Add(ReadOnlySpan<byte> bytes)
+    {
+        lock (received) received.AddRange(bytes.ToArray());
+    }
+
+    public byte[] Received
+    {
+        get
+        {
+            lock (received) return [.. received];
+        }
+    }
 }
