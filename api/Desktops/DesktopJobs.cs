@@ -27,6 +27,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
     /// <summary>How long a start job follows a machine. One that has not shown a screen by then is left to the sweep.</summary>
     static readonly TimeSpan FollowFor = TimeSpan.FromMinutes(5);
     static readonly TimeSpan AskHostEvery = TimeSpan.FromSeconds(2);
+    /// <summary>How old a machine no task owns must be before the sweep deletes it.</summary>
+    static readonly TimeSpan StrayAfter = TimeSpan.FromMinutes(30);
 
     /// <summary>
     /// Make the task's machine, or start the one it has, and follow it until there is a screen to watch,
@@ -278,10 +280,13 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }
         foreach (var id in deleting) await DeleteAsync(id, ct);
 
-        foreach (var stray in (await host.ListAsync(ct)).Where(name => name.StartsWith("ws-", StringComparison.Ordinal) && !owned.Contains(name)))
+        // A machine no task owns is a stray once it has been there a while. A newer one may belong to a task
+        // started after this sweep read the tasks, which can be minutes ago when it had desktops to stop.
+        foreach (var stray in (await host.ListAsync(ct)).Where(machine =>
+                     machine.Name.StartsWith("ws-", StringComparison.Ordinal) && !owned.Contains(machine.Name) && now - machine.CreatedAt > StrayAfter))
         {
-            log.LogWarning("Deleting the machine {Machine}: no task owns it.", stray);
-            await host.DeleteAsync(stray, ct);
+            log.LogWarning("Deleting the machine {Machine}: no task owns it.", stray.Name);
+            await host.DeleteAsync(stray.Name, ct);
         }
     }
 

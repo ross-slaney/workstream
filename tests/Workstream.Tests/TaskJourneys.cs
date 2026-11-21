@@ -312,8 +312,12 @@ public sealed class TaskJourneys
         using var desktop = await Desktop.StartAsync(idle.Id);
         await desktop.ExchangeAsync();
         await Stack.Jobs.StartAsync(silent.Id, CancellationToken.None);
-        // A machine no task knows: left behind by something that went wrong.
+        // Two machines no task knows. One was left behind long ago by something that went wrong; the other is
+        // a minute old, and could belong to a task started while the sweep was busy.
         await Stack.Desktops.CreateAsync(new DesktopSpec("ws-stray-0000000000", Guid.NewGuid().ToString("D"), team.Id, "standard", "", ""), CancellationToken.None);
+        Stack.Desktops.MadeAt["ws-stray-0000000000"] = DateTimeOffset.UtcNow.AddHours(-2);
+        await Stack.Desktops.CreateAsync(new DesktopSpec("ws-new-00000000000", Guid.NewGuid().ToString("D"), team.Id, "standard", "", ""), CancellationToken.None);
+        Stack.Desktops.MadeAt["ws-new-00000000000"] = DateTimeOffset.UtcNow.AddMinutes(-1);
 
         // The same sweep with no patience: idle at once, late at once.
         var impatient = new DesktopJobs(
@@ -326,5 +330,7 @@ public sealed class TaskJourneys
         Assert.IsTrue(swept.State is "stopping" or "stopped", swept.State);
         Assert.AreEqual("failed", (await ada.GetAsync<TaskDto>($"/api/tasks/{silent.Id}")).State);
         Assert.IsFalse(Stack.Desktops.Made.ContainsKey("ws-stray-0000000000"));
+        Assert.IsTrue(Stack.Desktops.Made.ContainsKey("ws-new-00000000000"));
+        await Stack.Desktops.DeleteAsync("ws-new-00000000000", CancellationToken.None);
     }
 }

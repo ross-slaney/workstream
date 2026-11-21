@@ -61,7 +61,11 @@ public sealed class FakeDesktops : IDesktopHost
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<string>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>(Running.Keys.ToList());
+    /// <summary>When each machine was made. A journey makes one old to play a machine left behind long ago.</summary>
+    public ConcurrentDictionary<string, DateTimeOffset> MadeAt { get; } = new();
+
+    public Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<HostedMachine>>(Running.Keys.Select(name => new HostedMachine(name, MadeAt.GetValueOrDefault(name, DateTimeOffset.UtcNow))).ToList());
 
     /// <summary>What the desktop for this task was made with.</summary>
     public DesktopSpec For(string taskId) => Made.Values.Single(spec => spec.TaskId == taskId);

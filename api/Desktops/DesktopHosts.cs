@@ -23,6 +23,9 @@ public sealed record DesktopSpec(string Name, string TaskId, string TeamId, stri
 /// <summary>Where a desktop is: its name at the host, and where the API reaches its display (<c>host:port</c>).</summary>
 public sealed record DesktopPlace(string Host, string Address);
 
+/// <summary>A machine the host holds, and when it was made.</summary>
+public sealed record HostedMachine(string Name, DateTimeOffset CreatedAt);
+
 /// <summary>How a machine that was asked to start is doing: on yet or not, or failed, and then why in the host's words.</summary>
 public sealed record MachineState(bool On, string? Failure = null);
 
@@ -46,8 +49,8 @@ public interface IDesktopHost
     Task StopAsync(string host, CancellationToken ct);
     /// <summary>Remove the machine and everything made with it. A machine that is not there is already deleted.</summary>
     Task DeleteAsync(string host, CancellationToken ct);
-    /// <summary>Every machine this host holds, by name: what the sweep compares with the tasks to find strays.</summary>
-    Task<IReadOnlyList<string>> ListAsync(CancellationToken ct);
+    /// <summary>Every machine this host holds: what the sweep compares with the tasks to find strays.</summary>
+    Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct);
 }
 
 /// <summary>A desktop's display, as the API reaches it.</summary>
@@ -164,7 +167,7 @@ public sealed class NoDesktopHost : IDesktopHost
     public Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct) => Task.FromResult(false);
     public Task StopAsync(string host, CancellationToken ct) => Task.CompletedTask;
     public Task DeleteAsync(string host, CancellationToken ct) => Task.CompletedTask;
-    public Task<IReadOnlyList<string>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
+    public Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostedMachine>>([]);
 }
 
 /// <summary>
@@ -276,18 +279,21 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         await UntilAsync(host, machine => machine is null, "be deleted", ct);
     }
 
-    public async Task<IReadOnlyList<string>> ListAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct)
     {
-        var names = new List<string>();
+        var machines = new List<HostedMachine>();
         string? next = $"{Group}/providers/Microsoft.Compute/virtualMachines?api-version={ComputeApi}";
         while (next is not null)
         {
             using var response = await SendAsync(HttpMethod.Get, next, null, ct);
             var page = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-            names.AddRange(page["value"]!.AsArray().Select(machine => machine!["name"]!.GetValue<string>()));
+            // A machine Azure gives no date for is taken as new, so nothing here ever calls it a stray too early.
+            machines.AddRange(page["value"]!.AsArray().Select(machine => new HostedMachine(
+                machine!["name"]!.GetValue<string>(),
+                DateTimeOffset.TryParse(machine["properties"]?["timeCreated"]?.GetValue<string>(), out var created) ? created : DateTimeOffset.UtcNow)));
             next = page["nextLink"]?.GetValue<string>();
         }
-        return names;
+        return machines;
     }
 
     static string NicName(string machine) => $"{machine}-nic";
@@ -428,9 +434,18 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
 
     public Task DeleteAsync(string host, CancellationToken ct) => RunAsync(["rm", "-f", host], ct, tolerate: true);
 
-    public async Task<IReadOnlyList<string>> ListAsync(CancellationToken ct) =>
-        (await RunAsync(["ps", "-a", "--filter", "label=workstream.task", "--format", "{{.Names}}"], ct))
+    public async Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct)
+    {
+        var names = (await RunAsync(["ps", "-a", "--filter", "label=workstream.task", "--format", "{{.Names}}"], ct))
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var machines = new List<HostedMachine>();
+        foreach (var name in names)
+        {
+            var created = (await RunAsync(["inspect", "-f", "{{.Created}}", name], ct, tolerate: true)).Trim();
+            machines.Add(new HostedMachine(name, DateTimeOffset.TryParse(created, out var at) ? at : DateTimeOffset.UtcNow));
+        }
+        return machines;
+    }
 
     /// <summary>Docker picks the published port again each time the container starts.</summary>
     async Task<string> AddressAsync(string name, CancellationToken ct)
