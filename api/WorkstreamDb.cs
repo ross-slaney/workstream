@@ -19,6 +19,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<WorkEnvironment> Environments => Set<WorkEnvironment>();
     public DbSet<WorkTask> Tasks => Set<WorkTask>();
     public DbSet<TaskMessage> TaskMessages => Set<TaskMessage>();
+    public DbSet<TaskInvitation> TaskInvitations => Set<TaskInvitation>();
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
     public DbSet<Spare> Spares => Set<Spare>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
@@ -99,6 +100,24 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             message.Property(x => x.Author).HasConversion<string>().HasMaxLength(20);
             message.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
             message.Property(x => x.ClientKey).HasMaxLength(36);
+        });
+
+        // A task shared with someone who has no account yet. Not a protected row: the share dialog reads a
+        // task's after one TASK_MANAGE check, and a link finds its own by the token's hash.
+        model.Entity<TaskInvitation>(invitation =>
+        {
+            invitation.ToTable("TaskInvitations");
+            invitation.Property(x => x.Id).HasMaxLength(36);
+            invitation.Property(x => x.TaskId).HasMaxLength(36);
+            invitation.Property(x => x.Email).HasMaxLength(320);
+            invitation.Property(x => x.NormalizedEmail).HasMaxLength(320);
+            invitation.Property(x => x.Role).HasMaxLength(50);
+            invitation.Property(x => x.TokenHash).HasMaxLength(64);
+            invitation.Property(x => x.InvitedBy).HasMaxLength(450);
+            invitation.HasIndex(x => x.TokenHash).IsUnique();
+            // One waiting invitation per address per task: sharing again replaces it.
+            invitation.HasIndex(x => new { x.TaskId, x.NormalizedEmail }).IsUnique();
+            invitation.HasOne<WorkTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
         });
 
         model.Entity<DesktopRun>(run =>

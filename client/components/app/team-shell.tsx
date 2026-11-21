@@ -14,6 +14,8 @@ import { CreateTeamDialog, NewTaskDialog } from "@/src/workspace/dialogs";
 
 /** How often the sidebar's tasks are read again, in milliseconds. */
 const TASKS_EVERY = 4000;
+/** And those shared with the person, which change less often. */
+const SHARED_EVERY = 15000;
 
 type TeamShell = {
   teamId: string;
@@ -50,6 +52,7 @@ export function TeamShellController({ teamId, children }: { teamId: string; chil
   const session = useSession();
   const teams = useOnlineRead(() => workstream.teams(), "teams");
   const tasks = useOnlineRead(async () => (await workstream.tasks(teamId)).data, `tasks:${teamId}`, TASKS_EVERY);
+  const shared = useOnlineRead(async () => (await workstream.sharedTasks()).data, "shared-tasks", SHARED_EVERY);
   const [dialog, setDialog] = useState<"task" | "team" | null>(null);
   const environments = useOnlineRead(async () => (dialog === "task" ? (await workstream.environments(teamId)).data : []), `environments:${teamId}:${dialog === "task"}`);
   const starting = useAction();
@@ -77,17 +80,14 @@ export function TeamShellController({ teamId, children }: { teamId: string; chil
 
   const all = teams.kind === "ready" ? teams.value.data : [];
   const team = all.find((candidate) => candidate.id === teamId) ?? null;
-  const shellTasks: Online<ShellTask[]> =
-    tasks.kind === "ready"
-      ? {
-          kind: "ready",
-          value: tasks.value.map((task) => ({
-            id: task.id, title: task.title, state: task.state, working: task.agentWorking,
-            by: task.createdBy === session?.userId ? null : task.createdByName,
-            open: place === "tasks" && open.includes(task.id),
-          })),
-        }
-      : tasks;
+  const toShell = (task: Task): ShellTask => ({
+    id: task.id, title: task.title, state: task.state, working: task.agentWorking,
+    by: task.createdBy === session?.userId ? null : task.createdByName,
+    open: place === "tasks" && open.includes(task.id),
+  });
+  const shellTasks: Online<ShellTask[]> = tasks.kind === "ready" ? { kind: "ready", value: tasks.value.map(toShell) } : tasks;
+  // Other teams' tasks only: the API leaves out every team the person is on.
+  const sharedTasks = shared.kind === "ready" ? shared.value.map(toShell) : [];
 
   const shell: TeamShell = { teamId, team, tasks, open, show, refreshTasks: tasks.refresh, newTask: () => setDialog("task") };
 
@@ -99,6 +99,7 @@ export function TeamShellController({ teamId, children }: { teamId: string; chil
         person={{ name: session?.name ?? "", email: session?.email ?? null, systemAdmin: session?.systemAdmin ?? false }}
         place={place}
         tasks={shellTasks}
+        shared={sharedTasks}
         onRetryTasks={tasks.reload}
         onOpenTask={(taskId) => show([taskId])}
         onOpenBeside={(taskId) => show(withTask(place === "tasks" ? open : [], taskId, null))}

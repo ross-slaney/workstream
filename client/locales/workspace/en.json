@@ -14,7 +14,8 @@
     "createTeam": "Create a team",
     "openBeside": "Open {title} beside the others",
     "by": "Started by {name}",
-    "dragHint": "Drag a task onto the screens to open it beside the others."
+    "dragHint": "Drag a task onto the screens to open it beside the others.",
+    "shared": "Shared with me"
   },
   "state": {
     "starting": "Starting",
@@ -48,7 +49,7 @@
     "delete": "Delete the task",
     "deleteTitle": "Delete this task?",
     "deleteBody": "Its desktop, everything on it and the conversation are deleted. This cannot be undone.",
-    "missing": "This task is not here any more. It may have been deleted."
+    "missing": "This task is not here any more. It may have been deleted, or it is no longer shared with you."
   },
   "desktop": {
     "label": "The desktop of {title}",
@@ -119,5 +120,53 @@
   "tabs": {
     "chat": "Conversation",
     "desktop": "Desktop"
+  },
+  "share": {
+    "open": "Share",
+    "title": "Share {title}",
+    "body": "Give someone outside the team this task alone: to watch it, to write to its agent too, or to use its desktop as well. They get nothing else of the team's.",
+    "email": "Email",
+    "emailPlaceholder": "name@company.com",
+    "role": "They can",
+    "roles": {
+      "watcher": "Watch",
+      "prompter": "Watch and write to the agent",
+      "driver": "Watch, write and use the desktop"
+    },
+    "length": "For",
+    "lengths": {
+      "hour": "An hour",
+      "day": "A day",
+      "week": "A week",
+      "never": "Until I take it back"
+    },
+    "send": "Share",
+    "granted": "{name} has the task now. Send them this link to open it.",
+    "grantedEmailed": "{name} has the task now. We emailed them this link.",
+    "invited": "{email} has no account yet. Send them this link: they create their account with that address and the task opens. It works once.",
+    "invitedEmailed": "{email} has no account yet. We emailed them this link: they create their account with that address and the task opens. It works once.",
+    "link": "Link to the task",
+    "who": "Who has it",
+    "team": "Everyone on {team}",
+    "teamCan": "Everything",
+    "until": "until {date}",
+    "untilTakenBack": "until taken back",
+    "waiting": "Invited, no account yet",
+    "revoke": "Take back",
+    "withdraw": "Withdraw",
+    "watchOnly": "This task is shared with you to watch. Ask whoever shared it if you need to write to the agent.",
+    "stoppedBody": "Its files are kept. Someone on the task's team can start it again.",
+    "badge": {
+      "watcher": "Shared to watch",
+      "prompter": "Shared with you",
+      "driver": "Shared with you"
+    }
+  },
+  "shareLink": {
+    "metaTitle": "A shared task · Workstream",
+    "opening": "Opening the task",
+    "unusableTitle": "This link can't be used",
+    "unusable": "It may have expired, been withdrawn, or been used already. Ask whoever shared the task to share it again.",
+    "home": "Go to my tasks"
   }
 }

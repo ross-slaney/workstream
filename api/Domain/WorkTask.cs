@@ -32,7 +32,8 @@ public enum StartStep
 
 /// <summary>
 /// A task: one piece of work, with a desktop and a conversation with the agent on it (docs/core-model.md).
-/// A node under its team; everyone on the team can see and use it through the team's one grant. This row also
+/// A node under its team; everyone on the team can see and use it through the team's one grant, and someone outside
+/// the team it is shared with through a grant on this node alone (Operations/Sharing.cs). This row also
 /// keeps the desktop's lifecycle. (The class is not named Task because System.Threading.Tasks.Task is.)
 /// </summary>
 public sealed class WorkTask : ISqlOSResourceEntity
@@ -245,7 +246,7 @@ public enum MessageKind
 }
 
 /// <summary>
-/// One entry in a task's conversation. Not a node: a message is never granted on its own, so <c>TASK_USE</c> on
+/// One entry in a task's conversation. Not a node: a message is never granted on its own, so <c>TASK_PROMPT</c> on
 /// the task writes one and <c>TASK_VIEW</c> reads them. <see cref="ResourceId"/> is the task's node, so the
 /// conversation is one authorized page over this table. <see cref="Id"/> is also the conversation's order.
 /// </summary>

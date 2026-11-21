@@ -79,6 +79,9 @@ public static class PlatformSeed
         }
 
         await db.SaveChangesAsync(ct);
+
+        // The email a shared task sends, as the code writes it.
+        await TaskShareEmail.SeedAsync(db, now, ct);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using Microsoft.EntityFrameworkCore;
@@ -12,11 +13,13 @@ namespace Workstream.Api.Desktops;
 
 /// <summary>
 /// The only way into a desktop: <c>GET /api/tasks/{id}/desktop</c> as a WebSocket. The browser's remote-desktop
-/// client speaks to the desktop's display through it, and this relay copies bytes both ways without reading
-/// them. What it does read is who is asking: a browser cannot put a bearer token on a WebSocket, so the token
-/// rides in the requested subprotocols as <c>bearer.{token}</c> beside <c>binary</c>, and is validated the way
-/// SqlOS validates it on any request. Then <c>TASK_USE</c> on the task, checked again every minute for as long
-/// as the stream stays open.
+/// client speaks to the desktop's display through it, and this relay copies the display's bytes to the browser
+/// as they are. It reads who is asking: a browser cannot put a bearer token on a WebSocket, so the token rides
+/// in the requested subprotocols as <c>bearer.{token}</c> beside <c>binary</c>, and is validated the way SqlOS
+/// validates it on any request. Then <c>TASK_VIEW</c> on the task to watch, and <c>TASK_DRIVE</c> to use the
+/// mouse and keyboard: what the browser sends is read message by message (<see cref="RfbClientFilter"/>), and
+/// for someone who may only watch, what would act on the desktop is dropped. Both are checked again every
+/// minute for as long as the stream stays open, so an ended or changed share takes effect within one.
 /// </summary>
 public static class DesktopRelay
 {
@@ -51,7 +54,7 @@ public static class DesktopRelay
         }
 
         var scopes = services.GetRequiredService<IServiceScopeFactory>();
-        var (status, address) = await AdmitAsync(scopes, token.UserId, token.SessionId, id, touch: true, http.RequestAborted);
+        var (status, address, drive) = await AdmitAsync(scopes, token.UserId, token.SessionId, id, touch: true, http.RequestAborted);
         if (address is null)
         {
             http.Response.StatusCode = status;
@@ -80,10 +83,11 @@ public static class DesktopRelay
         });
         using var open = CancellationTokenSource.CreateLinkedTokenSource(http.RequestAborted);
         var display = desktop.GetStream();
+        var filter = new RfbClientFilter(drive);
         var first = await Task.WhenAny(
-            ToDesktopAsync(browser, display, open.Token),
+            ToDesktopAsync(browser, display, filter, open.Token),
             ToBrowserAsync(display, browser, open.Token),
-            WatchAsync(scopes, token.UserId, token.SessionId, id, open.Token));
+            WatchAsync(scopes, token.UserId, token.SessionId, id, filter, open.Token));
         open.Cancel();
         if (browser.State is WebSocketState.Open or WebSocketState.CloseReceived)
         {
@@ -100,12 +104,12 @@ public static class DesktopRelay
     }
 
     /// <summary>
-    /// Whether this person may have this desktop on screen now, and where it is. Their session must be live,
-    /// they must hold <c>TASK_USE</c> on the task, and its display must be answering, which it is a few
-    /// seconds before its agent first exchanges. Each check that passes also records that the desktop is in
-    /// use, which is what keeps the sweep from stopping it.
+    /// Whether this person may have this desktop on screen now, where it is, and whether they may use its
+    /// mouse and keyboard. Their session must be live, they must hold <c>TASK_VIEW</c> on the task, and its
+    /// display must be answering, which it is a few seconds before its agent first exchanges. Each check that
+    /// passes also records that the desktop is in use, which is what keeps the sweep from stopping it.
     /// </summary>
-    static async Task<(int Status, string? Address)> AdmitAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, bool touch, CancellationToken ct)
+    static async Task<(int Status, string? Address, bool Drive)> AdmitAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, bool touch, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
@@ -113,39 +117,47 @@ public static class DesktopRelay
         var now = DateTime.UtcNow;
         if (!await db.Set<SqlOSSession>().AsNoTracking().AnyAsync(x => x.Id == sessionId && x.UserId == userId && x.RevokedAt == null && x.AbsoluteExpiresAt > now, ct))
         {
-            return (StatusCodes.Status401Unauthorized, null);
+            return (StatusCodes.Status401Unauthorized, null, false);
         }
         var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct);
-        if (task is null || task.State == DesktopState.Deleting || !await fga.Allows(userId, Permissions.TaskView, task.ResourceId)) return (StatusCodes.Status404NotFound, null);
-        if (!await fga.Allows(userId, Permissions.TaskUse, task.ResourceId)) return (StatusCodes.Status403Forbidden, null);
-        if (!task.CanBeWatched) return (StatusCodes.Status409Conflict, null);
+        if (task is null || task.State == DesktopState.Deleting || !await fga.Allows(userId, Permissions.TaskView, task.ResourceId)) return (StatusCodes.Status404NotFound, null, false);
+        if (!task.CanBeWatched) return (StatusCodes.Status409Conflict, null, false);
+        var drive = await fga.Allows(userId, Permissions.TaskDrive, task.ResourceId);
         if (touch)
         {
             task.Active(DateTimeOffset.UtcNow);
             await db.SaveChangesAsync(ct);
         }
-        return (StatusCodes.Status200OK, task.Address);
+        return (StatusCodes.Status200OK, task.Address, drive);
     }
 
-    /// <summary>Ends, and so closes the stream, when the person may no longer watch.</summary>
-    static async Task WatchAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, CancellationToken ct)
+    /// <summary>
+    /// Ends, and so closes the stream, when the person may no longer watch; keeps the mouse and keyboard to
+    /// whoever may still use them.
+    /// </summary>
+    static async Task WatchAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, RfbClientFilter filter, CancellationToken ct)
     {
         while (true)
         {
             await Task.Delay(CheckEvery, ct);
-            var (_, address) = await AdmitAsync(scopes, userId, sessionId, taskId, touch: true, ct);
+            var (_, address, drive) = await AdmitAsync(scopes, userId, sessionId, taskId, touch: true, ct);
             if (address is null) return;
+            filter.Drive = drive;
         }
     }
 
-    static async Task ToDesktopAsync(WebSocket browser, NetworkStream display, CancellationToken ct)
+    /// <summary>What the browser sends, read by the filter: only what this viewer may send reaches the display.</summary>
+    static async Task ToDesktopAsync(WebSocket browser, NetworkStream display, RfbClientFilter filter, CancellationToken ct)
     {
         var buffer = new byte[64 * 1024];
+        var allowed = new ArrayBufferWriter<byte>(buffer.Length);
         while (true)
         {
             var received = await browser.ReceiveAsync(buffer.AsMemory(), ct);
             if (received.MessageType == WebSocketMessageType.Close) return;
-            await display.WriteAsync(buffer.AsMemory(0, received.Count), ct);
+            allowed.Clear();
+            if (!filter.Filter(buffer.AsSpan(0, received.Count), allowed)) return;
+            if (allowed.WrittenCount > 0) await display.WriteAsync(allowed.WrittenMemory, ct);
         }
     }
 
