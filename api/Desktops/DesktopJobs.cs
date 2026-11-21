@@ -102,40 +102,30 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             return;
         }
 
-        // The host has only taken the request. Ask the display every quarter second, since its answer is the
-        // moment there is a screen to watch, and the host every two seconds, for when the machine is on and
-        // in case it could not be started.
-        var began = clock.GetUtcNow();
-        var asked = DateTimeOffset.MinValue;
-        var on = false;
-        while (clock.GetUtcNow() - began < FollowFor)
+        // The host has only taken the request. Two things are asked at once, each at its own pace: the display
+        // every quarter second, since its answer is the moment there is a screen to watch, and the host every
+        // two seconds, for when the machine is on and in case it could not be started.
+        using var following = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        following.CancelAfter(FollowFor);
+        var display = Task.Run(async () =>
         {
-            if (await host.DisplayAnswersAsync(place, ct))
+            while (!await host.DisplayAnswersAsync(place, following.Token)) await Task.Delay(TimeSpan.FromMilliseconds(250), following.Token);
+        }, following.Token);
+        var hosted = Task.Run(async () =>
+        {
+            var on = false;
+            while (true)
             {
-                await StepAsync(taskId, (task, run, now) =>
-                {
-                    task.DisplayUp(now);
-                    run?.DisplayUp(now);
-                }, ct);
-                return;
-            }
-            if (clock.GetUtcNow() - asked >= AskHostEvery)
-            {
-                asked = clock.GetUtcNow();
                 var state = new MachineState(on);
                 try
                 {
-                    state = await host.StateAsync(place.Host, ct);
+                    state = await host.StateAsync(place.Host, following.Token);
                 }
                 catch (Exception error) when (error is HttpRequestException or InvalidOperationException)
                 {
                     log.LogWarning(error, "The host did not say how the machine of task {TaskId} is doing.", taskId);
                 }
-                if (state.Failure is not null)
-                {
-                    await FailAsync(new InvalidOperationException(state.Failure));
-                    return;
-                }
+                if (state.Failure is not null) return state.Failure;
                 if (state.On && !on)
                 {
                     on = true;
@@ -143,13 +133,52 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                     {
                         task.MachineOn(now);
                         run?.MachineOn(now);
-                    }, ct);
+                    }, following.Token);
                 }
-                if (!await IsStartingAsync(taskId, ct)) return;
+                // The person stopped or deleted the task, or its agent is already there: nothing more to follow.
+                if (!await IsStartingAsync(taskId, following.Token)) return null;
+                await Task.Delay(AskHostEvery, following.Token);
             }
-            await Task.Delay(TimeSpan.FromMilliseconds(250), ct);
+        }, following.Token);
+
+        try
+        {
+            var first = await Task.WhenAny(display, hosted);
+            if (first == display && display.IsCompletedSuccessfully)
+            {
+                await StepAsync(taskId, (task, run, now) =>
+                {
+                    task.DisplayUp(now);
+                    run?.DisplayUp(now);
+                }, ct);
+            }
+            else if (first == hosted && await hosted is { } failure)
+            {
+                await FailAsync(new InvalidOperationException(failure));
+            }
+            else
+            {
+                await first;
+                // The agent was there before the display was seen to answer. It is answering: its time is kept.
+                if (await host.DisplayAnswersAsync(place, ct)) await StepAsync(taskId, (_, run, now) => run?.DisplayUp(now), ct);
+            }
         }
-        log.LogWarning("The display of task {TaskId} did not answer in {Minutes} minutes.", taskId, FollowFor.TotalMinutes);
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            log.LogWarning("The display of task {TaskId} did not answer in {Minutes} minutes.", taskId, FollowFor.TotalMinutes);
+        }
+        finally
+        {
+            following.Cancel();
+            try
+            {
+                await Task.WhenAll(display, hosted);
+            }
+            catch (Exception error) when (error is OperationCanceledException or HttpRequestException or InvalidOperationException)
+            {
+                // The one that was not first, stopped.
+            }
+        }
     }
 
     /// <summary>Release the machine of a task a person, or the sweep, asked to stop.</summary>

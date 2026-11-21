@@ -38,6 +38,16 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   bash /opt/workstream/image/install.sh
   bash /opt/workstream/image/configure.sh
 
+  # The desktop runs once here, so what a first run builds (font and icon caches, XFCE's own first settings,
+  # the compiled keyboard map) is in the image and no new machine spends its first seconds on it. This
+  # builder is told nothing, so the agent only waits, and what the run wrote of its own is removed.
+  systemctl start workstream-desktop.service
+  for _ in $(seq 120); do pgrep -x xfdesktop > /dev/null && pgrep -x xfce4-panel > /dev/null && break; sleep 1; done
+  pgrep -x xfdesktop > /dev/null
+  sleep 15
+  systemctl stop workstream-desktop.service
+  rm -rf /home/work/.workstream/* /home/work/.cache/sessions /tmp/.X1-lock /tmp/.X11-unix/X1
+
   # What a desktop cannot do without.
   command -v Xtigervnc chromium code node docker dotnet gh xdotool > /dev/null
   test -d /opt/workstream/agent/node_modules/@anthropic-ai/claude-agent-sdk

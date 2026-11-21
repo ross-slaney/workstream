@@ -14,9 +14,10 @@
 //
 // Prints one line per step with how long it took. Exits 1 at the first step that fails.
 //
-// With --starts it prints, for each task, how many seconds after the person pressed Start their screen showed
-// the desktop (the display answered through the relay) and the agent began on what they asked, then deletes
-// the task. These are the two waits a person feels, measured from outside, the way their browser sees them.
+// With --starts it prints, for each task, how many seconds after the person pressed Start the host said the
+// machine was on, their screen showed the desktop (the display answered through the relay) and the agent began
+// on what they asked, then deletes the task. The last two are the waits a person feels, measured from outside,
+// the way their browser sees them; the first is the host's part of them, which Workstream does not control.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -270,7 +271,7 @@ async function timeOneStart() {
   const seconds = () => Math.round((Date.now() - began) / 100) / 10;
   const made = await person.call("POST", `/api/teams/${team.id}/tasks`, { id, environmentId: environment.id, prompt, promptKey: randomUUID() });
   if (made.status !== 201) fail(`starting a task answered ${made.status}: ${JSON.stringify(made.body).slice(0, 300)}`);
-  const times = { screen: null, ready: null, working: null, firstLine: null };
+  const times = { on: null, screen: null, ready: null, working: null, firstLine: null };
   let failure = null;
   // The screen: ask the relay for the display until it answers, as the web app does.
   const screenShown = (async () => {
@@ -291,6 +292,8 @@ async function timeOneStart() {
       failure = conversation.task.failure ?? "the desktop failed";
       break;
     }
+    // The machine is on once the task's start has left its first step (the host said so, or the display answered).
+    if (times.on === null && (conversation.task.state === "ready" || (conversation.task.step && conversation.task.step !== "machine"))) times.on = seconds();
     if (times.ready === null && conversation.task.state === "ready") times.ready = seconds();
     if (times.working === null && conversation.task.agentWorking) times.working = seconds();
     if (times.firstLine === null && conversation.messages.some((message) => message.author === "agent")) times.firstLine = seconds();
@@ -303,12 +306,12 @@ async function timeOneStart() {
 
 async function timeStarts(count) {
   const column = (value) => String(value ?? "never").padStart(9);
-  console.log(`\n${"task".padEnd(10)}${column("screen")}${column("ready")}${column("working")}${column("1st line")}   seconds after Start`);
+  console.log(`\n${"task".padEnd(10)}${column("on")}${column("screen")}${column("ready")}${column("working")}${column("1st line")}   seconds after Start`);
   const runs = [];
   for (let n = 1; n <= count; n++) {
     const run = await timeOneStart();
     runs.push(run);
-    console.log(`${run.id.slice(0, 8).padEnd(10)}${column(run.screen)}${column(run.ready)}${column(run.working)}${column(run.firstLine)}${run.failure ? `   FAILED: ${run.failure}` : ""}`);
+    console.log(`${run.id.slice(0, 8).padEnd(10)}${column(run.on)}${column(run.screen)}${column(run.ready)}${column(run.working)}${column(run.firstLine)}${run.failure ? `   FAILED: ${run.failure}` : ""}`);
     // The next start is not helped or hindered by this one's machine still being deleted.
     await sleep(5000);
   }
@@ -320,5 +323,5 @@ async function timeStarts(count) {
     const values = runs.map((run) => run[name]).filter((value) => value !== null);
     return values.length === 0 ? "never" : `${Math.min(...values)} to ${Math.max(...values)}`;
   };
-  console.log(`\nScreen shown: median ${middle("screen")} s (${range("screen")}). Agent working: median ${middle("working")} s (${range("working")}).`);
+  console.log(`\nMachine on: median ${middle("on")} s (${range("on")}). Screen shown: median ${middle("screen")} s (${range("screen")}). Agent working: median ${middle("working")} s (${range("working")}).`);
 }

@@ -116,12 +116,14 @@ An estimate from list prices, not a bill: about $105 a month at most, less while
 | Container registry, Basic | $5 |
 | Logs, email, the image in the gallery | a few dollars |
 
-A running desktop is its machine: a Standard desktop (`Standard_D4as_v7`, 4 cores, 16 GB) is about $0.20 an hour. A stopped desktop costs only its 64 GB disk, about $5 a month, until its task is deleted.
+A running desktop is its machine: a Standard desktop (`Standard_D4as_v7`, 4 cores, 16 GB) is $0.182 an hour. A stopped desktop costs only its 64 GB disk, about $5 a month, until its task is deleted.
 
 ## Limits to know
 
 - **A provider.** A container apps environment inside a virtual network needs the `Microsoft.ContainerService` resource provider registered on the subscription. Without it the environment sits in `Waiting` and never finishes. `release.yml` registers it before a fresh installation's first deployment.
 
-- **Cores.** A new subscription has 10 cores in a region. Two Standard desktops use 8; baking an image uses 4 while it runs. More desktops at once needs a quota request in the Azure portal.
+- **Cores.** A new subscription has 10 cores in a region: two Standard desktops use 8, and baking an image uses 4 while it runs. This subscription has 40 in West US 3 (the regional limit and the `StandardDasv7Family` limit), which Azure granted at once and without charge: `az quota update --resource-name cores --scope /subscriptions/<id>/providers/Microsoft.Compute/locations/westus3 --limit-object value=40 --resource-type dedicated`, and the same for `standardDasv7Family`.
+- **How long Azure takes.** Making a machine, or starting a stopped one, takes Azure between 15 seconds and a minute before the machine begins to boot, and it varies by the hour. Nothing in this repository shortens that; a machine then shows its screen about 4 seconds after it begins to boot.
+- **Azure's limit on questions.** Azure answers about 15 questions about operations in 25 seconds, across the whole subscription. The API never waits on an operation: it asks about the machine itself, which is counted per machine (`api/Desktops/DesktopHosts.cs`).
 - **Email.** The domain Azure manages sends a few dozen emails an hour and may land in spam. A domain of our own replaces it.
 - **Model throughput.** A Foundry deployment has a tokens-a-minute limit. An agent that reaches it waits and tries again.

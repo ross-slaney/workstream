@@ -65,8 +65,9 @@ public static class Display
     {
         var separator = address.LastIndexOf(':');
         using var client = new TcpClient();
+        // Long enough that a display busy starting is heard out rather than hung up on.
         using var trying = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        trying.CancelAfter(TimeSpan.FromMilliseconds(600));
+        trying.CancelAfter(TimeSpan.FromSeconds(2));
         try
         {
             await client.ConnectAsync(address[..separator], int.Parse(address[(separator + 1)..]), trying.Token);
