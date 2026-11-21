@@ -103,7 +103,12 @@
       "expires": "Expires {date}",
       "emailedBody": "We emailed {email} an invitation. You can also send them this link yourself. It works once, and only for that address."
     },
-    "adminOnly": "Only an administrator can invite people or change who is on the team."
+    "adminOnly": "Only an administrator can invite people or change who is on the team.",
+    "email": {
+      "title": "Email",
+      "taskEmails": "Email me when a task I started or wrote in is finished or needs me",
+      "taskEmailsHint": "Not while you have its desktop on screen, and at most once every ten minutes for each task. This is your own setting and applies on every team you are on."
+    }
   },
   "usage": {
     "metaTitle": "Usage · Workstream",

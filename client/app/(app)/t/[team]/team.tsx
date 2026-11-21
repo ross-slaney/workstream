@@ -21,6 +21,8 @@ export default function TeamRoute() {
   const admin = valueOf(team)?.admin ?? false;
   // Only an administrator may read invitations; anyone else has none to see.
   const invitations = useOnlineRead(() => (admin ? workstream.invitations(teamId) : Promise.resolve([])), `invitations:${teamId}:${admin}`);
+  // The person's own, the same on every team.
+  const settings = useOnlineRead(() => workstream.mySettings(), "my-settings");
   const [invited, setInvited] = useState<PendingInvitation | null>(null);
   const action = useAction();
   const then = (refresh: () => void) => (run: () => Promise<unknown>) => void action.run(run).then(refresh);
@@ -36,12 +38,14 @@ export default function TeamRoute() {
         invitations={valueOf(invitations) ?? []}
         meId={session?.userId ?? ""}
         invited={invited}
+        taskEmails={valueOf(settings)?.taskEmails ?? null}
         busy={action.busy}
         error={action.error}
         onRetry={people.reload}
         onRename={(name) => then(team.refresh)(() => workstream.renameTeam(teamId, name))}
         onInvite={(email, asAdmin) => then(invitations.refresh)(async () => setInvited(await workstream.invite(teamId, email, asAdmin)))}
         onDismissInvited={() => setInvited(null)}
+        onTaskEmails={(on) => void action.run(async () => settings.replace(await workstream.changeMySettings({ taskEmails: on })))}
         onWithdraw={(invitationId) => then(invitations.refresh)(() => workstream.revokeInvitation(teamId, invitationId))}
         onSetAdmin={(userId, makeAdmin) => then(people.refresh)(() => workstream.setAdmin(teamId, userId, makeAdmin))}
         onRemove={(userId) =>

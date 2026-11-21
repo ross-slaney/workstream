@@ -153,9 +153,9 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 
-    static async Task<IResult> Exchange(DesktopExchange body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> Exchange(DesktopExchange body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
-        var outcome = await Operations.ExchangeAsync(Caller.Desktop(http), body, db, fga, ct);
+        var outcome = await Operations.ExchangeAsync(Caller.Desktop(http), body, db, fga, jobs, ct);
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 }

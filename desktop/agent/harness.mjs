@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
+import { noteBackground, noteFile } from "./restore.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,7 @@ You are the agent on a Workstream desktop: a Linux computer (Debian with the XFC
 - You have sudo without a password. Install what the task needs.
 - When you finish, say what you did and what is on screen for the person to look at.
 - The person reads your messages in a narrow panel beside the desktop. Write plain, short paragraphs.
+- When this desktop is stopped and started again, Workstream reruns the commands you left running in the background and reopens the browser's pages and VS Code.
 `.trim();
 
 /** Models are reached as Foundry serves them, through the gateway, with the desktop's own key. */
@@ -48,7 +50,8 @@ const modelEnvironment = (setup, key) => ({
  * @param {object} with.setup      What the API says this desktop is set up from.
  * @param {string} with.key        The desktop's key.
  * @param {string} with.workspace  The folder the agent works in.
- * @param {object} with.state      Kept across restarts: `sessionId` is the conversation to resume.
+ * @param {object} with.state      Kept across restarts: `sessionId` is the conversation to resume, and what to bring back after a stop.
+ * @param {string | null} with.restored  One line about what was brought back after a stop, for the agent to know; null otherwise.
  * @param {() => Promise<void>} with.saveState
  * @param {(kind: "text" | "activity", text: string) => void} with.say
  * @param {(working: boolean) => void} with.setWorking
@@ -57,7 +60,7 @@ const modelEnvironment = (setup, key) => ({
  * @param {(...args: unknown[]) => void} with.log
  * @returns {{ interrupt(): void }}
  */
-export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log }) {
+export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log, restored = null }) {
   let current = null;
 
   const environment = { ...process.env, ...setup.variables, ...modelEnvironment(setup, key) };
@@ -71,7 +74,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: [onThisDesktop(workspace), setup.instructions].filter(Boolean).join("\n\n"),
+      append: [onThisDesktop(workspace), restored, setup.instructions].filter(Boolean).join("\n\n"),
     },
     // The repository's own instructions and skills (CLAUDE.md, .claude/skills) apply, as they would on a laptop.
     settingSources: ["user", "project", "local"],
@@ -84,7 +87,8 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
       // What the agent is working in is what the person sees: the browser comes to the front when the agent
       // uses it, and a file the agent changes opens in the editor.
       PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [showBrowser] }],
-      PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }],
+      // And what is left running, and open, is kept to bring back after a stop (restore.mjs).
+      PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }, { matcher: "Bash", hooks: [keepBackground] }],
     },
     resume: state.sessionId ?? undefined,
     stderr: (line) => log("harness:", line.trimEnd()),
@@ -105,7 +109,14 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     const file = input.tool_input?.file_path;
     if (file && setup.apps.includes("vscode")) {
       spawn("code", ["--reuse-window", file], { detached: true, stdio: "ignore", env: environment }).on("error", () => {}).unref();
+      if (noteFile(state, file)) await saveState();
     }
+    return {};
+  }
+
+  /** A command the agent left running in the background is kept, to run again after a stop. */
+  async function keepBackground(input) {
+    if (noteBackground(state, input)) await saveState();
     return {};
   }
 

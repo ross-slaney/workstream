@@ -3,7 +3,8 @@ import type { PendingInvitation, Team, TeamPerson } from "@/lib/workstream/api";
 
 /**
  * A team: its name, who is on it, and inviting someone. Everyone sees the people; an administrator can also
- * rename the team, invite, change who administers it and remove someone. Anyone can leave.
+ * rename the team, invite, change who administers it and remove someone. Anyone can leave. Below, the
+ * person's own switch for the emails about tasks.
  */
 export type TeamScreenProps = {
   team: Team | null;
@@ -14,6 +15,8 @@ export type TeamScreenProps = {
   meId: string;
   /** The invitation just made, with its link to pass on. */
   invited: PendingInvitation | null;
+  /** Whether the person is emailed when a task they started or wrote in is finished or needs them. Null while it is read. */
+  taskEmails: boolean | null;
   busy: boolean;
   error: string | null;
   onRetry: () => void;
@@ -24,4 +27,5 @@ export type TeamScreenProps = {
   onSetAdmin: (userId: string, admin: boolean) => void;
   /** Remove someone, or leave when it is the person themselves. */
   onRemove: (userId: string) => void;
+  onTaskEmails: (on: boolean) => void;
 };

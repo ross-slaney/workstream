@@ -573,7 +573,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }, ct);
     }
 
-    /// <summary>Remove a deleted task for good: its machine, its key, its conversation, then the row and its node.</summary>
+    /// <summary>Remove a deleted task for good: its machine, its key, its conversation, who watched it, then the row and its node.</summary>
     [AutomaticRetry(Attempts = 2)]
     public async Task DeleteAsync(string taskId, CancellationToken ct)
     {
@@ -604,6 +604,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             var now = clock.GetUtcNow();
             await EndRunAsync(db, taskId, now, ct);
             await DesktopKeys.RetireForTaskAsync(db, task, ct);
+            await db.TaskWatchers.Where(x => x.TaskId == taskId).ExecuteDeleteAsync(ct);
             db.Tasks.Remove(task);
             await db.SaveChangesAsync(ct);
         }

@@ -13,6 +13,8 @@
   <ItemGroup>
     <!-- The apps a desktop can come with: one list, read here, by the image's install script and by the desktop at boot. -->
     <EmbeddedResource Include="../desktop/apps.json" LogicalName="Workstream.Apps.json" />
+    <!-- The words of the emails the API sends: every word a key, beside the app's own (client/locales). -->
+    <EmbeddedResource Include="../client/locales/emails/en.json" LogicalName="Workstream.Emails.en.json" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Services;
 using SqlOS.Extensions;
 using SqlOS.Fga.Models;
 using static Workstream.Api.WorkstreamAuthorization;
@@ -12,7 +13,8 @@ namespace Workstream.Api;
 /// idempotently: the <c>system_admins</c> group, granted <c>system_admin</c> on <c>root</c>; the one system
 /// administrator (<see cref="WorkstreamApp.AdministratorEmail"/>) as that group's only member, or nobody where
 /// no address is set; and the desktop operator, the agent the background jobs act as, granted
-/// <c>desktop_operator</c> on <c>root</c>.
+/// <c>desktop_operator</c> on <c>root</c>; and the notifier, the agent the task emails are sent as, granted
+/// <c>task_notifier</c> on <c>root</c>.
 /// </summary>
 public static class PlatformSeed
 {
@@ -31,6 +33,14 @@ public static class PlatformSeed
     public const string OperatorSubjectId = "agent::desktop-operator";
     public const string OperatorName = "Desktop operator";
 
+    /// <summary>
+    /// The notifier: the agent principal the job that emails a task's people acts as (Email/TaskEmails.cs). One
+    /// grant, on root, carrying <c>TASK_NOTIFY</c> and nothing else: it reads what it needs of a task to say
+    /// what happened, and checks <c>TASK_VIEW</c> for each person before it writes to them.
+    /// </summary>
+    public const string NotifierSubjectId = "agent::task-notifier";
+    public const string NotifierName = "Task notifier";
+
     public static async Task SeedAsync(WorkstreamDbContext db, DateTimeOffset now, string? administratorEmail, CancellationToken ct)
     {
         await db.ProvisionAgentSubjectAsync(OperatorSubjectId, OperatorName, agentType: "operator",
@@ -38,6 +48,12 @@ public static class PlatformSeed
         if (!await db.Set<SqlOSFgaGrant>().AnyAsync(x => x.SubjectId == OperatorSubjectId && x.ResourceId == RootResourceId && x.RoleId == Roles.DesktopOperator, ct))
         {
             IdentityProvisioning.Grant(db, OperatorSubjectId, RootResourceId, Roles.DesktopOperator);
+        }
+        await db.ProvisionAgentSubjectAsync(NotifierSubjectId, NotifierName, agentType: "notifier",
+            description: "Emails people when a task they started or wrote in is finished or needs them.", cancellationToken: ct);
+        if (!await db.Set<SqlOSFgaGrant>().AnyAsync(x => x.SubjectId == NotifierSubjectId && x.ResourceId == RootResourceId && x.RoleId == Roles.TaskNotifier, ct))
+        {
+            IdentityProvisioning.Grant(db, NotifierSubjectId, RootResourceId, Roles.TaskNotifier);
         }
 
         if (await db.Set<SqlOSFgaUserGroup>().FindAsync([SystemAdminsGroupId], ct) is null)
@@ -122,6 +138,9 @@ public sealed class PlatformSeedHostedService(IServiceProvider services, ILogger
         {
             log.LogInformation("The system administrator's password was set from configuration.");
         }
+        // The emails code owns, written into SqlOS's store whether or not this environment sends email.
+        var written = await Email.TaskEmailTemplates.ReconcileAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSEmailAdminService>(), ct);
+        if (written.Count > 0) log.LogInformation("Email templates written: {Keys}.", string.Join(", ", written));
     }
 
     public Task StopAsync(CancellationToken ct) => Task.CompletedTask;

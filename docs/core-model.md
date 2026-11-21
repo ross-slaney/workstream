@@ -28,6 +28,7 @@ Any column that names an actor holds a principal id.
 | `service_account` | A desktop | `service_account::desktop-{desktopId}` | What the agent on that desktop signs in as, with a key only that desktop holds. The id is the task's for a desktop made for a task, and the spare's own for a spare. The key says which desktop is calling; what it may do is the grant below. |
 | `service_account` | The machine preparing an environment | `service_account::desktop-{setupId}` | One for each environment, with an id made from the environment's id (`EnvironmentSetup.DesktopIdFor`), so it is never a task's or a spare's. Each attempt to prepare gives it a new key, so a machine from an earlier attempt cannot speak for the current one. |
 | `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare and prepare environments. No credential: the jobs run in the API process. |
+| `agent` | The task notifier | `agent::task-notifier` | The background job that emails a task's people when the agent's turn ends. No credential. |
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
 
@@ -36,6 +37,7 @@ A team is a SqlOS organization. SqlOS keeps its name, memberships and invitation
 ```text
 root                          system_admin    -> group::system_admins
 │                             desktop_operator -> agent::desktop-operator
+│                             task_notifier   -> agent::task-notifier
 └── team::{teamId}            team_member     -> group::{teamId}
     │                         team_admin      -> each administrator
     ├── environment::{id}     environment_setup -> service_account::desktop-{setupId}
@@ -67,6 +69,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model. |
 | `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
+| `TASK_NOTIFY` | task | The notifier's own: read what the agent last said and email the task's people about it. |
 | `ENVIRONMENT_RUN_SETUP` | environment | The preparing desktop's own: read the environment's setup, with its variables, and say how it went. |
 | `ENVIRONMENT_OPERATE_SETUP` | environment | The operator's own: make the machine that prepares the environment, save its disk, and remove both. |
 
@@ -76,6 +79,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | --- | --- | --- | --- |
 | `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits. Nothing inside a team. |
 | `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE`, `ENVIRONMENT_OPERATE_SETUP` |
+| `task_notifier` | root | `agent::task-notifier` | `TASK_NOTIFY` |
 | `team_member` | team | the team's group | `TEAM_VIEW`, `TEAM_VIEW_USAGE`, `TEAM_CREATE_ENVIRONMENT`, `TEAM_CREATE_TASK`, `ENVIRONMENT_VIEW`, `ENVIRONMENT_EDIT`, `TASK_VIEW`, `TASK_USE`, `TASK_MANAGE` |
 | `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS` |
 | `task_desktop` | task | the desktop that works on the task | `TASK_RUN_AGENT` |
@@ -124,11 +128,13 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `Teams` | The node, the month's model allowance, the limit on running desktops. | Limits are numbers, not access. |
 | `Environments` | Name, apps, size, repository, setup script, instructions, protected variables, and `SetupInputs`: a SHA-256 of the repository, branch, script, variables and apps, written where the environment is written, because that is the one place the variables are readable. | Configuration. |
 | `EnvironmentSetups` | An environment's saved setup (the snapshot's name, the inputs and image version it was made for, its commit, its size, when it was made and last used) and the attempt to prepare it in progress or how the last one failed. One row an environment, deleted with it. | The operator's stock and a lifecycle, like `Spares`: nobody is granted on it, and seeing it is seeing the environment. |
-| `Tasks` | Title, environment, who created it (a principal id, a fact), the desktop's state and address. | The desktop's lifecycle. |
+| `Tasks` | Title, environment, who created it (a principal id, a fact), the desktop's state and address, when it last emailed its people. | The desktop's lifecycle. |
 | `TaskMessages` | The conversation. | Content. |
 | `DesktopRuns` | When each machine ran, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own stopped machine), and when each step of it happened. | Usage, cost, and how long starts take. |
 | `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
 | `ModelUsage` | Tokens and cost of each model call. | Usage. |
+| `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
+| `TaskWatchers` | When each person last had a task's desktop on screen, one row a person a task. Removed with the task. | A fact about what someone did, like `Tasks.CreatedBy`, and never a permission: whether they may watch is `TASK_USE`. It is read only to keep from emailing someone about the task they are looking at. |
 
 `Tasks.CreatedBy` records who started a task. It grants nothing.
 
@@ -183,9 +189,19 @@ A person's message is a row in `TaskMessages`. The desktop exchanges with the AP
 
 The browser opens a WebSocket to `GET /api/tasks/{id}/desktop`, carrying the person's access token. The API validates the token, checks `TASK_USE` on the task, connects to the desktop's display on its private address, and relays bytes both ways, from the moment the display answers until the desktop is asked to stop. It checks again every minute and closes the stream when access is gone. Desktops accept connections only from the API.
 
+### Hear when a task is finished or needs you
+
+When the agent's turn ends (the desktop's exchange says it was working and now is not), the exchange queues a job that runs fifteen seconds later as `agent::task-notifier`, which checks `TASK_NOTIFY` on the task. The job writes to nobody when the agent is working again, when the conversation's last message is not the agent's words (someone answered, or the agent's last line was about something it did), or when the task already emailed in the last ten minutes. Otherwise it emails "finished", or "needs you" when the agent's last words end with a question, to the person who started the task and everyone who wrote in it, each of whom must:
+
+- still hold `TASK_VIEW` on the task, so someone who left the team hears nothing more of it;
+- not have turned these emails off (`PersonSettings`, at `GET` and `PUT /api/me/settings`, a switch on the team's page);
+- not have had the task's desktop on screen in the last two minutes (`TaskWatchers`, written by the relay when it lets them in and every minute after).
+
+The email is one of two SqlOS templates the API writes at every start (`task.finished`, `task.needs-you`), its words from `client/locales/emails/en.json`, and it links to the task in the team's workspace. Each person gets it once a turn, however often the job runs (SqlOS's idempotency key). Where email is not set up (development, staging), the job sends nothing.
+
 ### Stop, start, delete
 
-Stopping releases the machine but keeps its disk; starting brings the same desktop back. A desktop nobody has watched or written to for a while, whose agent is idle, is stopped by the operator. Deleting a task deletes the machine, the conversation and the node.
+Stopping releases the machine but keeps its disk; starting brings the same desktop back, and its agent starts again what it had left running and reopens what was open (architecture.md, "The agent"). A desktop nobody has watched or written to for a while, whose agent is idle, is stopped by the operator. Deleting a task deletes the machine, the conversation and the node.
 
 ### Usage and limits
 

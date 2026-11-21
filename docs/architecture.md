@@ -73,6 +73,16 @@ The agent has its own window on the desktop, the Agent button on the panel, whic
 
 Another harness would replace `harness.mjs` and nothing else: the rest of the agent only hands it prompts and takes what it said and did.
 
+### After a stop
+
+A stopped desktop keeps its disk and loses every program. So the agent keeps, in `~/.workstream/state.json`, what it would need to bring them back (`desktop/agent/restore.mjs`): the long-running commands the agent started (the harness notes every Bash call made with `run_in_background`, or ending in a lone `&`) with the folder each ran in, the pages open in the browser (read from Chromium's debugging port every fifteen seconds), and the files the agent opened in VS Code.
+
+The first time the agent runs on a machine that has just started, which it knows because its mark in `/dev/shm` is gone, and the desktop was prepared before, it brings them back: the commands run again in a terminal window titled Restored, VS Code opens on the workspace with those files, and the browser opens the pages, a page on one of the desktop's own servers once that server answers. The agent is told so in one line of its instructions, and the conversation gets one line saying it happened. An agent that restarts on a running desktop brings nothing back, since nothing stopped.
+
+## Email
+
+The API sends two kinds of email through Azure Communication Services: SqlOS's own (sign-in codes, invitations) and the email to a task's people when the agent's turn ends (`api/Email/TaskEmails.cs`, [the core model](core-model.md#hear-when-a-task-is-finished-or-needs-you)). The task emails are SqlOS templates that code owns: the API writes them into SqlOS's store at every start, with every word from `client/locales/emails/en.json`, which the API carries inside it. They are sent by a Hangfire job a few seconds after a turn ends. Where `SqlOS:EmailOtp:FromAddress` and its connection string are not set, nothing is sent.
+
 ## Models
 
 The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.
@@ -97,6 +107,6 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | --- | --- |
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
 | The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars). |
-| A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session. It goes with the task. |
+| A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |
 | The browser | The session's tokens, and which team was open last. |
