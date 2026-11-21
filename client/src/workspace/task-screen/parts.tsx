@@ -1,4 +1,4 @@
-import { ArrowUp, Maximize2, Minimize2, MoreHorizontal, Square, X } from "lucide-react-native";
+import { ArrowUp, Check, Maximize2, Minimize2, MoreHorizontal, Square, X } from "lucide-react-native";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button, IconButton } from "@/components/kit/button";
 import { Dialog } from "@/components/kit/dialog";
@@ -7,7 +7,7 @@ import { ErrorNote, Spinner } from "@/components/kit/status";
 import { useTheme } from "@/components/theme/theme";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { DesktopState, Task } from "@/lib/workstream/api";
+import type { DesktopState, StartStep, Task } from "@/lib/workstream/api";
 import type { ChatEntry, TaskScreenProps } from "./props";
 import { RichText } from "./rich-text";
 
@@ -172,7 +172,7 @@ export function Chat(p: TaskScreenProps) {
 
   const note =
     !task ? null
-    : task.state === "starting" ? t("chat.waitingForDesktop")
+    : task.state === "starting" ? (task.step === "agent" ? t("chat.agentStarting") : t("chat.waitingForDesktop"))
     : task.state === "stopped" || task.state === "stopping" || task.state === "failed" ? t("chat.desktopStopped")
     : null;
   const working = task?.state === "ready" && task.agentWorking;
@@ -274,17 +274,20 @@ function Entry({ entry, onRetry }: { entry: ChatEntry; onRetry: () => void }) {
   );
 }
 
-/** Where the desktop goes: the live picture when it is up, and otherwise what is happening to it and what to do. */
+/** Where the desktop goes: the live picture from the moment there is one, and otherwise what is happening to it and what to do. */
 export function DesktopPane(p: TaskScreenProps) {
   const t = useT("workspace");
   const task = p.task;
   if (p.missing) return <Stage title={t("task.missing")} />;
   if (!task) return <Stage busy title={t("desktop.connecting")} />;
+  // One place for the picture, so it stays connected as a starting desktop becomes ready.
+  if (p.desktop && (task.state === "ready" || task.state === "starting")) {
+    return <div className="relative min-h-0 min-w-0 flex-1 bg-stage">{p.desktop}</div>;
+  }
   switch (task.state) {
     case "ready":
-      return <div className="relative min-h-0 min-w-0 flex-1 bg-stage">{p.desktop}</div>;
     case "starting":
-      return <Stage busy title={t("desktop.starting.title")} body={t("desktop.starting.body")} />;
+      return <Starting step={task.step} since={task.stateChangedAt} />;
     case "stopping":
     case "deleting":
       return <Stage busy title={t("desktop.stopping.title")} body={t("desktop.stopping.body")} />;
@@ -293,6 +296,46 @@ export function DesktopPane(p: TaskScreenProps) {
     default:
       return <Stage title={t("desktop.stopped.title")} body={t("desktop.stopped.body")} action={<StageButton label={t("desktop.stopped.cta")} busy={p.busy} onClick={p.onStartDesktop} />} />;
   }
+}
+
+const START_STEPS: StartStep[] = ["machine", "boot", "agent"];
+
+/** Seconds since a moment, counted on screen. */
+function useSecondsSince(moment: string) {
+  const from = Date.parse(moment);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return Number.isFinite(from) ? Math.max(0, Math.round((now - from) / 1000)) : 0;
+}
+
+/**
+ * A desktop that is starting, before there is a screen to watch: the steps of a start in order, the ones
+ * done ticked, the one under way turning, and how long it has been.
+ */
+function Starting({ step, since }: { step: StartStep; since: string }) {
+  const t = useT("workspace");
+  const seconds = useSecondsSince(since);
+  const at = START_STEPS.indexOf(step);
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-4 bg-stage px-6 text-center text-stage-foreground">
+      <p className="text-[15px] font-semibold text-white">{t("desktop.starting.title")}</p>
+      <ol className="flex flex-col gap-2 text-left text-[13px]">
+        {START_STEPS.map((name, index) => (
+          <li key={name} aria-current={index === at ? "step" : undefined} className={cn("flex items-center gap-2.5", index === at && "text-white", index > at && "opacity-60")}>
+            <span className="flex size-4 items-center justify-center">
+              {index < at ? <Check size={14} color="currentColor" /> : index === at ? <Spinner label={t(`desktop.starting.steps.${name}`)} className="size-3.5" /> : <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />}
+            </span>
+            <span className="flex-1">{t(`desktop.starting.steps.${name}`)}</span>
+            {index === at ? <span className="tabular-nums opacity-70">{t("desktop.starting.elapsed", { seconds })}</span> : null}
+          </li>
+        ))}
+      </ol>
+      <p className="max-w-[380px] text-[13px] leading-relaxed">{t("desktop.starting.body")}</p>
+    </div>
+  );
 }
 
 function Stage({ title, body, busy, action }: { title: string; body?: string; busy?: boolean; action?: ReactNode }) {

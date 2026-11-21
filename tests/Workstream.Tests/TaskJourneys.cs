@@ -207,6 +207,102 @@ public sealed class TaskJourneys
         Assert.AreEqual("ready", (await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).State);
     }
 
+    /// <summary>The task, read until its start has come as far as <paramref name="step"/>.</summary>
+    static async Task<TaskDto> UntilStepAsync(Person person, string taskId, string step)
+    {
+        for (var asked = 0; asked < 100; asked++)
+        {
+            var task = await person.GetAsync<TaskDto>($"/api/tasks/{taskId}");
+            if (task.Step == step) return task;
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+        Assert.Fail($"The start never reached '{step}'.");
+        return null!;
+    }
+
+    [TestMethod]
+    public async Task A_start_is_written_down_step_by_step_and_its_screen_is_watched_before_the_agent_joins()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var task = await StartAsync(ada, team.Id, environment);
+        Assert.AreEqual("machine", task.Step);
+        var machine = DesktopHosting.NameFor(task.Id);
+        // The host has only taken the request: the machine is not on, and nothing answers.
+        Stack.Desktops.NotOn[machine] = true;
+        Stack.Desktops.NoDisplay[machine] = true;
+        var starting = Stack.Jobs.StartAsync(task.Id, CancellationToken.None);
+        await Task.Delay(TimeSpan.FromMilliseconds(600));
+        Assert.AreEqual("machine", (await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Step);
+        Assert.AreEqual(HttpStatusCode.Conflict, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
+
+        // The host says it is on.
+        Stack.Desktops.NotOn.TryRemove(machine, out _);
+        await UntilStepAsync(ada, task.Id, "boot");
+        Assert.AreEqual(HttpStatusCode.Conflict, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
+
+        // Its display answers: the job's work is done, and there is a screen, though no agent has spoken yet.
+        Stack.Desktops.NoDisplay.TryRemove(machine, out _);
+        await starting;
+        var watchable = await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}");
+        Assert.AreEqual("starting", watchable.State);
+        Assert.AreEqual("agent", watchable.Step);
+        var (status, greeting) = await Watching.OpenAsync(task.Id, ada.Token);
+        Assert.AreEqual(HttpStatusCode.SwitchingProtocols, status);
+        Assert.AreEqual(PlayedDisplay.Greeting, greeting);
+
+        // The agent's first exchange makes it ready, and the screen stays.
+        using var desktop = Desktop.Of(task.Id);
+        await desktop.ExchangeAsync();
+        Assert.AreEqual("ready", (await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).State);
+        Assert.AreEqual(HttpStatusCode.SwitchingProtocols, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
+
+        // A desktop asked to stop has no screen, and the next start begins from the first step.
+        await ada.PostAsync($"/api/tasks/{task.Id}/stop").IsAsync(HttpStatusCode.OK);
+        Assert.AreEqual(HttpStatusCode.Conflict, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
+        await Stack.Jobs.StopAsync(task.Id, CancellationToken.None);
+        Assert.AreEqual("machine", (await ada.PostAsync<TaskDto>($"/api/tasks/{task.Id}/start")).Step);
+    }
+
+    [TestMethod]
+    public async Task Only_the_team_watches_a_desktop_and_only_from_the_web_app()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var invitation = await ada.PostAsync<PendingInvitation>($"/api/teams/{team.Id}/invitations", new Invite(Person.NewEmail()));
+        using var ben = await Person.SignUpAsync("Ben Shneiderman", invitation.Email, Answers.TokenOf(invitation));
+        using var stranger = await Person.SignUpAsync("A Stranger");
+        using var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
+        var task = await StartAsync(ada, team.Id, environment);
+        using var desktop = await Desktop.StartAsync(task.Id);
+
+        // The team's administrator and a member.
+        Assert.AreEqual(HttpStatusCode.SwitchingProtocols, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
+        Assert.AreEqual(HttpStatusCode.SwitchingProtocols, (await Watching.OpenAsync(task.Id, ben.Token)).Status);
+        // A stranger and the system administrator are told there is no such task.
+        Assert.AreEqual(HttpStatusCode.NotFound, (await Watching.OpenAsync(task.Id, stranger.Token)).Status);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await Watching.OpenAsync(task.Id, administrator.Token)).Status);
+        // A desktop's key is not a person's token, and nobody is nobody.
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await Watching.OpenAsync(task.Id, desktop.Key)).Status);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await Watching.OpenAsync(task.Id, null)).Status);
+        // Another site's page cannot open the stream with a person's token.
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await Watching.OpenAsync(task.Id, ada.Token, "https://elsewhere.example")).Status);
+    }
+
+    [TestMethod]
+    public async Task A_machine_the_host_could_not_start_fails_the_task_in_words_and_is_removed()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var task = await StartAsync(ada, team.Id, environment);
+        var machine = DesktopHosting.NameFor(task.Id);
+        // The host took the request and then could not find room for the machine.
+        Stack.Desktops.Broken[machine] = "Allocation failed. We do not have sufficient capacity for the requested VM size in this region.";
+        await Stack.Jobs.StartAsync(task.Id, CancellationToken.None);
+        var failed = await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}");
+        Assert.AreEqual("failed", failed.State);
+        StringAssert.Contains(failed.Failure, "no capacity");
+        CollectionAssert.Contains(Stack.Desktops.Deleted.ToList(), machine);
+        Assert.AreEqual(HttpStatusCode.Conflict, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
+    }
+
     [TestMethod]
     public async Task The_sweep_stops_an_idle_desktop_fails_one_that_never_arrived_and_removes_strays()
     {
@@ -216,8 +312,12 @@ public sealed class TaskJourneys
         using var desktop = await Desktop.StartAsync(idle.Id);
         await desktop.ExchangeAsync();
         await Stack.Jobs.StartAsync(silent.Id, CancellationToken.None);
-        // A machine no task knows: left behind by something that went wrong.
+        // Two machines no task knows. One was left behind long ago by something that went wrong; the other is
+        // a minute old, and could belong to a task started while the sweep was busy.
         await Stack.Desktops.CreateAsync(new DesktopSpec("ws-stray-0000000000", Guid.NewGuid().ToString("D"), team.Id, "standard", "", ""), CancellationToken.None);
+        Stack.Desktops.MadeAt["ws-stray-0000000000"] = DateTimeOffset.UtcNow.AddHours(-2);
+        await Stack.Desktops.CreateAsync(new DesktopSpec("ws-new-00000000000", Guid.NewGuid().ToString("D"), team.Id, "standard", "", ""), CancellationToken.None);
+        Stack.Desktops.MadeAt["ws-new-00000000000"] = DateTimeOffset.UtcNow.AddMinutes(-1);
 
         // The same sweep with no patience: idle at once, late at once.
         var impatient = new DesktopJobs(
@@ -230,5 +330,7 @@ public sealed class TaskJourneys
         Assert.IsTrue(swept.State is "stopping" or "stopped", swept.State);
         Assert.AreEqual("failed", (await ada.GetAsync<TaskDto>($"/api/tasks/{silent.Id}")).State);
         Assert.IsFalse(Stack.Desktops.Made.ContainsKey("ws-stray-0000000000"));
+        Assert.IsTrue(Stack.Desktops.Made.ContainsKey("ws-new-00000000000"));
+        await Stack.Desktops.DeleteAsync("ws-new-00000000000", CancellationToken.None);
     }
 }

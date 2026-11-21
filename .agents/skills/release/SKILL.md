@@ -5,7 +5,7 @@ description: Ship Workstream to production. Bumps the version (client/app.json, 
 
 # Release
 
-Take what is already on `origin/main` to production through a version PR and a published GitHub release. The published release `vX.Y.Z` is what `.github/workflows/release.yml` deploys: both images from the tag's commit, one Bicep deployment of the web app and the API, and the desktops' image when `desktop/` changed since the previous release. No other path reaches production.
+Take what is already on `origin/main` to production through a version PR and a published GitHub release. The published release `vX.Y.Z` is what `.github/workflows/release.yml` deploys: the desktops' image first, when `desktop/` changed since the previous release, then both images from the tag's commit and one Bicep deployment of the web app and the API. No other path reaches production.
 
 Asking to release, ship, cut a version or deploy authorizes the commit, push, PR, merge and `gh release create` for this workflow only. Asking to roll back authorizes `gh workflow run release.yml`.
 
@@ -19,7 +19,7 @@ Asking to release, ship, cut a version or deploy authorizes the commit, push, PR
 
 ## Before a release that changes the desktop or the infrastructure
 
-Try it on staging first: `gh workflow run staging.yml -f action=deploy -f ref=main`, sign in at the address in the run's summary with a password, start a task and watch its desktop. Remove staging afterwards with `-f action=remove`. Production signs in by emailed code, so it cannot be tried without a real inbox.
+Try it on staging first: `gh workflow run staging.yml -f action=deploy -f ref=main` (add `-f desktop-image=true` when `desktop/` changed, so staging bakes and uses its own image), sign in at the address in the run's summary with a password, start a task and watch its desktop. Remove staging afterwards with `-f action=remove`. Production signs in by emailed code, so it cannot be tried without a real inbox.
 
 ## 1. Establish the release
 
@@ -56,7 +56,7 @@ gh release create vX.Y.Z --target main --title "Workstream X.Y.Z" --generate-not
 gh run watch "$(gh run list --workflow Release --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
 ```
 
-The run has three jobs: it resolves the tag, deploys the web app and the API and checks both origins serve the tag's commit, then bakes the desktops' image if `desktop/` changed (about half an hour; the builder machine is deleted when it ends, whether it worked or not). Read the log of anything red. Report the two origins from the run's summary.
+The run has three jobs: it resolves the tag, bakes the desktops' image if `desktop/` changed (about half an hour; the builder machine is deleted when it ends, whether it worked or not), then deploys the web app and the API with that image's version and checks both origins serve the tag's commit. Read the log of anything red. Report the two origins from the run's summary.
 
 A fresh installation needs `scripts/setup-azure.sh` run once and the `production` environment's `ADMINISTRATOR_EMAIL`, `MODEL_ENDPOINT` and `MODEL_KEY` (infra/README.md).
 
@@ -72,4 +72,4 @@ A fresh installation needs `scripts/setup-azure.sh` run once and the `production
 gh workflow run release.yml -f tag=vX.Y.Z   # the release to go back to
 ```
 
-It deploys that release's images again. The desktops' image is not rolled back by this: new desktops use the newest version in the gallery. To go back there too, delete the bad version: `az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition desktop --gallery-image-version X.Y.Z`.
+It deploys that release's images again, and makes new desktops from that release's image: each deployment uses the newest image version that is not newer than its release (`scripts/desktop-image-version.sh`), and the three newest are kept.

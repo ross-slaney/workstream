@@ -79,6 +79,8 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             task.Property(x => x.Host).HasMaxLength(100);
             task.Property(x => x.Address).HasMaxLength(100);
             task.Ignore(x => x.IsRunning);
+            task.Ignore(x => x.Step);
+            task.Ignore(x => x.CanBeWatched);
         });
 
         model.Entity<TaskMessage>(message =>

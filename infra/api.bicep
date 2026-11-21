@@ -27,7 +27,7 @@ param administratorPassword string = ''
 @description('The resource group desktops are made in (desktops.bicep).')
 param desktopsGroup string
 param desktopsSubnetId string
-@description('The gallery image a desktop is made from; its newest version is used.')
+@description('The image version a desktop is made from: the one this deployment was made with.')
 param desktopImageId string
 @description('The agents\' models (api/Model/ModelGateway.cs): the Foundry resource\'s Anthropic endpoint; empty leaves agents without one.')
 param modelEndpoint string = ''

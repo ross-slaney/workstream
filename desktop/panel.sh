@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# Writes the desktop's panel: the applications menu, a launcher for each app the environment chose (and the
-# agent's window, always), the open windows and a clock. Run before XFCE starts, so the panel is right from
-# the first frame. The apps come from the API with the desktop's key; without an answer, the defaults in
-# apps.json are used.
+# Writes the desktop's panel: the applications menu, a launcher for each app given (and the agent's window,
+# always), the open windows and a clock.
+#
+#   panel.sh [app …]      the ids in apps.json; none means the default apps
+#
+# The image is built with the default panel (image/configure.sh), so a new desktop draws it without asking
+# anyone. The agent runs this again when the task's environment chose other apps (agent/agent.mjs): then the
+# panel is already on screen, and it is started again to show the change.
 set -u
 ROOT=/opt/workstream
-[ -f /etc/workstream/desktop.env ] && . /etc/workstream/desktop.env
-apps=""
-if [ -n "${WORKSTREAM_API:-}" ] && [ -n "${WORKSTREAM_KEY:-}" ]; then
-  for _ in $(seq 10); do
-    apps=$(curl -fsS --max-time 5 -H "Authorization: Bearer $WORKSTREAM_KEY" "$WORKSTREAM_API/api/desktop/setup" 2>/dev/null | jq -r '.apps[]?' 2>/dev/null) && [ -n "$apps" ] && break
-    sleep 2
-  done
-fi
+apps="$*"
 [ -n "$apps" ] || apps=$(jq -r '.[] | select(.default) | .id' "$ROOT/apps.json")
 
 panel="$HOME/.config/xfce4/panel"
@@ -68,3 +65,10 @@ cat > "$config" <<XML
   </property>
 </channel>
 XML
+
+# A panel that is already running reads its settings from the settings service, which read this file when it
+# started: both are started again, the service first, so the panel comes back with what was just written.
+if pgrep -x xfce4-panel >/dev/null 2>&1; then
+  pkill -x xfconfd 2>/dev/null || true
+  xfce4-panel --restart >/dev/null 2>&1 || true
+fi

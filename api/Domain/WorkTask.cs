@@ -19,6 +19,17 @@ public enum DesktopState
     Deleting,
 }
 
+/// <summary>How far a starting desktop has come. It says nothing once the desktop is ready or stopped.</summary>
+public enum StartStep
+{
+    /// <summary>The host is making the machine, or turning on the one the task has.</summary>
+    Machine,
+    /// <summary>The machine is on and starting up.</summary>
+    Boot,
+    /// <summary>The display answers, so the desktop can be watched. Its agent has not exchanged with the API yet.</summary>
+    Agent,
+}
+
 /// <summary>
 /// A task: one piece of work, with a desktop and a conversation with the agent on it (docs/core-model.md).
 /// A node under its team; everyone on the team can see and use it through the team's one grant. This row also
@@ -51,8 +62,12 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public string Size { get; private set; } = DesktopSizes.Default;
     /// <summary>The machine's name at the desktop host. Null until one is made.</summary>
     public string? Host { get; private set; }
-    /// <summary>Where the API reaches the desktop's display: <c>host:port</c> on the private network.</summary>
+    /// <summary>Where the API reaches the desktop's display: <c>host:port</c> on the private network. Null while it has none.</summary>
     public string? Address { get; private set; }
+    /// <summary>When, in this start, the host said the machine was on.</summary>
+    public DateTimeOffset? OnAt { get; private set; }
+    /// <summary>When, in this start, the display first answered.</summary>
+    public DateTimeOffset? DisplayAt { get; private set; }
 
     /// <summary>When the desktop last exchanged with the API.</summary>
     public DateTimeOffset? SeenAt { get; private set; }
@@ -65,6 +80,15 @@ public sealed class WorkTask : ISqlOSResourceEntity
 
     /// <summary>Whether the machine is in use and counts toward the team's limit.</summary>
     public bool IsRunning => State is DesktopState.Starting or DesktopState.Ready or DesktopState.Stopping;
+
+    /// <summary>How far this start has come, from what has happened so far.</summary>
+    public StartStep Step => DisplayAt is not null ? StartStep.Agent : OnAt is not null ? StartStep.Boot : StartStep.Machine;
+
+    /// <summary>
+    /// Whether there is a screen to show: the display answers, which is before the agent's first exchange, and
+    /// until the desktop is asked to stop.
+    /// </summary>
+    public bool CanBeWatched => Address is not null && (State == DesktopState.Ready || State == DesktopState.Starting && DisplayAt is not null);
 
     public static WorkTask Start(string id, Team team, WorkEnvironment environment, string? title, string createdBy, DateTimeOffset now)
     {
@@ -97,19 +121,38 @@ public sealed class WorkTask : ISqlOSResourceEntity
 
     public void Rename(string? title) => Title = Rules.Text(title, "A task's title", MaxTitleLength);
 
-    /// <summary>The desktop host made the machine, or started it again: where it is.</summary>
+    /// <summary>The desktop host is making the machine, or starting it again: its name there, and where its display will be.</summary>
     public void DesktopMade(string host, string address)
     {
         Host = host;
         Address = address;
     }
 
-    /// <summary>The desktop exchanged with the API: it is up, and this is what its agent is doing.</summary>
-    public void DesktopSeen(bool agentWorking, DateTimeOffset now)
+    /// <summary>The host said the machine is on.</summary>
+    public void MachineOn(DateTimeOffset now)
+    {
+        if (State == DesktopState.Starting) OnAt ??= now;
+    }
+
+    /// <summary>The display answered: from now the desktop can be watched.</summary>
+    public void DisplayUp(DateTimeOffset now)
+    {
+        if (State != DesktopState.Starting) return;
+        OnAt ??= now;
+        DisplayAt ??= now;
+    }
+
+    /// <summary>
+    /// The desktop exchanged with the API: it is up, and this is what its agent is doing. Answers whether this
+    /// exchange is the one that made a starting desktop ready.
+    /// </summary>
+    public bool DesktopSeen(bool agentWorking, DateTimeOffset now)
     {
         SeenAt = now;
         AgentWorking = agentWorking;
-        if (State == DesktopState.Starting) Become(DesktopState.Ready, now);
+        if (State != DesktopState.Starting) return false;
+        Become(DesktopState.Ready, now);
+        return true;
     }
 
     public void Stop(DateTimeOffset now)
@@ -122,6 +165,8 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public void Stopped(DateTimeOffset now)
     {
         AgentWorking = false;
+        // A stopped machine is nowhere: the next start says where it is again.
+        Address = null;
         Become(DesktopState.Stopped, now);
     }
 
@@ -129,12 +174,16 @@ public sealed class WorkTask : ISqlOSResourceEntity
     {
         if (State is not (DesktopState.Stopped or DesktopState.Failed)) throw new DomainRuleException("Only a stopped desktop can be started.");
         ActiveAt = now;
+        Address = null;
+        OnAt = null;
+        DisplayAt = null;
         Become(DesktopState.Starting, now);
     }
 
     public void Fail(string why, DateTimeOffset now)
     {
         AgentWorking = false;
+        Address = null;
         Become(DesktopState.Failed, now);
         Failure = why.Length <= 500 ? why : why[..500];
     }
@@ -233,7 +282,8 @@ public sealed class TaskMessage : IHasResourceId
 
 /// <summary>
 /// One stretch of a desktop running: from when it was asked to start until it stopped, failed or was deleted.
-/// What a team's desktop hours are summed from, and what the administrator's graph is drawn from.
+/// What a team's desktop hours are summed from, and what the administrator's graph is drawn from. It also
+/// keeps when each step of the start happened, which is how long a start really takes.
 /// </summary>
 public sealed class DesktopRun
 {
@@ -247,12 +297,28 @@ public sealed class DesktopRun
     public string TeamId { get; private set; } = "";
     public string Size { get; private set; } = "";
     public DateTimeOffset StartedAt { get; private set; }
+    /// <summary>When the host said the machine was on.</summary>
+    public DateTimeOffset? OnAt { get; private set; }
+    /// <summary>When the display first answered: the person had a screen to watch.</summary>
+    public DateTimeOffset? DisplayAt { get; private set; }
+    /// <summary>When the agent first exchanged with the API.</summary>
+    public DateTimeOffset? ReadyAt { get; private set; }
     public DateTimeOffset? EndedAt { get; private set; }
 
     public static DesktopRun Begin(WorkTask task, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid().ToString("D"), TaskId = task.Id, TeamId = task.TeamId, Size = task.Size, StartedAt = now,
     };
+
+    public void MachineOn(DateTimeOffset now) => OnAt ??= now;
+
+    public void DisplayUp(DateTimeOffset now)
+    {
+        OnAt ??= now;
+        DisplayAt ??= now;
+    }
+
+    public void Ready(DateTimeOffset now) => ReadyAt ??= now;
 
     public void End(DateTimeOffset now) => EndedAt ??= now;
 }

@@ -8,14 +8,16 @@ import { newId } from "@/lib/utils";
 import { workstream, type Message, type Task } from "@/lib/workstream/api";
 import { TaskScreen, type ChatEntry } from "@/src/workspace/task-screen";
 
-/** How often an open screen reads its conversation, in milliseconds. */
+/** How often an open screen reads its conversation, in milliseconds: sooner while the desktop is starting, when each step is news. */
 const READ_EVERY = 1500;
+const READ_EVERY_STARTING = 500;
 
 type Unsent = { key: string; text: string; failed: boolean };
 
 /**
- * The controller for one screen. It reads the task's conversation every second and a half (only what is new
- * since the last message it has), sends what the person writes, and does what they ask of the task. The view
+ * The controller for one screen. It reads the task's conversation every second and a half, and twice a second
+ * while the desktop is starting (only what is new since the last message it has), sends what the person
+ * writes, and does what they ask of the task. The view
  * and the live desktop below it know nothing of the API.
  */
 export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
@@ -44,6 +46,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
   useEffect(() => {
     let live = true;
     let reading = false;
+    let starting = true;
     last.current = 0;
     setTask(null);
     setMissing(false);
@@ -55,6 +58,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
       try {
         const conversation = await workstream.conversation(taskId, last.current);
         if (!live) return;
+        starting = conversation.task.state === "starting";
         setTask(conversation.task);
         take(conversation.messages);
       } catch (error) {
@@ -64,11 +68,15 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         reading = false;
       }
     };
-    void read();
-    const timer = setInterval(read, READ_EVERY);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const readOn = async () => {
+      await read();
+      if (live) timer = setTimeout(readOn, starting ? READ_EVERY_STARTING : READ_EVERY);
+    };
+    void readOn();
     return () => {
       live = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [taskId, take]);
 
@@ -146,7 +154,12 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
       onClose={onClose}
       busy={action.busy}
       error={action.error}
-      desktop={task?.state === "ready" ? <DesktopStream taskId={taskId} label={t("desktop.label", { title: task.title })} onShape={setDesktopShape} /> : null}
+      // There is a screen to watch as soon as the display answers, which is before the agent has joined.
+      desktop={
+        task && (task.state === "ready" || (task.state === "starting" && task.step === "agent")) ? (
+          <DesktopStream taskId={taskId} label={t("desktop.label", { title: task.title })} onShape={setDesktopShape} />
+        ) : null
+      }
       desktopShape={desktopShape}
     />
   );

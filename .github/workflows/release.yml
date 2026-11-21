@@ -2,8 +2,11 @@ name: Release
 
 # Production ships only from a published GitHub release. Merging to main runs the checks and nothing else;
 # the `release` skill bumps the version, merges the version PR and publishes `vX.Y.Z`, and this workflow
-# takes that tag to production: both images built from the tag's commit, one Bicep deployment of the web app
-# and the API, then the desktops' image when `desktop/` changed since the previous release.
+# takes that tag to production: the desktops' image first, when `desktop/` changed since the previous
+# release, then both images built from the tag's commit and one Bicep deployment of the web app and the API.
+#
+# The image comes first because each deployment makes its desktops from one version of it, the one it was
+# deployed with: the API never runs against an image it was not released with, in either order of time.
 #
 # Also runs by hand to deploy any release again (a rollback).
 
@@ -84,9 +87,70 @@ jobs:
             echo "desktop=$desktop"
           } >> "$GITHUB_OUTPUT"
 
+  desktop-image:
+    name: Desktops' image
+    needs: resolve
+    if: needs.resolve.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: production
+    concurrency:
+      group: workstream-desktop-image
+      cancel-in-progress: false
+    outputs:
+      version: ${{ steps.image.outputs.version }}
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      # Baked when desktop/ changed since the previous release, when the gallery has no image yet, or when
+      # asked; never twice for one release. Versions 0.0.x are staging's own and do not count.
+      - name: Decide whether to bake
+        id: decide
+        env:
+          CHANGED: ${{ needs.resolve.outputs.desktop }}
+          ASKED: ${{ inputs.desktop-image }}
+        run: |
+          set -euo pipefail
+          have=$(az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition machine --query "[].name" -o tsv 2>/dev/null | grep -v '^0\.0\.' || true)
+          if grep -qx "$VERSION" <<<"$have"; then
+            echo "Image $VERSION is already in the gallery."; echo "bake=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$have" ] || [ "$CHANGED" = true ] || [ "$ASKED" = true ]; then
+            echo "bake=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop/ is unchanged since the previous release: desktops keep the image they have."; echo "bake=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/bake-desktop-image
+        if: steps.decide.outputs.bake == 'true'
+        with:
+          version: ${{ needs.resolve.outputs.version }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          token: ${{ github.token }}
+          location: ${{ env.LOCATION }}
+      - name: Keep the three newest
+        if: steps.decide.outputs.bake == 'true'
+        run: |
+          set -euo pipefail
+          az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition machine \
+            --query "sort_by([?!starts_with(name, '0.0.')], &publishingProfile.publishedDate)[].name" -o tsv | head -n -3 \
+            | xargs -r -I{} az sig image-version delete -g "$GROUP" --gallery-name workstream --gallery-image-definition machine --gallery-image-version {}
+      - name: The image this release makes its desktops from
+        id: image
+        run: |
+          set -euo pipefail
+          version=$(scripts/desktop-image-version.sh "$VERSION")
+          echo "Release $VERSION makes its desktops from image $version."
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   deploy:
     name: Web + API (Bicep)
-    needs: resolve
+    needs: [resolve, desktop-image]
     if: needs.resolve.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     # A brand-new installation makes its network, its container apps environment and its SQL server first.
@@ -109,77 +173,8 @@ jobs:
           sha: ${{ needs.resolve.outputs.sha }}
           tag: ${{ needs.resolve.outputs.tag }}
           release-tag: ${{ needs.resolve.outputs.tag }}
+          desktop-image-version: ${{ needs.desktop-image.outputs.version }}
           administrator-email: ${{ vars.ADMINISTRATOR_EMAIL }}
           # The agents' models (infra/README.md "Models").
           model-endpoint: ${{ vars.MODEL_ENDPOINT }}
           model-key: ${{ secrets.MODEL_KEY }}
-
-  desktop-image:
-    name: Desktops' image
-    needs: [resolve, deploy]
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    environment: production
-    concurrency:
-      group: workstream-desktop-image
-      cancel-in-progress: false
-    env:
-      BUILDER: workstream-image-${{ github.run_id }}
-      VERSION: ${{ needs.resolve.outputs.version }}
-      SHA: ${{ needs.resolve.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
-          persist-credentials: false
-      - uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      # Baked when desktop/ changed since the previous release, when the gallery has no image yet, or when
-      # asked; never twice for one release.
-      - name: Decide whether to bake
-        id: decide
-        env:
-          CHANGED: ${{ needs.resolve.outputs.desktop }}
-          ASKED: ${{ inputs.desktop-image }}
-        run: |
-          set -euo pipefail
-          have=$(az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop --query "[].name" -o tsv)
-          if grep -qx "$VERSION" <<<"$have"; then
-            echo "Image $VERSION is already in the gallery."; echo "bake=false" >> "$GITHUB_OUTPUT"
-          elif [ -z "$have" ] || [ "$CHANGED" = true ] || [ "$ASKED" = true ]; then
-            echo "bake=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "desktop/ is unchanged since the previous release: desktops keep the image they have."; echo "bake=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Build the image on a new machine
-        if: steps.decide.outputs.bake == 'true'
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          az group create -n "$BUILDER" -l "$LOCATION" --tags project=workstream purpose=image-build -o none
-          az vm create -g "$BUILDER" -n builder --image Debian:debian-13:13-gen2:latest --size Standard_D4as_v7 \
-            --admin-username builder --authentication-type password --admin-password "$(openssl rand -hex 20)Aa1-" \
-            --public-ip-sku Standard --nsg-rule NONE --os-disk-size-gb 64 --storage-sku Premium_LRS \
-            --security-type TrustedLaunch -o none
-          # The script's output comes back when it ends (its last 4 KB); it prints the last line only if every step ran.
-          az vm run-command invoke -g "$BUILDER" -n builder --command-id RunShellScript --scripts @desktop/image/bake.sh \
-            --parameters "$TOKEN" "$GITHUB_REPOSITORY" "$SHA" --query "value[0].message" -o tsv | tee build.log
-          grep -q "WORKSTREAM IMAGE OK $SHA" build.log
-      - name: Publish it and keep the three newest
-        if: steps.decide.outputs.bake == 'true'
-        run: |
-          set -euo pipefail
-          az vm deallocate -g "$BUILDER" -n builder -o none
-          az vm generalize -g "$BUILDER" -n builder -o none
-          az sig image-version create -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop \
-            --gallery-image-version "$VERSION" --virtual-machine "$(az vm show -g "$BUILDER" -n builder --query id -o tsv)" \
-            --replica-count 1 --storage-account-type Standard_LRS -o none
-          az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop \
-            --query "sort_by([], &publishingProfile.publishedDate)[].name" -o tsv | head -n -3 \
-            | xargs -r -I{} az sig image-version delete -g "$GROUP" --gallery-name workstream --gallery-image-definition desktop --gallery-image-version {}
-          echo "### Desktops' image \`$VERSION\` published" >> "$GITHUB_STEP_SUMMARY"
-      - name: Delete the builder
-        if: always() && steps.decide.outputs.bake == 'true'
-        run: az group delete -n "$BUILDER" --yes --no-wait

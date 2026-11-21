@@ -28,6 +28,8 @@ public sealed class Person : IDisposable
     public string Email { get; private init; } = "";
     public string Name { get; private init; } = "";
     public string UserId { get; private set; } = "";
+    /// <summary>The access token this person's requests carry.</summary>
+    public string Token => http.DefaultRequestHeaders.Authorization?.Parameter ?? "";
 
     public static string NewEmail() => $"person-{Guid.NewGuid():N}@workstream.test";
 
