@@ -51,13 +51,13 @@ public sealed class ModelJourneys
     public async Task A_streamed_answer_is_passed_through_and_counted_from_its_events()
     {
         var (ada, team, desktop) = await WorkingAsync();
-        Stack.Model.Answer = () => FakeModel.Events("claude-haiku-5-5", input: 2_000_000, output: 1_000_000);
+        Stack.Model.Answer = () => FakeModel.Events("claude-haiku-5-5", input: 50_000, output: 20_000);
         using var answer = await desktop.AskModelAsync(stream: true);
         Assert.AreEqual("text/event-stream", answer.Content.Headers.ContentType?.MediaType);
         var events = await answer.Content.ReadAsStringAsync();
         StringAssert.Contains(events, "event: message_stop");
-        // Haiku: $0.10 a million in, $0.50 a million out.
-        Assert.AreEqual(0.70m, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).ModelSpentUsd);
+        // Haiku, a prompt under 100,000 tokens: $0.10 a million in, $0.50 a million out.
+        Assert.AreEqual(0.015m, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).ModelSpentUsd);
     }
 
     [TestMethod]
