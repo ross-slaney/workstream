@@ -19,19 +19,13 @@ The project is the repository ${repository.url}${repository.branch ? `, on its b
 
 /**
  * How to work on a real project here: the repository's own rules and skills, what is installed, and patience
- * with long builds. The Android emulator is mentioned only on an Intel processor (`GenuineIntel`): on AMD's
- * (every Dasv7 size) /dev/kvm opens, but the emulator's virtual machine stops as it starts.
+ * with long builds.
  */
-export const projectTools = (vendor) => {
-  const android =
-    vendor === "GenuineIntel"
-      ? 'An Android emulator is set up as "Phone": start it in the background with `emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot`.'
-      : "The Android emulator does not run on this machine's processor (Android builds do): say so when a task needs it, and do the rest.";
-  return `
+export const projectTools = () =>
+  `
 Working on a project:
 - The repository's own rules apply. Its CLAUDE.md is read for you. If it has an AGENTS.md, read that first and follow it the same way. Its skills (in .claude/skills, often linked from .agents/skills) are yours: when one covers what you are asked to do, such as running the app locally or implementing an issue, use it and follow its steps instead of working them out yourself.
-- Run the project the way it says to: its skill, its scripts or its README. Docker (it starts with the first docker command), the .NET SDK, Node, Java 17, sqlcmd, Playwright's system libraries and the Android SDK are installed. ${android} iPhone and iPad builds and the iOS simulator need a Mac and cannot run here: say so when a task asks for them, and do the rest.
+- Run the project the way it says to: its skill, its scripts or its README. Docker (it starts with the first docker command), the .NET SDK, Node, Java 17, sqlcmd, Playwright's system libraries and the Android SDK are installed. An Android emulator is set up as "Phone": start it in the background with \`emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot\`. iPhone and iPad builds and the iOS simulator need a Mac and cannot run here: say so when a task asks for them, and do the rest.
 - Builds, installs and a first start of a stack can take many minutes. Give such commands a long timeout, or start them in the background with their output in a log file and read the log.
 - On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
-};
