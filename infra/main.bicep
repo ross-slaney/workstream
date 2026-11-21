@@ -35,6 +35,17 @@ param desktopImageVersion string
 param modelEndpoint string = ''
 @secure()
 param modelKey string = ''
+@description('Workstream\'s GitHub App, which teams connect their GitHub accounts through (infra/README.md, "GitHub"): its id, the name in its address and its OAuth client\'s id, the GitHub variables GH_APP_ID, GH_APP_SLUG and GH_APP_CLIENT_ID. The app is made by hand, once; empty leaves GitHub "not set up".')
+param githubAppId string = ''
+param githubAppSlug string = ''
+param githubClientId string = ''
+@description('The secrets GH_APP_CLIENT_SECRET, GH_APP_PRIVATE_KEY (its PEM in base64, which the deploy action makes) and, optionally, GH_APP_WEBHOOK_SECRET.')
+@secure()
+param githubClientSecret string = ''
+@secure()
+param githubPrivateKey string = ''
+@secure()
+param githubWebhookSecret string = ''
 
 var production = empty(stage)
 var shared = 'workstream'
@@ -133,6 +144,10 @@ module api 'api.bicep' = {
     desktopImageId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images/versions', 'workstream', 'machine', desktopImageVersion)
     modelEndpoint: modelEndpoint
     modelKey: modelKey
+    github: { appId: githubAppId, appSlug: githubAppSlug, clientId: githubClientId }
+    githubClientSecret: githubClientSecret
+    githubPrivateKey: githubPrivateKey
+    githubWebhookSecret: githubWebhookSecret
   }
 }
 

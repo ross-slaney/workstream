@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
 import { noteBackground, noteFile } from "./restore.mjs";
+import { projectWork } from "./instructions.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -63,7 +64,8 @@ const modelEnvironment = (setup, key) => ({
 export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log, restored = null }) {
   let current = null;
 
-  const environment = { ...process.env, ...setup.variables, ...modelEnvironment(setup, key) };
+  // gh's wrapper first on the PATH (shims/gh), so the agent's gh signs itself in.
+  const environment = { ...process.env, PATH: `${path.join(here, "shims")}:${process.env.PATH}`, ...setup.variables, ...modelEnvironment(setup, key) };
   const options = () => ({
     cwd: workspace,
     env: environment,
@@ -74,7 +76,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: [onThisDesktop(workspace), restored, setup.instructions].filter(Boolean).join("\n\n"),
+      append: [onThisDesktop(workspace), restored, projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
     },
     // The repository's own instructions and skills (CLAUDE.md, .claude/skills) apply, as they would on a laptop.
     settingSources: ["user", "project", "local"],

@@ -106,6 +106,13 @@ jobs:
           administrator-password: ${{ secrets.ADMINISTRATOR_PASSWORD }}
           model-endpoint: ${{ vars.MODEL_ENDPOINT }}
           model-key: ${{ secrets.MODEL_KEY }}
+          # A GitHub App of staging's own, if it has one: an app sends people back to one address only.
+          github-app-id: ${{ vars.GH_APP_ID }}
+          github-app-slug: ${{ vars.GH_APP_SLUG }}
+          github-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          github-client-secret: ${{ secrets.GH_APP_CLIENT_SECRET }}
+          github-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          github-webhook-secret: ${{ secrets.GH_APP_WEBHOOK_SECRET }}
 
   remove:
     name: Remove staging

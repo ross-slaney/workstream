@@ -30,7 +30,7 @@ a person's browser
 3. The host says the machine is on. Its service (`desktop/start.sh`, then `desktop/session.sh`) starts three things at once: the agent (`desktop/agent/agent.mjs`), the display, and XFCE on it.
 4. The display answers. From this moment the person has a screen to watch, a few seconds before the agent has said anything, and the job's work is done.
 5. The agent reads what it is told from the machine's user data, and exchanges with the API about once a second from then on: it hands over what it said and did, and takes what people wrote. The first exchange turns the task `ready`.
-6. The agent reads its setup from the API with its key: the apps for the panel, the repository, the setup script, the variables and the instructions. It prepares the desktop where the person can watch: it clones the repository, shows the environment's apps on the panel, runs the setup script in a terminal window, and opens the browser and the editor.
+6. The agent reads its setup from the API with its key: the apps for the panel, the repository, the setup script, the variables and the instructions. It prepares the desktop where the person can watch: it sets git and gh up to ask the API for a GitHub token when they need one, clones the repository, shows the environment's apps on the panel, runs the setup script in a terminal window, and opens the browser and the editor.
 7. The person's browser reads the conversation twice a second while the desktop is starting, and every second and a half after. It shows each step as the task reports it (`step`: `machine`, `boot`, `agent`), and opens a WebSocket to the API for the display as soon as there is one.
 
 Each of those moments is kept with the run (`DesktopRun`: asked, on, display, ready), so how long a start takes is something the product knows and not something anyone has to guess. The system administrator's page shows the middle start of the last seven days, by what it started from.
@@ -82,12 +82,19 @@ The harness calls models the way it calls Microsoft Foundry, at `…/api/model/a
 
 The prices are a table in `ModelOptions`, with the two things that make a call cost more than its plain rate: a cache write kept for an hour, and Haiku's higher rate for a prompt over 100,000 tokens. They are what Workstream pays; `Markup` is 1 until there is billing.
 
+## GitHub
+
+A team connects GitHub by installing Workstream's GitHub App on its account or organization ([the core model](core-model.md), "Connect GitHub"). The API holds the app's private key and signs, with it, the short JWT GitHub takes from an app (`api/GitHub/GitHubApp.cs`, RS256, nine minutes). With that it asks GitHub for an installation token whenever a desktop asks for one, for that desktop's repository alone, and hands it over without keeping it.
+
+On the desktop, git's credential helper for `https://github.com` is `desktop/agent/github.mjs`, and `gh` is a small wrapper first on the PATH (`desktop/agent/shims/gh`) that sets `GH_TOKEN` from the same script each time it runs. Each asks the API with the desktop's key, which it reads where the agent does (its user data, never its disk), so a token never runs out in the middle of a task and none is written down. A `GITHUB_TOKEN` an environment already has is used as it is. The agent is told to finish project work as a branch and a pull request, never on the default branch.
+
 ## What a desktop can and cannot do
 
 A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 
 - It holds one credential, its key. The key reaches `/api/desktop/*` and `/api/model/*` for its own task. It is not a person's token and opens no other route. The key is in the machine's user data, which Azure serves to that machine alone, and is never written to its disk: a copy of a desktop's disk carries nobody's key.
 - It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted.
+- It can ask for a GitHub token for its own environment's repository, when its team has connected GitHub: one repository, to push and open pull requests, for an hour. It never holds the app's key or anyone's own GitHub token. A leaked desktop key is also worth that repository's tokens until the task is deleted.
 - It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
 - It has no Azure identity.
 - A spare is a desktop with no task. Its key authenticates and nothing more until a task takes it, and it is never given to another team.
@@ -98,6 +105,6 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | Kept in | What |
 | --- | --- |
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
-| The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars). |
+| The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | The browser | The session's tokens, and which team was open last. |

@@ -1,5 +1,5 @@
 import type { Online } from "@/lib/online";
-import type { DesktopApp, DesktopSize, Environment } from "@/lib/workstream/api";
+import type { DesktopApp, DesktopSize, Environment, GitHubRepository } from "@/lib/workstream/api";
 
 /** A variable in the editor. One that is already saved shows no value; typing one replaces it. */
 export type VariableDraft = { name: string; value: string; saved: boolean };
@@ -24,6 +24,11 @@ export type EnvironmentsScreenProps = {
   environments: Online<Environment[]>;
   /** The apps a desktop can come with. */
   apps: DesktopApp[];
+  /**
+   * The repositories the team's GitHub connection reaches, which the repository can be picked from. Null when
+   * the team is not connected (or they could not be read): the address is typed.
+   */
+  repositories: GitHubRepository[] | null;
   onRetry: () => void;
   onAdd: () => void;
   onEdit: (environment: Environment) => void;

@@ -40,6 +40,10 @@ export default function EnvironmentsRoute() {
   const { teamId } = useTeamShell();
   const environments = useOnlineRead(async () => (await workstream.environments(teamId)).data, `environments:${teamId}`);
   const apps = useOnlineRead(() => workstream.apps(), "apps");
+  // With the team connected to GitHub, the repository can be picked from what the connection reaches.
+  const github = useOnlineRead(() => workstream.github(teamId), `github:${teamId}`);
+  const connected = valueOf(github)?.connected ?? false;
+  const repositories = useOnlineRead(() => (connected ? workstream.githubRepositories(teamId) : Promise.resolve([])), `github-repositories:${teamId}:${connected}`);
   const [editing, setEditing] = useState<{ id: string | null; draft: EnvironmentDraft } | null>(null);
   const action = useAction();
   const catalog = valueOf(apps) ?? [];
@@ -57,6 +61,7 @@ export default function EnvironmentsRoute() {
       <EnvironmentsScreen
         environments={environments}
         apps={catalog}
+        repositories={connected ? valueOf(repositories) : null}
         onRetry={environments.reload}
         onAdd={() => {
           action.clearError();

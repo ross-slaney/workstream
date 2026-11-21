@@ -155,13 +155,23 @@ async function exchangeForever() {
 
 const shellQuote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
 
-/** The environment's variables, for every shell on the desktop, and a token for git where one is given. */
+/** Where gh's wrapper is (shims/gh): first on the PATH of every shell and of the agent, so gh signs itself in. */
+const shims = path.join(root, "agent", "shims");
+
+/**
+ * The environment's variables, for every shell on the desktop, and git and gh set up for GitHub: git asks
+ * github.mjs for a token whenever it needs one, and gh asks it through its wrapper. The token is for the
+ * environment's repository, from the team's GitHub connection, or the GITHUB_TOKEN the environment was given.
+ */
 async function writeVariables(variables) {
-  const lines = Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`);
+  const lines = [`export PATH=${shellQuote(shims)}:"$PATH"`, ...Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`)];
   await writeFile(path.join(dir, "env.sh"), lines.join("\n") + "\n", { mode: 0o600 });
-  const token = variables.GITHUB_TOKEN ?? variables.GH_TOKEN;
-  if (token) {
-    await run("git", ["config", "--global", `url.https://x-access-token:${token}@github.com/.insteadOf`, "https://github.com/"]).catch((error) => log("git config failed:", error.message));
+  const config = (...args) => run("git", ["config", "--global", ...args]).catch((error) => log("git config failed:", error.message));
+  await config("--replace-all", "credential.https://github.com.helper", `!node ${path.join(root, "agent", "github.mjs")} credential`);
+  // Commits need an author. The person can set their own, and a repository's own setting wins.
+  if (!(await run("git", ["config", "--global", "user.name"]).then(() => true, () => false))) {
+    await config("user.name", "Workstream agent");
+    await config("user.email", "agent@workstream.invalid");
   }
 }
 
@@ -186,7 +196,7 @@ async function runSetupScript(script, folder, variables) {
 }
 
 const start = (command, args, variables) =>
-  spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, ...variables } }).on("error", (error) => log(`${command} did not start:`, error.message)).unref();
+  spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, PATH: `${shims}:${process.env.PATH}`, ...variables } }).on("error", (error) => log(`${command} did not start:`, error.message)).unref();
 
 /** Whether a program of this name is running in the session. */
 const running = (name) => run("pgrep", ["-x", name]).then(() => true, () => false);
@@ -228,7 +238,9 @@ async function prepareFiles(setup) {
     if (!existsSync(target)) {
       say("activity", `Cloning ${setup.repository.url}`);
       const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
-      await run("git", args, { timeout: 15 * 60_000 }).catch((error) =>
+      // With the environment's variables, where a pasted GITHUB_TOKEN is, and never waiting on a prompt nobody sees.
+      const env = { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" };
+      await run("git", args, { timeout: 15 * 60_000, env }).catch((error) =>
         say("text", `I could not clone the repository: ${String(error.stderr || error.message).trim().split("\n").slice(-3).join(" ")}`));
     }
     if (existsSync(target)) workspace = target;
