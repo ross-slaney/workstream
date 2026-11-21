@@ -78,6 +78,8 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public bool AgentWorking { get; private set; }
     /// <summary>How many times a person has asked the agent to stop what it is doing. The desktop acts when it changes.</summary>
     public int Interrupts { get; private set; }
+    /// <summary>When the task last emailed people that it was finished or needed them. Null until it first did.</summary>
+    public DateTimeOffset? EmailedAt { get; private set; }
 
     /// <summary>Whether the machine is in use and counts toward the team's limit.</summary>
     public bool IsRunning => State is DesktopState.Starting or DesktopState.Ready or DesktopState.Stopping;
@@ -169,6 +171,21 @@ public sealed class WorkTask : ISqlOSResourceEntity
         Become(DesktopState.Ready, now);
         return true;
     }
+
+    /// <summary>
+    /// Whether the desktop's exchange, saying the agent is or is not working, ends the agent's turn: it was
+    /// working and now is not. Asked before <see cref="DesktopSeen"/> records the exchange.
+    /// </summary>
+    public bool EndsTurn(bool agentWorking) => State == DesktopState.Ready && AgentWorking && !agentWorking;
+
+    /// <summary>
+    /// Whether the task may email people about a turn now: at most one email every <paramref name="gap"/>,
+    /// however many turns end in between.
+    /// </summary>
+    public bool MayEmail(DateTimeOffset now, TimeSpan gap) => EmailedAt is not { } last || now - last >= gap;
+
+    /// <summary>The task emailed people about a turn.</summary>
+    public void Emailed(DateTimeOffset now) => EmailedAt = now;
 
     public void Stop(DateTimeOffset now)
     {

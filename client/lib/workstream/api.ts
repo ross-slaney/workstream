@@ -10,6 +10,9 @@ export type ListPage<T> = { data: T[]; nextCursor: string | null };
 
 export type Me = { userId: string; name: string; email: string | null; systemAdmin: boolean };
 
+/** The person's own settings: `taskEmails` is whether they are emailed when a task they started or wrote in is finished or needs them. */
+export type MySettings = { taskEmails: boolean };
+
 export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number };
 
 export type TeamPerson = { userId: string; name: string; email: string | null; admin: boolean; joinedAt: string };
@@ -153,6 +156,8 @@ const id = encodeURIComponent;
 
 export const workstream = {
   me: () => apiJson<Me>("/api/me"),
+  mySettings: () => apiJson<MySettings>("/api/me/settings"),
+  changeMySettings: (settings: MySettings) => apiSend<MySettings>("PUT", "/api/me/settings", settings),
   apps: () => apiJson<DesktopApp[]>("/api/apps"),
 
   teams: () => apiJson<ListPage<Team>>("/api/teams"),

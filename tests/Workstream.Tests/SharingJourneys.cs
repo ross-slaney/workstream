@@ -66,9 +66,15 @@ public sealed class SharingJourneys
         Assert.AreEqual(grace.UserId, shared.Person.UserId);
         Assert.AreEqual("watcher", shared.Person.Role);
         Assert.IsTrue(shared.Person.Until > DateTime.UtcNow.AddHours(23) && shared.Person.Until < DateTime.UtcNow.AddHours(25));
-        // Someone with an account is sent to the task itself; nothing is emailed where email is not set up.
-        StringAssert.Contains(shared.Link, $"/home?open={task.Id}");
-        Assert.IsFalse(shared.Emailed);
+        // Someone with an account is sent to the task itself, in their own workspace, and emailed the link.
+        Assert.AreEqual($"{Stack.WebOrigin}/home?open={task.Id}", shared.Link);
+        Assert.IsTrue(shared.Emailed);
+        var email = Stack.Mail.Sent(grace.Email).Single();
+        Assert.AreEqual("Ada Lovelace shared a task with you", email.Subject);
+        StringAssert.Contains(email.TextBody, task.Title);
+        StringAssert.Contains(email.TextBody, "You can watch its desktop and read its conversation.");
+        StringAssert.Contains(email.TextBody, "It ends ");
+        StringAssert.Contains(email.HtmlBody, $"href=\"{shared.Link}\"");
 
         // Grace sees it among what is shared with her, reads it and watches its desktop.
         Assert.AreEqual(task.Id, (await SharedWithAsync(grace)).Single().Id);
@@ -153,7 +159,13 @@ public sealed class SharingJourneys
         Assert.IsNull(shared.Person);
         Assert.AreEqual(address, shared.Invitation!.Email);
         Assert.AreEqual("prompter", shared.Invitation.Role);
-        StringAssert.Contains(shared.Link, "/share?token=");
+        StringAssert.StartsWith(shared.Link, $"{Stack.WebOrigin}/share?token=");
+        // The email to someone new carries the link that takes the invitation.
+        Assert.IsTrue(shared.Emailed);
+        var email = Stack.Mail.Sent(address).Single();
+        StringAssert.Contains(email.TextBody, shared.Link);
+        StringAssert.Contains(email.TextBody, "Create your account with this address");
+        StringAssert.Contains(email.TextBody, "You can watch its desktop and write to its agent.");
         var waiting = (await ada.GetAsync<TaskAccessList>($"/api/tasks/{task.Id}/access")).Invitations.Single();
         Assert.AreEqual(address, waiting.Email);
         // The link is given once, to whoever made it.

@@ -23,6 +23,8 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
     public DbSet<Spare> Spares => Set<Spare>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
+    public DbSet<PersonSettings> PersonSettings => Set<PersonSettings>();
+    public DbSet<TaskWatcher> TaskWatchers => Set<TaskWatcher>();
 
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
     internal static decimal DefaultModelAllowanceUsd { get; set; } = 20m;
@@ -160,6 +162,22 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             usage.Property(x => x.Model).HasMaxLength(100);
             usage.Property(x => x.CostUsd).HasPrecision(18, 6);
             usage.HasIndex(x => new { x.TeamId, x.At });
+        });
+
+        model.Entity<PersonSettings>(settings =>
+        {
+            settings.ToTable("PersonSettings");
+            settings.HasKey(x => x.UserId);
+            settings.Property(x => x.UserId).HasMaxLength(450);
+        });
+
+        model.Entity<TaskWatcher>(watcher =>
+        {
+            watcher.ToTable("TaskWatchers");
+            watcher.HasKey(x => new { x.TaskId, x.UserId });
+            watcher.HasOne<WorkTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
+            watcher.Property(x => x.TaskId).HasMaxLength(36);
+            watcher.Property(x => x.UserId).HasMaxLength(450);
         });
     }
 

@@ -6,6 +6,7 @@ using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using Workstream.Api.Domain;
+using Workstream.Api.Email;
 using static Workstream.Api.WorkstreamAuthorization;
 
 namespace Workstream.Api;
@@ -113,7 +114,7 @@ public static partial class Operations
     /// link is in the answer, and is emailed to them where email is set up.
     /// </summary>
     public static async Task<Outcome<TaskShared>> ShareTaskAsync(Caller caller, string taskId, string? email, string? role, string? expiresIn,
-        WorkstreamApp app, WorkstreamDbContext db, ISqlOSFgaAuthService fga, ISqlOSTransactionalEmailService mail, CancellationToken ct)
+        WorkstreamApp app, WorkstreamDbContext db, ISqlOSFgaAuthService fga, ISqlOSEmailSender sender, ISqlOSTransactionalEmailService mail, ILogger log, CancellationToken ct)
     {
         var allowed = await TaskWithAsync(caller, taskId, Permissions.TaskManage, "Only the task's team can share it.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<TaskShared>();
@@ -151,8 +152,7 @@ public static partial class Operations
             await GrantShareAsync(db, person.UserId, task, grantedRole, until, ct);
             await db.SaveChangesAsync(ct);
             var link = TaskLink(app, task.Id);
-            var emailed = app.Sender is not null
-                && await TaskShareEmail.SendAsync(mail, person.DefaultEmail ?? address, sharer, task.Title, grantedRole, until, link, newcomer: false, $"{task.Id}:{person.UserId}:{now.UtcTicks}", ct);
+            var emailed = await ShareEmail.SendAsync(sender, mail, log, person.DefaultEmail ?? address, sharer, task.Title, grantedRole, until, link, newcomer: false, $"{task.Id}:{person.UserId}:{now.UtcTicks}", ct);
             return Outcome<TaskShared>.Ok(new TaskShared(new SharedPerson(person.UserId, person.DisplayName, person.DefaultEmail, TaskShareRoles.NameOf(grantedRole), until), null, link, emailed));
         }
 
@@ -160,8 +160,7 @@ public static partial class Operations
         db.TaskInvitations.Add(invitation);
         await db.SaveChangesAsync(ct);
         var invitationLink = InvitationLink(app, token);
-        var sent = app.Sender is not null
-            && await TaskShareEmail.SendAsync(mail, address, sharer, task.Title, grantedRole, until, invitationLink, newcomer: true, invitation.Id, ct);
+        var sent = await ShareEmail.SendAsync(sender, mail, log, address, sharer, task.Title, grantedRole, until, invitationLink, newcomer: true, invitation.Id, ct);
         return Outcome<TaskShared>.Ok(new TaskShared(null, ToDto(invitation, invitationLink), invitationLink, sent));
     }
 

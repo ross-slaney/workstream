@@ -172,9 +172,9 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
-    static async Task<IResult> PostTaskShare(string id, ShareTask body, HttpContext http, WorkstreamApp app, WorkstreamDbContext db, ISqlOSFgaAuthService fga, ISqlOSTransactionalEmailService mail, CancellationToken ct)
+    static async Task<IResult> PostTaskShare(string id, ShareTask body, HttpContext http, WorkstreamApp app, WorkstreamDbContext db, ISqlOSFgaAuthService fga, ISqlOSEmailSender sender, ISqlOSTransactionalEmailService mail, ILoggerFactory logs, CancellationToken ct)
     {
-        var outcome = await Operations.ShareTaskAsync(CallerOf(http), id, body.Email, body.Role, body.ExpiresIn, app, db, fga, mail, ct);
+        var outcome = await Operations.ShareTaskAsync(CallerOf(http), id, body.Email, body.Role, body.ExpiresIn, app, db, fga, sender, mail, logs.CreateLogger("Workstream.Sharing"), ct);
         return outcome.IsOk ? Results.Created($"/api/tasks/{id}/access", outcome.Value) : ToResult(outcome);
     }
 
@@ -210,9 +210,9 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
-    static async Task<IResult> Exchange(DesktopExchange body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> Exchange(DesktopExchange body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
-        var outcome = await Operations.ExchangeAsync(Caller.Desktop(http), body, db, fga, ct);
+        var outcome = await Operations.ExchangeAsync(Caller.Desktop(http), body, db, fga, jobs, ct);
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 }

@@ -107,7 +107,7 @@ public static class DesktopRelay
     /// Whether this person may have this desktop on screen now, where it is, and whether they may use its
     /// mouse and keyboard. Their session must be live, they must hold <c>TASK_VIEW</c> on the task, and its
     /// display must be answering, which it is a few seconds before its agent first exchanges. Each check that
-    /// passes also records that the desktop is in use, which is what keeps the sweep from stopping it.
+    /// passes also records that the desktop is in use, which is what keeps the sweep from stopping it, and that this person has it on screen.
     /// </summary>
     static async Task<(int Status, string? Address, bool Drive)> AdmitAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, bool touch, CancellationToken ct)
     {
@@ -125,8 +125,21 @@ public static class DesktopRelay
         var drive = await fga.Allows(userId, Permissions.TaskDrive, task.ResourceId);
         if (touch)
         {
-            task.Active(DateTimeOffset.UtcNow);
+            var at = DateTimeOffset.UtcNow;
+            task.Active(at);
             await db.SaveChangesAsync(ct);
+            // And that this person has it on screen, so they are not emailed about what they are watching.
+            var watcher = await db.TaskWatchers.SingleOrDefaultAsync(x => x.TaskId == task.Id && x.UserId == userId, ct);
+            if (watcher is null) db.TaskWatchers.Add(TaskWatcher.Of(task, userId, at));
+            else watcher.Seen(at);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException)
+            {
+                // Their other stream, opened at the same moment, wrote it first: it says the same.
+            }
         }
         return (StatusCodes.Status200OK, task.Address, drive);
     }

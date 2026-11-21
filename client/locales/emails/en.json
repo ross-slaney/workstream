@@ -1,0 +1,47 @@
+{
+  "layout": {
+    "brand": "Workstream",
+    "why": "You get this email because you started this task or wrote in it.",
+    "turnOff": "Turn these emails off",
+    "turnOffText": "Turn these emails off on your team's page: {settingsLink}"
+  },
+  "finished": {
+    "displayName": "A task is finished",
+    "subject": "Finished: {title}",
+    "heading": "The agent finished {title}",
+    "intro": "The agent in {team} stopped working and said:",
+    "button": "Open the task",
+    "buttonText": "Open the task: {link}"
+  },
+  "needsYou": {
+    "displayName": "A task needs you",
+    "subject": "Needs you: {title}",
+    "heading": "The agent has a question about {title}",
+    "intro": "The agent in {team} is waiting for an answer:",
+    "button": "Answer the agent",
+    "buttonText": "Answer the agent: {link}"
+  },
+  "shared": {
+    "displayName": "A task was shared with you",
+    "subject": "{sharer} shared a task with you",
+    "heading": "{sharer} shared {title} with you",
+    "button": "Open the task",
+    "buttonText": "Open the task: {link}",
+    "why": "You get this email because someone on the task's team shared it with this address."
+  },
+  "sharedInvite": {
+    "displayName": "A task was shared with someone new",
+    "subject": "{sharer} shared a task with you",
+    "heading": "{sharer} shared {title} with you",
+    "button": "Create your account and open it",
+    "buttonText": "Create your account with this address and open the task: {link}",
+    "why": "You get this email because someone on the task's team shared it with this address. The link works once, for a week, and only for this address."
+  },
+  "shareAccess": {
+    "watcher": "You can watch its desktop and read its conversation.",
+    "prompter": "You can watch its desktop and write to its agent.",
+    "driver": "You can watch its desktop, write to its agent and use its mouse and keyboard.",
+    "ends": "It ends {until} UTC.",
+    "never": "It lasts until they take it back."
+  }
+}
