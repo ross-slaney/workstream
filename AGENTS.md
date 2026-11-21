@@ -1,0 +1,21 @@
+# Workstream
+
+Workstream gives each task its own cloud desktop with an AI agent working on it; a person watches it live, talks to the agent and takes over when they want, with up to four tasks on screen at once. It is built the way Genius (`agenetix/ChecklistSquad`) is built: SqlOS as the data model, a plain REST API, one Expo app, Bicep, and releases by GitHub release. Read [README.md](README.md) for the layout and how to run it.
+
+Built: sign-in by emailed code (a password in development); teams, invitations and administrators; environments (apps, size, and the advanced settings: repository, setup script, variables, instructions); tasks with a desktop each, started, stopped, started again and deleted; the conversation between people and the agent; the live desktop in the browser through the API's relay; the workspace with up to four tasks side by side by drag and drop; usage and limits per team; the system administrator's page with the running-desktops curve; the model gateway to Foundry with a monthly allowance per team. Not built: payments, sign in with ChatGPT, pull-request previews, a phone app, a custom domain.
+
+## The rules
+
+1. **Model on SqlOS first.** [docs/core-model.md](docs/core-model.md) defines the system: principals, nodes, permissions, roles and grants. A feature that changes who, where or what may be done changes that document in the same PR. If you are about to add a column, flag, join or table that relates a principal to a node, stop: it is a grant, and its list is a page (`ToPageAsync`). When SqlOS seems to lack something, read its docs and source before concluding, then raise it; never work around it.
+2. **Build the house way.** REST handlers resolve the caller, load the row and its real parent, check SqlOS on the target node (creates check the parent), call the domain and save. The verbs live once, in `api/Operations/`; the handlers in `api/WorkstreamApi*.cs` are adapters. Behavior and its rules live in `api/Domain/`. SchemaSync, no migrations. Identity side effects (a new person's team, a membership's group) happen inside the save, in `api/IdentityProvisioning.cs`.
+3. **One view per surface.** A screen in `client/src/` is a folder: `props.ts` (the contract), `parts.tsx`, one file per surface (`web-desktop.tsx`, `web-phone.tsx`) and `index.ts`, which picks. Controllers live in `client/app/` and never know the surface. Views take props only. A window or platform check anywhere but `client/lib/surface.ts` is raised, not written.
+4. **Every word is a key.** User-facing text lives in `client/locales/<namespace>/en.json` and is read with `useT`. The system administrator's page is English only and writes its words in place.
+5. **Colors come from the palette.** `client/components/theme/palette.ts` is the one list, light and dark, checked for contrast by test. Views use the Tailwind classes it backs; `useTheme().colors` is for color props only.
+6. **Gates.** `cd client && npm run check`; `cd desktop/agent && npm test`; `dotnet test tests/Workstream.Tests`. Every endpoint ships allow and deny journeys per kind of caller: a team's administrator, a member, a stranger, the system administrator, a desktop with its key, and nobody.
+7. **A desktop is untrusted.** It runs whatever its agent is asked to. It holds one key that reaches its own task and nothing else; it never holds a model key, a person's token or anything of another team's. It has no public address and cannot reach another desktop. Anything that would give a desktop more than that is raised first.
+8. **Production ships only by GitHub release.** `vX.Y.Z` is the version in `client/app.json`. Merging to `main` deploys nothing. Infrastructure is `infra/` and the workflows, nothing made by hand, with one exception that is written down: the Foundry resource and its model deployments (`infra/README.md`, "Models").
+9. **Working with a person.** Never commit or push during synchronous work unless the person explicitly approves that commit.
+
+## Skills
+
+In `.agents/skills/`, linked into `.claude/skills/`: `run-local-stack` and `release`.

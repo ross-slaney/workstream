@@ -1,0 +1,74 @@
+# How the pieces fit
+
+[The core model](core-model.md) says who can do what. This says what runs where and how a task's desktop works.
+
+## The pieces
+
+```text
+a person's browser
+  │  pages                    web app (client/, Expo server output)
+  │  REST, sign-in            ┐
+  │  the desktop's display    │ API (api/): REST + SqlOS, the relay,
+  ▼  (a WebSocket)            ┘ the model gateway, the jobs
+                                 │                    │
+            private network      │ display            │ model calls, with Workstream's key
+                                 ▼                    ▼
+                         a task's desktop        Microsoft Foundry (Claude)
+                         (one machine per task)
+                                 │
+                                 └── calls the API at its public address, with its own key
+```
+
+- **The web app** has no secrets and no database. Public pages (the landing page, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session.
+- **The API** is one process: the REST API with SqlOS for sign-in and authorization, the relay that carries a desktop's display to the people watching it, the gateway every agent's model calls go through, and the background jobs (Hangfire, in the app's own database) that make, stop and delete desktops.
+- **A desktop** is a Debian virtual machine with the XFCE desktop on a TigerVNC display, made from one image. In development it is a Docker container built from the same two scripts.
+
+## What happens when someone starts a task
+
+1. The browser posts the task with an id it made. The API checks `TEAM_CREATE_TASK` on the team and the team's limit of running desktops, saves the task as `starting` with the person's first message, and queues a job.
+2. The job (`api/Desktops/DesktopJobs.cs`), as `agent::desktop-operator`, makes the desktop's service account, grants it `task_desktop` on the task, issues its key, and asks the host for a machine (`AzureDesktopHost` or `DockerDesktopHost`). The machine is told two things: the API's address and its key.
+3. The machine boots. Its service (`desktop/start.sh`) starts the display, the session and the agent (`desktop/agent/agent.mjs`).
+4. The agent reads its setup from the API with its key: the apps for the panel, the repository, the setup script, the variables and the instructions. It prepares the desktop where the person can watch: it clones the repository, runs the setup script in a terminal window, and opens the browser and the editor.
+5. About once a second the agent exchanges with the API: it hands over what it said and did, and takes what people wrote. The first exchange turns the task `ready`.
+6. The person's browser opens a WebSocket to the API for the display, and reads the conversation every second and a half.
+
+Stopping a task deallocates its machine and keeps its disk. Starting it again brings the same desktop back, and the agent resumes the same conversation. Deleting a task deletes the machine, its disk and its network interface, and ends its key. A desktop nobody watches or writes to, whose agent is idle, is stopped after half an hour by a sweep that also fails a desktop that never arrived and removes any machine no task knows.
+
+## The display
+
+A desktop's display is a VNC server with no password, on a network that admits one caller: the API. The browser never reaches a desktop. It opens `GET /api/tasks/{id}/desktop` as a WebSocket carrying the person's access token; the API validates the token, checks `TASK_USE` on the task, connects to the desktop's private address, and passes bytes both ways. It checks again every minute and closes the stream when access is gone. The browser draws it with noVNC.
+
+VNC rather than RDP for two reasons: the screen has to exist before anyone connects, because the agent works on it whether or not a person is watching, and several people can watch the same screen at once. There is no outside service and no VPN between the person and the desktop.
+
+## The agent
+
+`desktop/agent/harness.mjs` is the one file that knows which agent runs: the Claude Agent SDK, with every permission granted, because the desktop is the task's own machine and is deleted with it. It is told where it is and to work where people can see: the browser tools drive the Chromium window on the desktop (the same one the person can use), a small set of desktop tools take screenshots and click and type for anything else, and a file the agent edits opens in VS Code as it changes. The repository's own `CLAUDE.md` and skills apply, as they would on a laptop.
+
+The agent has its own window on the desktop, the Agent button on the panel, which shows the same conversation. A person at the desktop can talk to the agent there; what they type reaches the web app's conversation too.
+
+Another harness would replace `harness.mjs` and nothing else: the rest of the agent only hands it prompts and takes what it said and did.
+
+## Models
+
+The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.
+
+The prices are a table in `ModelOptions`. They are what Workstream pays; `Markup` is 1 until there is billing.
+
+## What a desktop can and cannot do
+
+A desktop runs whatever its agent is asked to, so it is treated as untrusted:
+
+- It holds one credential, its key. The key reaches `/api/desktop/*` and `/api/model/*` for its own task. It is not a person's token and opens no other route.
+- It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted.
+- It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
+- It has no Azure identity.
+- An environment's variables are stored protected and are sent only to a desktop made from that environment. They are on that desktop in plain text, because the work needs them there: anyone on the team can read them by opening the desktop.
+
+## What is kept where
+
+| Kept in | What |
+| --- | --- |
+| SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
+| The app's tables | Teams' limits, environments, tasks, messages, desktop runs (for hours), model usage (for dollars). |
+| A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session. It goes with the task. |
+| The browser | The session's tokens, and which team was open last. |
