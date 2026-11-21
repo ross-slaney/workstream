@@ -1,0 +1,20 @@
+{
+  "name": "workstream-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The agent on a Workstream desktop: the Claude Agent SDK, the desktop's tools, and the exchange with the API.",
+  "type": "module",
+  "main": "agent.mjs",
+  "scripts": {
+    "start": "node agent.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.330",
+    "@playwright/mcp": "0.0.86",
+    "zod": "^4.0.0"
+  }
+}

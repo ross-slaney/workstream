@@ -1,0 +1,16 @@
+[Unit]
+Description=Workstream desktop: the display, the session and the agent
+After=network-online.target cloud-init.service docker.service
+Wants=network-online.target
+
+[Service]
+User=work
+Group=work
+# The two things the desktop is told arrive in a file cloud-init writes; the session waits for it briefly.
+ExecStartPre=/bin/sh -c 'for i in $(seq 120); do [ -f /etc/workstream/desktop.env ] && exit 0; sleep 1; done; exit 0'
+ExecStart=/opt/workstream/start.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

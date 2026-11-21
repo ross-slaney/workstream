@@ -1,0 +1,101 @@
+{
+  "environments": {
+    "metaTitle": "Environments · Workstream",
+    "title": "Environments",
+    "subtitle": "An environment is what a task's desktop comes with. Everyone on the team can start tasks from these.",
+    "add": "New environment",
+    "empty": "No environments. Add one and tasks can start from it.",
+    "appsCount": "{count, plural, one {# app} other {# apps}}",
+    "hasRepository": "Clones {repository}",
+    "hasSetup": "Runs a setup script",
+    "variablesCount": "{count, plural, one {# variable} other {# variables}}",
+    "editor": {
+      "newTitle": "New environment",
+      "editTitle": "Edit environment",
+      "name": "Name",
+      "namePlaceholder": "Web app",
+      "apps": "Apps on the desktop",
+      "appsHint": "Each one gets a button on the desktop's panel.",
+      "size": "Desktop size",
+      "sizes": {
+        "small": "Small · 2 cores, 8 GB",
+        "standard": "Standard · 4 cores, 16 GB",
+        "large": "Large · 8 cores, 32 GB"
+      },
+      "advanced": "Advanced",
+      "advancedHint": "For a project that needs its code, tools and keys in place before the agent starts.",
+      "repository": "Repository",
+      "repositoryPlaceholder": "https://github.com/acme/app",
+      "repositoryHint": "Cloned when the desktop is made. For a private GitHub repository, add a variable named GITHUB_TOKEN.",
+      "branch": "Branch",
+      "branchPlaceholder": "main",
+      "setupScript": "Setup script",
+      "setupScriptHint": "Runs once on a new desktop, in a terminal you can watch, in the repository's folder when there is one.",
+      "setupScriptPlaceholder": "npm ci\ndocker pull postgres:17",
+      "variables": "Variables",
+      "variablesHint": "Set in every shell on the desktop and given to the agent. Values are stored protected and never shown again.",
+      "variableName": "NAME",
+      "variableValue": "Value",
+      "variableKept": "Saved. Type to replace it.",
+      "addVariable": "Add a variable",
+      "removeVariable": "Remove {name}",
+      "instructions": "Instructions for the agent",
+      "instructionsHint": "Added to what the agent is told on every desktop made from this environment.",
+      "instructionsPlaceholder": "Run the tests before you say you are done. Leave the app running on port 3000.",
+      "save": "Save environment",
+      "delete": "Delete environment",
+      "deleteTitle": "Delete this environment?",
+      "deleteBody": "Tasks can no longer start from it. Tasks already started from it must be deleted first."
+    }
+  },
+  "team": {
+    "metaTitle": "Team · Workstream",
+    "title": "Team",
+    "subtitle": "Everyone on a team can see, use and manage every task and environment in it.",
+    "name": "Team name",
+    "rename": "Save name",
+    "people": "People",
+    "you": "you",
+    "admin": "Administrator",
+    "member": "Member",
+    "makeAdmin": "Make administrator",
+    "removeAdmin": "Make member",
+    "remove": "Remove",
+    "leave": "Leave team",
+    "removeTitle": "Remove {name}?",
+    "removeBody": "They lose access to this team's tasks and environments at once.",
+    "leaveTitle": "Leave this team?",
+    "leaveBody": "You lose access to its tasks and environments.",
+    "invite": {
+      "title": "Invite someone",
+      "email": "Email",
+      "emailPlaceholder": "name@company.com",
+      "asAdmin": "As an administrator",
+      "send": "Invite",
+      "linkTitle": "Invitation ready",
+      "linkBody": "An email is on its way where email is set up. You can also send this link yourself. It works once, for {email} only.",
+      "notSent": "The email could not be sent. Send the link yourself.",
+      "pending": "Waiting to be accepted",
+      "withdraw": "Withdraw",
+      "expires": "Expires {date}"
+    },
+    "adminOnly": "Only an administrator can invite people or change who is on the team."
+  },
+  "usage": {
+    "metaTitle": "Usage · Workstream",
+    "title": "Usage",
+    "subtitle": "What this team has used since {date}.",
+    "models": {
+      "title": "Models",
+      "spent": "{spent} of {allowance} used",
+      "body": "What the team's agents have spent on AI models this month. When the allowance is used up, agents stop until next month or until it is raised.",
+      "left": "{left} left"
+    },
+    "desktops": {
+      "title": "Desktops",
+      "hours": "{hours, plural, one {# hour} other {# hours}} of desktop time",
+      "running": "{running} of {limit} running now",
+      "body": "A desktop counts from when it starts until it stops. Idle desktops stop by themselves."
+    }
+  }
+}

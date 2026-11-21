@@ -20,7 +20,7 @@ public static partial class Operations
 {
     /// <summary>Every team, oldest first: the query "my teams" pages with <c>TEAM_VIEW</c>.</summary>
     public static IQueryable<Team> Teams(WorkstreamDbContext db) =>
-        db.Teams.AsNoTracking().OrderBy(x => x.CreatedAt).ThenBy(x => x.Id);
+        db.Teams.AsNoTracking().OrderBy(x => x.CreatedAt);
 
     /// <summary>The names SqlOS keeps for these teams.</summary>
     public static async Task<Dictionary<string, string>> TeamNamesAsync(WorkstreamDbContext db, IEnumerable<string> teamIds, CancellationToken ct)

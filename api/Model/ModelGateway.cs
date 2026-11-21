@@ -102,7 +102,9 @@ public static class ModelGateway
         }
         if (!options.IsConfigured)
         {
-            await RefuseAsync(http, StatusCodes.Status503ServiceUnavailable, "api_error", "Models are not set up in this environment (Workstream:Model).");
+            // A plain refusal: the agent's client waits and tries again on a 5xx, and reads a 401 or 403 as its own
+            // credential having failed. This will not change by waiting, and the words are for the person.
+            await RefuseAsync(http, StatusCodes.Status400BadRequest, "invalid_request_error", "Models are not set up in this environment. Set Workstream:Model:Endpoint and Workstream:Model:Key (README, \"Models\").");
             return;
         }
         var allowance = await cache.GetOrCreateAsync($"allowance:{task.TeamId}", async entry =>
@@ -113,7 +115,7 @@ public static class ModelGateway
         });
         if (allowance <= 0)
         {
-            await RefuseAsync(http, StatusCodes.Status403Forbidden, "permission_error", "Your team has used its model allowance for this month. A system administrator can raise it.");
+            await RefuseAsync(http, StatusCodes.Status400BadRequest, "invalid_request_error", "Your team has used its model allowance for this month. A system administrator can raise it.");
             return;
         }
         if (http.Request.ContentLength > MaxRequestBytes)

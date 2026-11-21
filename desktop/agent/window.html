@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent</title>
+<style>
+  :root { --bg: #fff; --ink: #14171f; --muted: #5b6474; --line: #e3e6ec; --soft: #f4f6f9; --primary: #1f4fe0; --on-primary: #fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --ink: #edf0f5; --muted: #9aa3b2; --line: #2a2f3a; --soft: #1b1f27; --primary: #7c9cff; --on-primary: #0b1020; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, "DejaVu Sans", sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #state { color: var(--muted); font-size: 12px; }
+  #list { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .person { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: 12px; background: var(--primary); color: var(--on-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .agent { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .activity { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty { margin: auto; color: var(--muted); text-align: center; max-width: 280px; }
+  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+  textarea { flex: 1; min-height: 44px; max-height: 160px; resize: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); color: var(--ink); font: inherit; }
+  textarea:focus-visible, button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  button { min-width: 64px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; }
+  button.quiet { background: var(--soft); color: var(--ink); border: 1px solid var(--line); }
+  button[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Agent</h1>
+  <span id="state" role="status"></span>
+  <button id="stop" class="quiet" type="button" hidden>Stop</button>
+</header>
+<div id="list" aria-live="polite">
+  <p class="empty" id="empty">Tell the agent what to do. It works on this desktop, where you can watch and take over.</p>
+</div>
+<form id="form">
+  <textarea id="text" rows="1" placeholder="Message the agent" aria-label="Message the agent"></textarea>
+  <button type="submit">Send</button>
+</form>
+<script>
+  const list = document.getElementById("list"), text = document.getElementById("text"), stop = document.getElementById("stop");
+  let after = 0;
+  async function read() {
+    try {
+      const reply = await (await fetch("/conversation?after=" + after)).json();
+      document.getElementById("title").textContent = reply.title || "Agent";
+      document.getElementById("state").textContent = reply.working ? "Working" : "";
+      stop.hidden = !reply.working;
+      const pinned = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+      for (const message of reply.messages) {
+        after = Math.max(after, message.id);
+        document.getElementById("empty")?.remove();
+        const row = document.createElement("div");
+        row.className = message.kind === "activity" ? "activity" : message.author === "person" ? "person" : "agent";
+        row.textContent = message.text;
+        list.append(row);
+      }
+      if (reply.messages.length && pinned) list.scrollTop = list.scrollHeight;
+    } catch {}
+  }
+  document.getElementById("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const value = text.value.trim();
+    if (!value) return;
+    text.value = "";
+    await fetch("/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: value }) });
+    read();
+  });
+  text.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); document.getElementById("form").requestSubmit(); }
+  });
+  stop.addEventListener("click", () => fetch("/interrupt", { method: "POST" }));
+  read();
+  setInterval(read, 1000);
+</script>
+</body>
+</html>

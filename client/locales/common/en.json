@@ -1,0 +1,32 @@
+{
+  "brand": {
+    "name": "Workstream"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close",
+    "retry": "Try again",
+    "copy": "Copy",
+    "copied": "Copied",
+    "signOut": "Sign out",
+    "back": "Back"
+  },
+  "state": {
+    "loading": "Loading",
+    "offline": "You're offline. This page needs a connection.",
+    "saving": "Saving"
+  },
+  "errors": {
+    "signIn": "Sign in to continue.",
+    "requestFailed": "The request failed ({status}).",
+    "couldNotRead": "This could not be loaded.",
+    "couldNotSave": "That did not work. Try again.",
+    "notFound": "There is nothing at this address."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "home": "Go to the start"
+  }
+}

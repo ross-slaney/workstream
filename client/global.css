@@ -1,0 +1,6 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Colors are CSS variables set by ThemeProvider (components/theme/theme.tsx)
+   from components/theme/palette.ts. Do not define them here. */

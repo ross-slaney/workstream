@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "signInTitle": "Sign in · Workstream"
+  },
+  "signIn": {
+    "title": "Sign in to Workstream",
+    "subtitleCode": "We'll email you a code. No password to remember.",
+    "subtitlePassword": "Sign in with your email and password.",
+    "submitCode": "Email me a code",
+    "submitPassword": "Sign in",
+    "switch": "New here? Create an account"
+  },
+  "signUp": {
+    "title": "Create your account",
+    "subtitle": "You get a team of your own, and a desktop for your first task.",
+    "submitCode": "Email me a code",
+    "submitPassword": "Create account",
+    "switch": "Already have an account? Sign in"
+  },
+  "verify": {
+    "title": "Enter the code",
+    "subtitle": "We sent a six-digit code to {email}.",
+    "submit": "Continue",
+    "resend": "Send a new code",
+    "restart": "Use a different email"
+  },
+  "name": {
+    "title": "What should we call you?",
+    "subtitle": "That email is new here. Add your name to finish creating your account.",
+    "submit": "Create account"
+  },
+  "fields": {
+    "email": "Email",
+    "name": "Your name",
+    "password": "Password",
+    "code": "Code"
+  },
+  "state": {
+    "finishing": "Signing you in",
+    "waiting": "One moment"
+  },
+  "errors": {
+    "failed": "Sign-in did not work. Try again."
+  },
+  "invite": {
+    "title": "You're invited",
+    "signedOut": "Sign in, or create an account with the email this invitation was sent to, and you'll join the team.",
+    "signIn": "Sign in to accept",
+    "accepting": "Joining the team",
+    "open": "Open the team",
+    "missing": "This invitation link is not complete. Ask for a new one."
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "title": "Workstream · A cloud desktop for every task",
+    "description": "Give each task its own cloud desktop with an AI agent working on it. Watch it live, take over when you want, and keep several going at once."
+  },
+  "nav": {
+    "signIn": "Sign in",
+    "start": "Get started"
+  },
+  "hero": {
+    "title": "A cloud desktop for every task",
+    "body": "Workstream gives each piece of work its own computer in the cloud, with an AI agent on it. You watch the screen live, talk to the agent beside it, and take the mouse whenever you want. Your own computer stays free.",
+    "cta": "Start a task",
+    "secondary": "See how it works",
+    "pictureAlt": "The Workstream dashboard: a list of tasks on the left, and two tasks open side by side, each with its conversation and its live desktop."
+  },
+  "how": {
+    "title": "How it works",
+    "steps": {
+      "ask": {
+        "title": "Say what you want done",
+        "body": "Write the task in plain words and choose the environment it starts from. A desktop is ready in about two minutes."
+      },
+      "watch": {
+        "title": "Watch it happen",
+        "body": "The agent opens the browser, edits files and runs commands on a real desktop that you see live. Nothing happens off screen."
+      },
+      "takeOver": {
+        "title": "Step in when it matters",
+        "body": "Click into the desktop and it is yours. Fix what the agent got wrong, sign in to a site yourself, then hand it back."
+      }
+    }
+  },
+  "solo": {
+    "eyebrow": "On your own",
+    "title": "Run several things at once without a slower laptop",
+    "points": {
+      "parallel": {
+        "title": "Up to four tasks on one screen",
+        "body": "Drag tasks side by side and follow them together. Each has its own desktop, so they never get in each other's way."
+      },
+      "free": {
+        "title": "Nothing runs on your machine",
+        "body": "Builds, browsers, containers and test runs happen on the task's desktop. Close your laptop and the work continues."
+      },
+      "ready": {
+        "title": "A desktop that already has what you use",
+        "body": "Chrome, VS Code, a terminal, Docker, Node, Python and .NET are installed. Save a repository, a setup script and your keys as an environment, and every task starts ready."
+      }
+    }
+  },
+  "teams": {
+    "eyebrow": "With a team",
+    "title": "One setup for everyone, and every task in the open",
+    "points": {
+      "shared": {
+        "title": "Shared environments",
+        "body": "Set up the project once. A new teammate, or a new agent, starts from the same desktop in minutes instead of a day."
+      },
+      "visible": {
+        "title": "See and join any task",
+        "body": "Everyone on the team can open a running task, read what the agent did, and take over its desktop. Reviews start before the pull request."
+      },
+      "control": {
+        "title": "Limits you set, usage you can see",
+        "body": "Each task runs on its own isolated machine. An administrator sets how many run at once and what the team may spend on models, and sees what was used."
+      }
+    }
+  },
+  "closing": {
+    "title": "Start your first task",
+    "body": "Sign up, write what you want done, and watch a desktop do it.",
+    "cta": "Get started"
+  },
+  "footer": {
+    "rights": "Workstream"
+  }
+}

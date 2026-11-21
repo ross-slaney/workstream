@@ -25,7 +25,7 @@ public static partial class Operations
 
     /// <summary>A team's environments, A to Z: the query its list pages with <c>ENVIRONMENT_VIEW</c>.</summary>
     public static IQueryable<WorkEnvironment> Environments(WorkstreamDbContext db, string teamId) =>
-        db.Environments.AsNoTracking().Where(x => x.TeamId == teamId).OrderBy(x => x.Name).ThenBy(x => x.Id);
+        db.Environments.AsNoTracking().Where(x => x.TeamId == teamId).OrderBy(x => x.Name);
 
     public static async Task<Outcome<WorkEnvironment>> ViewEnvironmentAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {

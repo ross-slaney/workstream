@@ -18,8 +18,12 @@ public sealed record RenameTask(string Title);
 /// <summary>A message a person sends. <see cref="Key"/> is a UUID the client makes, so a send tried again writes once.</summary>
 public sealed record Say(string Text, string Key);
 
-/// <summary>One entry in the conversation. <see cref="Author"/> is <c>person</c> or <c>agent</c>; <see cref="Kind"/> is <c>text</c> or <c>activity</c>.</summary>
-public sealed record MessageDto(long Id, string Author, string? AuthorName, string Kind, string Text, DateTimeOffset CreatedAt);
+/// <summary>
+/// One entry in the conversation. <see cref="Author"/> is <c>person</c> or <c>agent</c>; <see cref="Kind"/> is
+/// <c>text</c> or <c>activity</c>; <see cref="Mine"/> says the caller wrote it. A person's message with no
+/// name was typed at the desktop itself.
+/// </summary>
+public sealed record MessageDto(long Id, string Author, string? AuthorName, bool Mine, string Kind, string Text, DateTimeOffset CreatedAt);
 
 /// <summary>The conversation after a message, with the task as it is now: one read keeps a screen current.</summary>
 public sealed record ConversationDto(IReadOnlyList<MessageDto> Messages, TaskDto Task);
@@ -93,8 +97,8 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 
-    static MessageDto ToDto(TaskMessage x, IReadOnlyDictionary<string, string> names) => new(
-        x.Id, x.Author == MessageAuthor.Agent ? "agent" : "person", names.GetValueOrDefault(x.AuthorId),
+    static MessageDto ToDto(TaskMessage x, IReadOnlyDictionary<string, string> names, string callerId) => new(
+        x.Id, x.Author == MessageAuthor.Agent ? "agent" : "person", names.GetValueOrDefault(x.AuthorId), x.AuthorId == callerId,
         x.Kind == MessageKind.Activity ? "activity" : "text", x.Text, x.CreatedAt);
 
     /// <summary>
@@ -109,7 +113,7 @@ public static partial class WorkstreamApi
         var (page, error) = await AuthorizedPageAsync(Operations.Messages(db, id, Math.Max(0, after ?? 0)), caller.PrincipalId, Permissions.TaskView, pageSize ?? 200, null, ct);
         if (error is not null) return error;
         var names = await NamesAsync(db, page!.Data.Select(x => x.AuthorId).Append(seen.Value!.CreatedBy), ct);
-        return Results.Ok(new ConversationDto([.. page.Data.Select(x => ToDto(x, names))], ToDto(seen.Value!, names)));
+        return Results.Ok(new ConversationDto([.. page.Data.Select(x => ToDto(x, names, caller.PrincipalId))], ToDto(seen.Value!, names)));
     }
 
     static async Task<IResult> SayMessage(string id, Say body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
@@ -117,7 +121,7 @@ public static partial class WorkstreamApi
         var caller = CallerOf(http);
         var outcome = await Operations.SayAsync(caller, id, body.Text, body.Key, db, fga, ct);
         if (!outcome.IsOk) return ToResult(outcome);
-        return Results.Created($"/api/tasks/{id}/messages", ToDto(outcome.Value!, await NamesAsync(db, [caller.PrincipalId], ct)));
+        return Results.Created($"/api/tasks/{id}/messages", ToDto(outcome.Value!, await NamesAsync(db, [caller.PrincipalId], ct), caller.PrincipalId));
     }
 
     static async Task<IResult> GetDesktopSetup(HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, DesktopOptions desktops, ModelOptions model, CancellationToken ct)

@@ -42,7 +42,7 @@ public static partial class Operations
     /// <summary>A team's tasks, newest first: the query its list pages with <c>TASK_VIEW</c>.</summary>
     public static IQueryable<WorkTask> Tasks(WorkstreamDbContext db, string teamId) =>
         db.Tasks.AsNoTracking().Where(x => x.TeamId == teamId && x.State != DesktopState.Deleting)
-            .OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id);
+            .OrderByDescending(x => x.CreatedAt);
 
     /// <summary>A task's conversation after a message, oldest first: the query pages with <c>TASK_VIEW</c>.</summary>
     public static IQueryable<TaskMessage> Messages(WorkstreamDbContext db, string taskId, long after) =>
@@ -263,8 +263,9 @@ public static partial class Operations
 
         // What people wrote since: the desktop's own page of the conversation, read as its service account.
         var after = Math.Max(0, body.After);
-        var prompts = await Messages(db, task.Id, after)
-            .Where(x => x.Author == MessageAuthor.Person && x.AuthorId != desktop.PrincipalId)
+        var prompts = await db.TaskMessages.AsNoTracking()
+            .Where(x => x.TaskId == task.Id && x.Id > after && x.Author == MessageAuthor.Person && x.AuthorId != desktop.PrincipalId)
+            .OrderBy(x => x.Id)
             .ToPageAsync(desktop.PrincipalId, Permissions.TaskRunAgent, 20, null, ct);
         return Outcome<DesktopReply>.Ok(new DesktopReply([.. prompts.Data.Select(x => new DesktopPrompt(x.Id, x.Text))], task.Interrupts, task.Title));
     }

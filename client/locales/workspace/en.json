@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "title": "Tasks · Workstream"
+  },
+  "sidebar": {
+    "newTask": "New task",
+    "tasks": "Tasks",
+    "noTasks": "No tasks yet. Start one and its desktop appears here.",
+    "environments": "Environments",
+    "team": "Team",
+    "usage": "Usage",
+    "admin": "Admin",
+    "teams": "Your teams",
+    "createTeam": "Create a team",
+    "openBeside": "Open {title} beside the others",
+    "by": "Started by {name}",
+    "dragHint": "Drag a task onto the screens to open it beside the others."
+  },
+  "state": {
+    "starting": "Starting",
+    "ready": "Ready",
+    "working": "Working",
+    "stopping": "Stopping",
+    "stopped": "Stopped",
+    "failed": "Failed",
+    "deleting": "Deleting"
+  },
+  "screens": {
+    "empty": {
+      "title": "Nothing open",
+      "body": "Choose a task on the left, or start a new one. Drag a second task here to watch them side by side, up to four.",
+      "cta": "New task"
+    },
+    "drop": {
+      "add": "Drop to open this task beside the others",
+      "replace": "Drop on a screen to put this task there",
+      "full": "Four screens are open. Drop on one to replace it."
+    },
+    "close": "Close this screen",
+    "more": "More for {title}"
+  },
+  "task": {
+    "rename": "Rename",
+    "renameTitle": "Rename the task",
+    "titleLabel": "Title",
+    "stop": "Stop the desktop",
+    "start": "Start the desktop",
+    "delete": "Delete the task",
+    "deleteTitle": "Delete this task?",
+    "deleteBody": "Its desktop, everything on it and the conversation are deleted. This cannot be undone.",
+    "missing": "This task is not here any more. It may have been deleted."
+  },
+  "desktop": {
+    "label": "The desktop of {title}",
+    "starting": {
+      "title": "Starting the desktop",
+      "body": "A new computer is being made for this task. It usually takes about two minutes. What you asked for is already waiting for the agent."
+    },
+    "stopping": {
+      "title": "Stopping the desktop",
+      "body": "The machine is being released. Its files are kept."
+    },
+    "stopped": {
+      "title": "The desktop is stopped",
+      "body": "Its files are kept. Start it to continue where the task left off.",
+      "cta": "Start the desktop"
+    },
+    "failed": {
+      "title": "The desktop did not start",
+      "cta": "Start it again"
+    },
+    "connecting": "Connecting to the desktop",
+    "lost": "The connection to the desktop was lost. Reconnecting.",
+    "fullscreen": "Fill the window",
+    "exitFullscreen": "Back to the screens"
+  },
+  "chat": {
+    "label": "Conversation with the agent",
+    "empty": "Tell the agent what to do. It works on the desktop beside this, where you can watch.",
+    "placeholder": "Message the agent",
+    "send": "Send",
+    "working": "The agent is working",
+    "stop": "Stop",
+    "you": "You",
+    "agent": "Agent",
+    "atDesktop": "From the desktop",
+    "waitingForDesktop": "The agent will read this when the desktop is ready.",
+    "desktopStopped": "The desktop is stopped. Start it and the agent reads this.",
+    "notSent": "Not sent. Try again."
+  },
+  "newTask": {
+    "title": "New task",
+    "promptLabel": "What should the agent do?",
+    "promptPlaceholder": "Open our staging site, sign up as a new customer and tell me where the flow breaks.",
+    "environmentLabel": "Environment",
+    "environmentHint": "What the desktop comes with. Change these under Environments.",
+    "start": "Start task",
+    "noEnvironments": "Add an environment first.",
+    "teamLabel": "Team"
+  },
+  "createTeam": {
+    "title": "Create a team",
+    "nameLabel": "Team name",
+    "body": "A team shares its tasks and environments. You can invite people after you create it.",
+    "create": "Create team"
+  },
+  "noTeam": {
+    "title": "You're not on a team",
+    "body": "Create one to start a task, or open an invitation someone sent you.",
+    "cta": "Create a team"
+  },
+  "tabs": {
+    "chat": "Conversation",
+    "desktop": "Desktop"
+  }
+}
