@@ -74,6 +74,7 @@ public static partial class WorkstreamApi
     static void MapDesktop(RouteGroupBuilder desktop)
     {
         desktop.MapGet("/setup", GetDesktopSetup).ExcludeFromDescription();
+        desktop.MapPost("/setup", ReportSetup).ExcludeFromDescription();
         desktop.MapPost("/exchange", Exchange).ExcludeFromDescription();
         // A token for the desktop's repository from the team's GitHub connection (WorkstreamApi.GitHub.cs).
         desktop.MapGet("/github/token", GetDesktopGitHubToken).ExcludeFromDescription();
@@ -212,6 +213,13 @@ public static partial class WorkstreamApi
     {
         var outcome = await Operations.DesktopSetupAsync(Caller.Desktop(http), db, fga, protection, desktops, model, ct);
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
+    }
+
+    /// <summary>The preparing desktop says how the environment's setup is going.</summary>
+    static async Task<IResult> ReportSetup(SetupReport body, HttpContext http, WorkstreamDbContext db, IBackgroundJobClient jobs, CancellationToken ct)
+    {
+        var outcome = await Operations.ReportSetupAsync(Caller.Desktop(http), body, db, jobs, ct);
+        return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 
     static async Task<IResult> Exchange(DesktopExchange body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)

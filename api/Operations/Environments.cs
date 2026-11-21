@@ -1,8 +1,10 @@
 using System.Text.Json;
+using Hangfire;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
+using Workstream.Api.Desktops;
 using Workstream.Api.Domain;
 using static Workstream.Api.WorkstreamAuthorization;
 
@@ -35,7 +37,7 @@ public static partial class Operations
     }
 
     public static async Task<Outcome<WorkEnvironment>> AddEnvironmentAsync(Caller caller, string teamId, string id, WriteEnvironment body,
-        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, CancellationToken ct)
+        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, IBackgroundJobClient jobs, DesktopOptions options, CancellationToken ct)
     {
         var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamCreateEnvironment, "You can't add environments to this team.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<WorkEnvironment>();
@@ -47,6 +49,7 @@ public static partial class Operations
             KeepVariables(environment, body.Variables, protection, now);
             db.Environments.Add(environment);
             await db.SaveChangesAsync(ct);
+            await KeepSetupAsync(environment, null, protection, db, jobs, options, ct);
             return Outcome<WorkEnvironment>.Ok(environment);
         }
         catch (DomainRuleException rule)
@@ -56,7 +59,7 @@ public static partial class Operations
     }
 
     public static async Task<Outcome<WorkEnvironment>> ChangeEnvironmentAsync(Caller caller, string id, WriteEnvironment body,
-        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, CancellationToken ct)
+        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, IBackgroundJobClient jobs, DesktopOptions options, CancellationToken ct)
     {
         var seen = await ViewEnvironmentAsync(caller, id, db, fga, ct);
         if (!seen.IsOk) return seen;
@@ -65,9 +68,11 @@ public static partial class Operations
         try
         {
             var now = DateTimeOffset.UtcNow;
+            var before = environment.SetupInputs;
             environment.Change(SettingsOf(body), now);
             KeepVariables(environment, body.Variables, protection, now);
             await db.SaveChangesAsync(ct);
+            await KeepSetupAsync(environment, before, protection, db, jobs, options, ct);
             return seen;
         }
         catch (DomainRuleException rule)
@@ -76,7 +81,11 @@ public static partial class Operations
         }
     }
 
-    public static async Task<Outcome<bool>> DeleteEnvironmentAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    /// <summary>
+    /// Delete the environment. Its saved setup goes with it, and so does a machine preparing it, whose key ends
+    /// now.
+    /// </summary>
+    public static async Task<Outcome<bool>> DeleteEnvironmentAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
         var seen = await ViewEnvironmentAsync(caller, id, db, fga, ct);
         if (!seen.IsOk) return seen.As<bool>();
@@ -84,8 +93,20 @@ public static partial class Operations
         if (!await fga.Allows(caller.PrincipalId, Permissions.EnvironmentEdit, environment.ResourceId)) return Outcome<bool>.Forbidden("You can't delete this environment.");
         // A task's desktop reads its setup from its environment every time it starts.
         if (await db.Tasks.AnyAsync(x => x.EnvironmentId == id, ct)) return Outcome<bool>.Invalid("Tasks were started from this environment. Delete them first.");
+        var setup = await db.Setups.SingleOrDefaultAsync(x => x.EnvironmentId == id, ct);
+        var save = setup?.Save;
+        var machine = setup is { IsPreparing: true } ? setup.RunHost ?? DesktopHosting.NameFor(setup.RunId!) : null;
+        if (setup is not null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var run in await db.DesktopRuns.Where(x => x.TaskId == setup.RunId && x.EndedAt == null).ToListAsync(ct)) run.End(now);
+            await DesktopKeys.RetireAsync(db, EnvironmentSetup.DesktopIdFor(id), ct);
+            db.Setups.Remove(setup);
+        }
         db.Environments.Remove(environment);
         await db.SaveChangesAsync(ct);
+        if (save is not null) jobs.Enqueue<DesktopJobs>(job => job.DeleteSaveAsync(save, CancellationToken.None));
+        if (machine is not null) jobs.Enqueue<DesktopJobs>(job => job.RemovePreparingMachineAsync(machine, CancellationToken.None));
         return Outcome<bool>.Ok(true);
     }
 
@@ -109,6 +130,8 @@ public static partial class Operations
             names.Add(name);
         }
         environment.KeepVariables(names, next.Count == 0 ? null : protection.CreateProtector(VariablesPurpose).Protect(JsonSerializer.Serialize(next)), now);
+        // Here, where the values are readable, is the one place what a saved setup depends on can be known.
+        environment.KeepSetupInputs(SetupInputsOf(environment, next));
     }
 
     /// <summary>The environment's variables, readable: only for the desktop that is being set up from it.</summary>

@@ -42,8 +42,10 @@ public sealed class Spare
     public DateTimeOffset WantedAt { get; private set; }
     /// <summary>When its agent last asked the API for a task.</summary>
     public DateTimeOffset? SeenAt { get; private set; }
+    /// <summary>The environment's saved setup it was made from. Null when it was made from the image.</summary>
+    public string? Save { get; private set; }
 
-    public static Spare For(Team team, WorkEnvironment environment, DateTimeOffset now)
+    public static Spare For(Team team, WorkEnvironment environment, string? save, DateTimeOffset now)
     {
         if (environment.TeamId != team.Id) throw new DomainRuleException("The environment belongs to another team.");
         return new Spare
@@ -51,6 +53,7 @@ public sealed class Spare
             Id = Guid.NewGuid().ToString("D"),
             TeamId = team.Id,
             EnvironmentId = environment.Id,
+            Save = save,
             Size = environment.Size,
             State = SpareState.Starting,
             CreatedAt = now,
@@ -76,9 +79,13 @@ public sealed class Spare
     }
 
     /// <summary>
-    /// Whether a task from this environment can start on it now: it is the same size of machine, and its agent
-    /// asked a moment ago, so it is really there.
+    /// Whether a task from this environment can start on it now. It is the same size of machine; it was made
+    /// from what a new machine for the task would be made from (<paramref name="save"/>: the environment's
+    /// saved setup, or null for the image), so a task never gets another environment's files or an older
+    /// setup; and its agent asked a moment ago, so it is really there.
     /// </summary>
-    public bool Serves(WorkEnvironment environment, DateTimeOffset now) =>
-        State == SpareState.Ready && Address is not null && Size == environment.Size && SeenAt is { } seen && now - seen < TimeSpan.FromSeconds(30);
+    public bool Serves(WorkEnvironment environment, string? save, DateTimeOffset now) =>
+        State == SpareState.Ready && Address is not null && Size == environment.Size && Save == save
+        && (save is null || EnvironmentId == environment.Id)
+        && SeenAt is { } seen && now - seen < TimeSpan.FromSeconds(30);
 }

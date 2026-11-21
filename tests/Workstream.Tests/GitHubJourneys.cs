@@ -221,6 +221,30 @@ public sealed class GitHubJourneys
     }
 
     [TestMethod]
+    public async Task A_machine_preparing_an_environment_gets_a_token_for_its_repository_while_it_prepares()
+    {
+        var (ada, team) = await Person.WithTeamAsync();
+        var installation = Stack.GitHub.Install("Organization", "app");
+        await ConnectAsync(ada, team.Id, installation);
+        var environment = Guid.NewGuid().ToString("D");
+        await ada.PostAsync($"/api/teams/{team.Id}/environments",
+            new AddEnvironment(environment, "Prepared app", ["terminal"], "small", $"https://github.com/{installation.Account}/app", null, "npm ci", null, null)).IsAsync(HttpStatusCode.Created);
+        await Stack.Jobs.PrepareAsync(environment, CancellationToken.None);
+        using var preparing = Desktop.Preparing(environment);
+
+        // Its clone of a private repository works: a token for that one repository, from the team's connection.
+        var token = await Person.ReadAsync<DesktopGitHubToken>(await preparing.GetAsync("/api/desktop/github/token"));
+        Assert.AreEqual($"{installation.Account}/app", token.Repository);
+        CollectionAssert.AreEqual(new[] { "app" }, Stack.GitHub.Tokens[token.Token].Repositories!.ToArray());
+
+        // Once it has said how the setup went, it gets nothing more.
+        await preparing.ReportAsync("failed", exit: 1).IsAsync(HttpStatusCode.NoContent);
+        await preparing.GetAsync("/api/desktop/github/token").IsAsync(HttpStatusCode.Unauthorized);
+        await Stack.Jobs.RemovePreparingMachineAsync(preparing.Host, CancellationToken.None);
+        await ada.DeleteAsync($"/api/environments/{environment}").IsAsync(HttpStatusCode.NoContent);
+    }
+
+    [TestMethod]
     public async Task Removing_the_app_on_GitHub_disconnects_every_team_on_that_installation()
     {
         var (ada, team) = await Person.WithTeamAsync();

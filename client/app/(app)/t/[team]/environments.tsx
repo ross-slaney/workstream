@@ -1,5 +1,5 @@
 import Head from "expo-router/head";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTeamShell } from "@/components/app/team-shell";
 import { useAction } from "@/hooks/use-action";
 import { useOnlineRead } from "@/hooks/use-online-read";
@@ -34,11 +34,15 @@ const bodyOf = (draft: EnvironmentDraft): WriteEnvironment => ({
   variables: draft.variables.filter((variable) => variable.name.trim()).map((variable) => ({ name: variable.name.trim(), value: variable.value === "" && variable.saved ? null : variable.value })),
 });
 
+/** How often the list is read again while an environment is being prepared, so its page shows what the setup writes. */
+const PREPARING_EVERY = 3000;
+
 /** /t/{team}/environments: the team's environments, and the editor for one. */
 export default function EnvironmentsRoute() {
   const t = useT("settings");
   const { teamId } = useTeamShell();
-  const environments = useOnlineRead(async () => (await workstream.environments(teamId)).data, `environments:${teamId}`);
+  const [preparingAny, setPreparingAny] = useState(false);
+  const environments = useOnlineRead(async () => (await workstream.environments(teamId)).data, `environments:${teamId}`, preparingAny ? PREPARING_EVERY : undefined);
   const apps = useOnlineRead(() => workstream.apps(), "apps");
   // With the team connected to GitHub, the repository can be picked from what the connection reaches.
   const github = useOnlineRead(() => workstream.github(teamId), `github:${teamId}`);
@@ -46,7 +50,14 @@ export default function EnvironmentsRoute() {
   const repositories = useOnlineRead(() => (connected ? workstream.githubRepositories(teamId) : Promise.resolve([])), `github-repositories:${teamId}:${connected}`);
   const [editing, setEditing] = useState<{ id: string | null; draft: EnvironmentDraft } | null>(null);
   const action = useAction();
+  const prepare = useAction();
   const catalog = valueOf(apps) ?? [];
+  const list = valueOf(environments);
+  const shown = editing?.id ? (list?.find((environment) => environment.id === editing.id) ?? null) : null;
+
+  useEffect(() => {
+    setPreparingAny(Boolean(list?.some((environment) => environment.setup.state === "preparing")));
+  }, [list]);
 
   const done = () => {
     setEditing(null);
@@ -69,9 +80,10 @@ export default function EnvironmentsRoute() {
         }}
         onEdit={(environment) => {
           action.clearError();
+          prepare.clearError();
           setEditing({ id: environment.id, draft: draftOf(environment) });
         }}
-        editor={editing ? { ...editing, busy: action.busy, error: action.error } : null}
+        editor={editing ? { ...editing, busy: action.busy, error: action.error, setup: shown?.setup ?? null, preparing: prepare.busy, prepareError: prepare.error } : null}
         onChangeDraft={(draft) => setEditing((current) => (current ? { ...current, draft } : current))}
         onCloseEditor={() => setEditing(null)}
         onSave={() => {
@@ -80,6 +92,14 @@ export default function EnvironmentsRoute() {
             if (editing.id) await workstream.changeEnvironment(editing.id, bodyOf(editing.draft));
             else await workstream.addEnvironment(teamId, newId(), bodyOf(editing.draft));
             done();
+          });
+        }}
+        onPrepare={() => {
+          if (!editing?.id) return;
+          const id = editing.id;
+          void prepare.run(async () => {
+            await workstream.prepareEnvironment(id);
+            environments.refresh();
           });
         }}
         onDelete={() => {

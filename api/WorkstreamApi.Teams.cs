@@ -1,3 +1,5 @@
+using Hangfire;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Workstream.Api.Model;
 using Microsoft.AspNetCore.DataProtection;
@@ -22,10 +24,10 @@ public sealed record Invite(string Email, bool Admin = false);
 
 /// <summary>The team a person joined by taking an invitation.</summary>
 
-/// <summary>An environment as it is shown. Variables are listed by name; their values are never sent.</summary>
+/// <summary>An environment as it is shown, with how its prepared setup stands. Variables are listed by name; their values are never sent.</summary>
 public sealed record EnvironmentDto(
     string Id, string TeamId, string Name, IReadOnlyList<string> Apps, string Size, string? RepositoryUrl, string? RepositoryBranch,
-    string? SetupScript, string? Instructions, IReadOnlyList<string> VariableNames, DateTimeOffset UpdatedAt);
+    string? SetupScript, string? Instructions, IReadOnlyList<string> VariableNames, DateTimeOffset UpdatedAt, SetupDto Setup);
 
 /// <summary>An environment as a person adds it: <see cref="WriteEnvironment"/> with the id the client made.</summary>
 public sealed record AddEnvironment(
@@ -63,6 +65,7 @@ public static partial class WorkstreamApi
         api.MapGet("/environments/{id}", GetEnvironment).WithName("get_environment").WithTags("Environments").Produces<EnvironmentDto>();
         api.MapPut("/environments/{id}", ChangeEnvironment).WithName("change_environment").WithTags("Environments").Produces<EnvironmentDto>().ProducesProblem(400);
         api.MapDelete("/environments/{id}", DeleteEnvironment).WithName("delete_environment").WithTags("Environments").ProducesProblem(400);
+        api.MapPost("/environments/{id}/setup", PrepareEnvironment).WithName("prepare_environment").WithTags("Environments").Produces<EnvironmentDto>().ProducesProblem(400).ProducesProblem(503);
     }
 
     static void MapAdmin(RouteGroupBuilder api)
@@ -154,37 +157,55 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 
-    static EnvironmentDto ToDto(WorkEnvironment x) => new(
-        x.Id, x.TeamId, x.Name, x.Apps, x.Size, x.RepositoryUrl, x.RepositoryBranch, x.SetupScript, x.Instructions, x.VariableNames, x.UpdatedAt);
+    static EnvironmentDto ToDto(WorkEnvironment x, EnvironmentSetup? setup, DesktopOptions desktops) => new(
+        x.Id, x.TeamId, x.Name, x.Apps, x.Size, x.RepositoryUrl, x.RepositoryBranch, x.SetupScript, x.Instructions, x.VariableNames, x.UpdatedAt,
+        Operations.SetupOf(x, setup, desktops));
 
-    static async Task<IResult> ListEnvironments(string teamId, string? cursor, int? pageSize, HttpContext http, WorkstreamDbContext db, CancellationToken ct)
+    /// <summary>The environment as it is shown, with its setup read now.</summary>
+    static async Task<EnvironmentDto> EnvironmentDtoAsync(WorkEnvironment environment, WorkstreamDbContext db, DesktopOptions desktops, CancellationToken ct) =>
+        ToDto(environment, await db.Setups.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentId == environment.Id, ct), desktops);
+
+    static async Task<IResult> ListEnvironments(string teamId, string? cursor, int? pageSize, HttpContext http, WorkstreamDbContext db, DesktopOptions desktops, CancellationToken ct)
     {
         var (page, error) = await AuthorizedPageAsync(Operations.Environments(db, teamId), CallerOf(http).PrincipalId, Permissions.EnvironmentView, pageSize, cursor, ct);
-        return error ?? Results.Ok(new ListPage<EnvironmentDto>([.. page!.Data.Select(ToDto)], page.NextCursor));
+        if (error is not null) return error;
+        var ids = page!.Data.Select(x => x.Id).ToList();
+        var setups = await db.Setups.AsNoTracking().Where(x => ids.Contains(x.EnvironmentId)).ToDictionaryAsync(x => x.EnvironmentId, ct);
+        return Results.Ok(new ListPage<EnvironmentDto>([.. page.Data.Select(x => ToDto(x, setups.GetValueOrDefault(x.Id), desktops))], page.NextCursor));
     }
 
-    static async Task<IResult> AddTeamEnvironment(string teamId, AddEnvironment body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, CancellationToken ct)
+    static async Task<IResult> AddTeamEnvironment(string teamId, AddEnvironment body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection,
+        IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct)
     {
-        var outcome = await Operations.AddEnvironmentAsync(CallerOf(http), teamId, body.Id, body.Body, db, fga, protection, ct);
-        return outcome.IsOk ? Results.Created($"/api/environments/{outcome.Value!.Id}", ToDto(outcome.Value)) : ToResult(outcome);
+        var outcome = await Operations.AddEnvironmentAsync(CallerOf(http), teamId, body.Id, body.Body, db, fga, protection, jobs, desktops, ct);
+        return outcome.IsOk ? Results.Created($"/api/environments/{outcome.Value!.Id}", await EnvironmentDtoAsync(outcome.Value, db, desktops, ct)) : ToResult(outcome);
     }
 
-    static async Task<IResult> GetEnvironment(string id, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> GetEnvironment(string id, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, CancellationToken ct)
     {
         var outcome = await Operations.ViewEnvironmentAsync(CallerOf(http), id, db, fga, ct);
-        return outcome.IsOk ? Results.Ok(ToDto(outcome.Value!)) : ToResult(outcome);
+        return outcome.IsOk ? Results.Ok(await EnvironmentDtoAsync(outcome.Value!, db, desktops, ct)) : ToResult(outcome);
     }
 
-    static async Task<IResult> ChangeEnvironment(string id, WriteEnvironment body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection, CancellationToken ct)
+    static async Task<IResult> ChangeEnvironment(string id, WriteEnvironment body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection,
+        IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct)
     {
-        var outcome = await Operations.ChangeEnvironmentAsync(CallerOf(http), id, body, db, fga, protection, ct);
-        return outcome.IsOk ? Results.Ok(ToDto(outcome.Value!)) : ToResult(outcome);
+        var outcome = await Operations.ChangeEnvironmentAsync(CallerOf(http), id, body, db, fga, protection, jobs, desktops, ct);
+        return outcome.IsOk ? Results.Ok(await EnvironmentDtoAsync(outcome.Value!, db, desktops, ct)) : ToResult(outcome);
     }
 
-    static async Task<IResult> DeleteEnvironment(string id, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> DeleteEnvironment(string id, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
-        var outcome = await Operations.DeleteEnvironmentAsync(CallerOf(http), id, db, fga, ct);
+        var outcome = await Operations.DeleteEnvironmentAsync(CallerOf(http), id, db, fga, jobs, ct);
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
+    }
+
+    /// <summary>"Prepare again": the environment's setup is done again on a machine of its own, and saved.</summary>
+    static async Task<IResult> PrepareEnvironment(string id, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IDataProtectionProvider protection,
+        IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct)
+    {
+        var outcome = await Operations.PrepareAgainAsync(CallerOf(http), id, db, fga, protection, jobs, desktops, ct);
+        return outcome.IsOk ? Results.Ok(await EnvironmentDtoAsync(outcome.Value!, db, desktops, ct)) : ToResult(outcome);
     }
 
     static async Task<IResult> GetAdminOverview(HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, TimeProvider clock, CancellationToken ct)

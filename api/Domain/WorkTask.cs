@@ -319,6 +319,8 @@ public static class MachinePurpose
     public const string Task = "task";
     /// <summary>A spare, kept ready for a team's next task (<see cref="Spare"/>).</summary>
     public const string Spare = "spare";
+    /// <summary>A machine doing an environment's setup once, to be saved (<see cref="EnvironmentSetup"/>).</summary>
+    public const string Prepare = "prepare";
 }
 
 /// <summary>What a task's desktop started from, which is most of how long the start took.</summary>
@@ -328,6 +330,8 @@ public static class StartSource
     public const string Image = "image";
     /// <summary>A spare that was already running.</summary>
     public const string Spare = "spare";
+    /// <summary>A new machine, made from the environment's saved setup.</summary>
+    public const string Save = "save";
     /// <summary>The task's own machine, stopped earlier.</summary>
     public const string Stopped = "stopped";
 }
@@ -368,6 +372,15 @@ public sealed class DesktopRun
     {
         Id = Guid.NewGuid().ToString("D"), TaskId = task.Id, TeamId = task.TeamId, Size = task.Size, StartedAt = now, Source = source,
     };
+
+    /// <summary>A preparing machine's time, from when it is asked for until its disk is saved or the attempt fails.</summary>
+    public static DesktopRun BeginPrepare(string runId, WorkEnvironment environment, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid().ToString("D"), TaskId = runId, TeamId = environment.TeamId, Size = environment.Size, StartedAt = now, Purpose = MachinePurpose.Prepare,
+    };
+
+    /// <summary>The task's machine was made from the environment's saved setup.</summary>
+    public void FromSave() => Source = StartSource.Save;
 
     /// <summary>A spare's time, from when its machine is asked for until a task takes it or it is removed.</summary>
     public static DesktopRun Begin(Spare spare, DateTimeOffset now) => new()

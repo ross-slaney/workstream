@@ -139,16 +139,32 @@ public static partial class Operations
     /// <summary>
     /// A desktop asks for a GitHub token: for its task's environment's repository and nothing else, from its
     /// team's connection, good for an hour, minted now and kept nowhere. The task is the one the desktop holds
-    /// <c>TASK_RUN_AGENT</c> on. Not there (404) when the task has no repository on GitHub, the team is not
-    /// connected, or the connection does not reach the repository: the desktop then does without.
+    /// <c>TASK_RUN_AGENT</c> on. A machine preparing an environment gets one for that environment's repository,
+    /// the one it holds <c>ENVIRONMENT_RUN_SETUP</c> on, while its attempt lasts. Not there (404) when there is
+    /// no repository on GitHub, the team is not connected, or the connection does not reach the repository:
+    /// the desktop then does without.
     /// </summary>
     public static async Task<Outcome<DesktopGitHubToken>> DesktopGitHubTokenAsync(Caller desktop, WorkstreamDbContext db, GitHubOptions options, GitHubApp github, CancellationToken ct)
     {
-        if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is not { } task) return Outcome<DesktopGitHubToken>.NotFound();
+        string teamId;
+        string? repositoryUrl;
+        if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is { } task)
+        {
+            teamId = task.TeamId;
+            repositoryUrl = await db.Environments.AsNoTracking().Where(x => x.Id == task.EnvironmentId).Select(x => x.RepositoryUrl).SingleOrDefaultAsync(ct);
+        }
+        else if (await PreparingAsync(desktop, db, ct) is { } preparing)
+        {
+            teamId = preparing.Environment.TeamId;
+            repositoryUrl = preparing.Environment.RepositoryUrl;
+        }
+        else
+        {
+            return Outcome<DesktopGitHubToken>.NotFound();
+        }
         if (!options.IsConfigured) return Outcome<DesktopGitHubToken>.Unavailable(GitHubNotSetUp);
-        var repositoryUrl = await db.Environments.AsNoTracking().Where(x => x.Id == task.EnvironmentId).Select(x => x.RepositoryUrl).SingleOrDefaultAsync(ct);
         if (GitHubRepositoryName.Of(repositoryUrl) is not { } repository) return Outcome<DesktopGitHubToken>.NotFound();
-        var connection = await db.GitHubConnections.AsNoTracking().SingleOrDefaultAsync(x => x.TeamId == task.TeamId, ct);
+        var connection = await db.GitHubConnections.AsNoTracking().SingleOrDefaultAsync(x => x.TeamId == teamId, ct);
         if (connection is null || !connection.Reaches(repository)) return Outcome<DesktopGitHubToken>.NotFound();
         try
         {
