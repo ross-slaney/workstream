@@ -1,13 +1,14 @@
 [Unit]
 Description=Workstream desktop: the display, the session and the agent
-After=network-online.target cloud-init.service docker.service
-Wants=network-online.target
+# Ordered after nothing but the basics. The display and the session need no network, so they come up while
+# the network does; the agent asks until it is there. Docker starts beside all of it.
 
 [Service]
 User=work
 Group=work
-# The two things the desktop is told arrive in a file cloud-init writes; the session waits for it briefly.
-ExecStartPre=/bin/sh -c 'for i in $(seq 120); do [ -f /etc/workstream/desktop.env ] && exit 0; sleep 1; done; exit 0'
+# The session's own files (its message bus, its sockets): /run/workstream, in memory, gone when the machine stops.
+RuntimeDirectory=workstream
+RuntimeDirectoryMode=0700
 ExecStart=/opt/workstream/start.sh
 Restart=always
 RestartSec=3

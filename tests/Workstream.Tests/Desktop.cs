@@ -28,6 +28,12 @@ public sealed class Desktop : IDisposable
     public static async Task<Desktop> StartAsync(string taskId)
     {
         await Stack.Jobs.StartAsync(taskId, CancellationToken.None);
+        return Of(taskId);
+    }
+
+    /// <summary>Speak as the desktop a start job already made for the task.</summary>
+    public static Desktop Of(string taskId)
+    {
         var spec = Stack.Desktops.For(taskId);
         return new Desktop(spec.Key, spec.Name);
     }

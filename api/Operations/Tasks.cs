@@ -258,7 +258,11 @@ public static partial class Operations
             }
             task.Active(now);
         }
-        task.DesktopSeen(body.Working, now);
+        if (task.DesktopSeen(body.Working, now))
+        {
+            // The first exchange of this start: how long the agent took is kept with the run.
+            foreach (var run in await db.DesktopRuns.Where(x => x.TaskId == task.Id && x.EndedAt == null).ToListAsync(ct)) run.Ready(now);
+        }
         await db.SaveChangesAsync(ct);
 
         // What people wrote since: the desktop's own page of the conversation, read as its service account.

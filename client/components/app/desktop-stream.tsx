@@ -41,12 +41,14 @@ export function DesktopStream({ taskId, label, onShape }: { taskId: string; labe
     let remote: RemoteDesktop | null = null;
     let closed = false;
     let attempts = 0;
+    let connected = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
 
     const again = () => {
       if (closed) return;
-      setStatus("lost");
-      retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 10_000));
+      // A stream that never opened is still connecting; only one that was open has been lost.
+      setStatus(connected ? "lost" : "connecting");
+      retry = setTimeout(connect, Math.min(500 * 2 ** attempts++, 10_000));
     };
 
     async function connect() {
@@ -62,6 +64,7 @@ export function DesktopStream({ taskId, label, onShape }: { taskId: string; labe
         client.background = stage;
         client.addEventListener("connect", () => {
           attempts = 0;
+          connected = true;
           setStatus("connected");
           // The picture is drawn at the desktop's own size: that is its shape, whatever it is scaled to.
           const picture = screen.current?.querySelector("canvas");

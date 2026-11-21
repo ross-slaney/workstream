@@ -49,8 +49,12 @@ Without the two model values the product deploys and agents say models are not s
 Publishing the GitHub release `vX.Y.Z` runs `release.yml` (the `release` skill does the whole thing):
 
 1. **Resolve.** The tag must be `v` + `client/app.json`'s version, on `main`, and published.
-2. **Web + API.** On a fresh installation the job first deploys `foundation.bicep` by itself, because the images need the registry and the web image needs the API's address. It builds both images, deploys `main.bicep`, and checks that both origins serve the exact commit.
-3. **Desktops' image.** When `desktop/` changed since the previous release, or the gallery is empty, the job makes a Debian 13 machine in a group of its own, runs `desktop/image/bake.sh` on it, captures it into the gallery as version `X.Y.Z`, keeps the three newest versions and deletes the builder. New desktops use the newest version; running and stopped desktops keep the disk they have.
+2. **Desktops' image.** When `desktop/` changed since the previous release, or the gallery is empty, the job makes a Debian 13 machine in a group of its own, runs `desktop/image/bake.sh` on it, captures it into the gallery as version `X.Y.Z` (about half an hour), keeps the three newest versions and deletes the builder. Otherwise it does nothing. Either way it says which version this release makes its desktops from: its own, or the newest before it.
+3. **Web + API.** On a fresh installation the job first deploys `foundation.bicep` by itself, because the images need the registry and the web image needs the API's address. It builds both images, deploys `main.bicep` with the image version from the step before, and checks that both origins serve the exact commit.
+
+The image comes first because the API and the image are released together: a deployment makes its desktops from one image version, the one it was deployed with, and never from whatever is newest. So the API never meets a desktop newer than itself, and deploying an older release again gets that release's image, as long as it is one of the three kept. Running and stopped desktops keep the disk they have.
+
+The image is specialized (`infra/gallery.bicep`, `desktop/image/seal.sh`): a machine made from it starts as it is, with nothing to provision, and reads what it is for from its user data.
 
 To deploy a release again, run the workflow by hand with its tag. If a release fails, fix the cause and re-run its jobs; a fix to the workflow or the Bicep needs a new tag, because the workflow runs from the tag's commit.
 
@@ -60,8 +64,11 @@ Production signs in by emailed code, so trying a change there needs a real inbox
 
 ```bash
 gh workflow run staging.yml -f action=deploy -f ref=main     # or a branch, a tag, a commit
+gh workflow run staging.yml -f action=deploy -f ref=my-branch -f desktop-image=true   # a change under desktop/
 gh workflow run staging.yml -f action=remove
 ```
+
+Staging makes its desktops from the newest release's image. With `desktop-image=true` it bakes one of its own from the ref first, as version `0.0.N` in the same gallery; no release ever chooses a `0.0` version, only the newest is kept, and removing staging deletes it.
 
 The run's summary gives its two addresses. Its administrator is `admin@workstream.test` with the password in the `staging` environment's `ADMINISTRATOR_PASSWORD` secret. Remove it when you are done: while it exists it costs what its two apps and its database cost, and its desktops count against the same cores.
 

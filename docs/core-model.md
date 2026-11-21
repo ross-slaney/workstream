@@ -134,7 +134,7 @@ The system administrator is the one address the deployment names (`Workstream:Ad
 2. The API checks `TEAM_CREATE_TASK` on the team and `ENVIRONMENT_VIEW` on the environment, and refuses if the team already runs as many desktops as its limit allows.
 3. It saves the task (desktop state `starting`) and the first message, and queues the start job.
 4. The job, as `agent::desktop-operator`, provisions the desktop's service account, grants it `task_desktop`, and asks the desktop host for a machine carrying two values: the API's address and the desktop's key.
-5. The desktop boots, reads its setup from the API with its key, prepares itself, and starts the agent. Its first exchange with the API marks the desktop `ready`.
+5. The desktop boots. Its display answers first, and from then the team can watch it; its agent's first exchange with the API marks the desktop `ready`. The agent reads its setup from the API with its key and prepares the desktop.
 
 ### Talk to the agent
 
@@ -142,7 +142,7 @@ A person's message is a row in `TaskMessages`. The desktop exchanges with the AP
 
 ### Watch and use the desktop
 
-The browser opens a WebSocket to `GET /api/tasks/{id}/desktop`, carrying the person's access token. The API validates the token, checks `TASK_USE` on the task, connects to the desktop's display on its private address, and relays bytes both ways. It checks again every minute and closes the stream when access is gone. Desktops accept connections only from the API.
+The browser opens a WebSocket to `GET /api/tasks/{id}/desktop`, carrying the person's access token. The API validates the token, checks `TASK_USE` on the task, connects to the desktop's display on its private address, and relays bytes both ways, from the moment the display answers until the desktop is asked to stop. It checks again every minute and closes the stream when access is gone. Desktops accept connections only from the API.
 
 ### Stop, start, delete
 

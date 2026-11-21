@@ -1,6 +1,6 @@
 [
   { "id": "chrome", "name": "Chrome", "description": "The web browser. The agent uses it where you can watch.", "launcher": "chromium.desktop", "default": true },
-  { "id": "vscode", "name": "VS Code", "description": "The code editor. Files the agent changes open here.", "launcher": "code.desktop", "default": true },
+  { "id": "vscode", "name": "VS Code", "description": "The code editor. Files the agent changes open here.", "launcher": "com.microsoft.VSCode.desktop", "default": true },
   { "id": "terminal", "name": "Terminal", "description": "A command line.", "launcher": "xfce4-terminal.desktop", "default": true },
   { "id": "files", "name": "Files", "description": "The file manager.", "launcher": "thunar.desktop", "default": true },
   { "id": "writer", "name": "Writer", "description": "Documents (LibreOffice).", "launcher": "libreoffice-writer.desktop", "default": false },

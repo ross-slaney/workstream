@@ -10,7 +10,6 @@ id work >/dev/null 2>&1 || useradd --create-home --shell /bin/bash work
 echo "work ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/work
 chmod 0440 /etc/sudoers.d/work
 getent group docker >/dev/null && usermod -aG docker work
-install -d -m 0750 -o root -g work /etc/workstream
 
 # Chromium: no first-run questions, one profile shared by the person and the agent's browser tools (which
 # attach on port 9222, open to this desktop only), and no sandbox of its own inside a container, which has
@@ -37,7 +36,8 @@ EOF
 chmod +x "$ROOT/start.sh" "$ROOT/session.sh" "$ROOT/panel.sh"
 
 # What the person's programs start with: no trust or telemetry questions in VS Code, the environment's
-# variables in every shell, and a plain window manager that is quick to stream.
+# variables in every shell, a plain window manager and a plain background, which are quick to stream, and
+# the panel with the default apps, so a new desktop draws itself without asking anyone anything.
 sudo -u work bash <<'EOF'
 set -euo pipefail
 mkdir -p ~/.workstream ~/work ~/.config/Code/User ~/.vscode ~/.config/xfce4/xfconf/xfce-perchannel-xml
@@ -77,16 +77,45 @@ cat > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<'XML'
   </property>
 </channel>
 XML
+# The display is named VNC-0 (start.sh). No picture and one flat colour.
+cat > ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitorVNC-0" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="image-style" type="int" value="0"/>
+          <property name="color-style" type="int" value="0"/>
+          <property name="rgba1" type="array">
+            <value type="double" value="0.11"/>
+            <value type="double" value="0.13"/>
+            <value type="double" value="0.16"/>
+            <value type="double" value="1"/>
+          </property>
+        </property>
+      </property>
+    </property>
+  </property>
+</channel>
+XML
+/opt/workstream/panel.sh
 for file in ~/.bashrc ~/.profile; do
-  echo '[ -f "$HOME/.workstream/env.sh" ] && . "$HOME/.workstream/env.sh"' >> "$file"
+  grep -q workstream/env.sh "$file" 2>/dev/null || echo '[ -f "$HOME/.workstream/env.sh" ] && . "$HOME/.workstream/env.sh"' >> "$file"
 done
 git config --global init.defaultBranch main
 EOF
 
 # On a machine, the desktop starts at boot. A container has no service manager and runs start.sh itself.
+# Docker does not start at boot: it would read its programs off a new machine's slow disk just when the
+# desktop is reading its own. Its socket is there instead, and the first `docker` command starts it.
 if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   install -m 0644 "$ROOT/image/workstream-desktop.service" /etc/systemd/system/workstream-desktop.service
-  systemctl enable workstream-desktop.service docker.service
+  systemctl enable workstream-desktop.service
+  if systemctl cat docker.socket >/dev/null 2>&1; then
+    systemctl disable docker.service containerd.service
+    systemctl enable docker.socket
+  fi
 fi
 
 echo "The desktop is configured."

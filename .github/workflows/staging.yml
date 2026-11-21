@@ -16,6 +16,10 @@ on:
       ref:
         description: Branch, tag or commit to deploy
         default: main
+      desktop-image:
+        description: Bake the desktops' image from this ref too (for a change under desktop/); otherwise staging uses the newest release's
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,8 +32,55 @@ env:
   NAME: workstream-staging
 
 jobs:
+  # Staging's desktops come from the newest release's image, or from an image of its own baked from the ref
+  # being tried. Its own are versions 0.0.N in the same gallery: no release ever chooses one, and only the
+  # newest is kept.
+  desktop-image:
+    name: Desktops' image
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: staging
+    outputs:
+      version: ${{ steps.image.outputs.version }}
+    env:
+      OWN: 0.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - uses: ./.github/actions/bake-desktop-image
+        if: inputs.desktop-image
+        with:
+          version: ${{ env.OWN }}
+          sha: ${{ steps.commit.outputs.sha }}
+          token: ${{ github.token }}
+      - name: Keep only this one of staging's own
+        if: inputs.desktop-image
+        run: |
+          set -euo pipefail
+          az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine \
+            --query "[?starts_with(name, '0.0.') && name != '$OWN'].name" -o tsv \
+            | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition machine --gallery-image-version {}
+      - name: The image staging makes its desktops from
+        id: image
+        env:
+          BAKED: ${{ inputs.desktop-image }}
+        run: |
+          set -euo pipefail
+          if [ "$BAKED" = true ]; then version="$OWN"; else version=$(scripts/desktop-image-version.sh); fi
+          echo "Staging makes its desktops from image $version."
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   deploy:
     name: Web + API (Bicep)
+    needs: desktop-image
     if: inputs.action == 'deploy'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -49,6 +100,7 @@ jobs:
           stage: staging
           sha: ${{ steps.commit.outputs.sha }}
           tag: staging-${{ steps.commit.outputs.sha }}
+          desktop-image-version: ${{ needs.desktop-image.outputs.version }}
           # The administrator here is a made-up address with a password (the secret ADMINISTRATOR_PASSWORD).
           administrator-email: ${{ vars.ADMINISTRATOR_EMAIL || 'admin@workstream.test' }}
           administrator-password: ${{ secrets.ADMINISTRATOR_PASSWORD }}
@@ -82,6 +134,10 @@ jobs:
           for group in "$NAME-desktops" "$NAME"; do
             if [ "$(az group exists -n "$group")" = true ]; then az group delete -n "$group" --yes; fi
           done
+          # The images staging baked for itself.
+          az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine \
+            --query "[?starts_with(name, '0.0.')].name" -o tsv 2>/dev/null \
+            | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition machine --gallery-image-version {}
           # The database's administrators group lives in Entra, outside any resource group.
           az ad group delete --group "$NAME-sql-admins" 2>/dev/null || true
           echo "### Staging removed" >> "$GITHUB_STEP_SUMMARY"

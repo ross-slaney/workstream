@@ -101,8 +101,9 @@ public static class DesktopRelay
 
     /// <summary>
     /// Whether this person may have this desktop on screen now, and where it is. Their session must be live,
-    /// they must hold <c>TASK_USE</c> on the task, and the desktop must be ready. Each check that passes also
-    /// records that the desktop is in use, which is what keeps the sweep from stopping it.
+    /// they must hold <c>TASK_USE</c> on the task, and its display must be answering, which it is a few
+    /// seconds before its agent first exchanges. Each check that passes also records that the desktop is in
+    /// use, which is what keeps the sweep from stopping it.
     /// </summary>
     static async Task<(int Status, string? Address)> AdmitAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, bool touch, CancellationToken ct)
     {
@@ -117,7 +118,7 @@ public static class DesktopRelay
         var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct);
         if (task is null || task.State == DesktopState.Deleting || !await fga.Allows(userId, Permissions.TaskView, task.ResourceId)) return (StatusCodes.Status404NotFound, null);
         if (!await fga.Allows(userId, Permissions.TaskUse, task.ResourceId)) return (StatusCodes.Status403Forbidden, null);
-        if (task.State != DesktopState.Ready || task.Address is null) return (StatusCodes.Status409Conflict, null);
+        if (!task.CanBeWatched) return (StatusCodes.Status409Conflict, null);
         if (touch)
         {
             task.Active(DateTimeOffset.UtcNow);

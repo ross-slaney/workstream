@@ -60,6 +60,12 @@ export type WriteEnvironment = {
 
 export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "failed" | "deleting";
 
+/**
+ * How far a starting desktop has come: its machine is being made or turned on, the machine is on and starting
+ * up, or its screen can be watched and the agent has not joined yet.
+ */
+export type StartStep = "machine" | "boot" | "agent";
+
 export type Task = {
   id: string;
   teamId: string;
@@ -69,6 +75,8 @@ export type Task = {
   createdByName: string | null;
   createdAt: string;
   state: DesktopState;
+  /** Means something only while `state` is `starting`. */
+  step: StartStep;
   failure: string | null;
   size: DesktopSize;
   agentWorking: boolean;

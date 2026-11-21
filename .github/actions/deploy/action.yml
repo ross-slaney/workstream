@@ -16,6 +16,9 @@ inputs:
   release-tag:
     description: Validated release tag, production only.
     default: ''
+  desktop-image-version:
+    description: The version of the desktops' image this deployment makes its desktops from (scripts/desktop-image-version.sh). In the gallery already.
+    required: true
   administrator-email:
     description: The one address that reaches /admin; empty leaves nobody as administrator.
     default: ''
@@ -123,6 +126,7 @@ runs:
         ADMINISTRATOR_PASSWORD: ${{ inputs.stage != '' && inputs.administrator-password || '' }}
         MODEL_ENDPOINT: ${{ inputs.model-endpoint }}
         MODEL_KEY: ${{ inputs.model-key }}
+        DESKTOP_IMAGE_VERSION: ${{ inputs.desktop-image-version }}
       run: |
         # Once more on failure: a fresh installation's SQL administrators group (data.bicep) cannot take its
         # members in the same second Entra makes it, and the deployment is idempotent.
@@ -130,7 +134,7 @@ runs:
           az deployment sub create -l westus3 -n "$NAME" -f infra/main.bicep -o none --only-show-errors \
             -p location=westus3 stage="$STAGE" image="$IMAGE" webImage="$WEB_IMAGE" sourceSha="$SHA" releaseTag="$RELEASE_TAG" \
                administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
-               modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" && break
+               modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" desktopImageVersion="$DESKTOP_IMAGE_VERSION" && break
           [ "$attempt" = 1 ] || exit 1
           echo "::warning::The deployment failed once; deploying again."
         done

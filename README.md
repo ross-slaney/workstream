@@ -53,7 +53,7 @@ It works against the local stack and against staging, which sign in with a passw
 
 ## Ship it
 
-Production ships only from a published GitHub release. Merging to `main` deploys nothing. The version is `client/app.json` → `expo.version`, mirrored in `client/package.json`; publishing the release `vX.Y.Z` runs `.github/workflows/release.yml`, which builds both images from the tag's commit, deploys `infra/main.bicep`, checks that both origins serve that exact commit, and bakes the desktops' image when `desktop/` changed since the previous release.
+Production ships only from a published GitHub release. Merging to `main` deploys nothing. The version is `client/app.json` → `expo.version`, mirrored in `client/package.json`; publishing the release `vX.Y.Z` runs `.github/workflows/release.yml`, which bakes the desktops' image when `desktop/` changed since the previous release, then builds both images from the tag's commit, deploys `infra/main.bicep`, and checks that both origins serve that exact commit.
 
 [infra/README.md](infra/README.md) has what Azure needs once (the CI identity, the models), what it costs, and how to read the database.
 

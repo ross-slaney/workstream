@@ -10,8 +10,13 @@
 //   --keep        leave the task and its desktop running at the end, and print how to sign in to look at it
 //   --prompt "…"  what to ask the agent (default: a small task that needs the browser)
 //   --wait 600    seconds to wait for the desktop to be ready (default 600)
+//   --starts 5    instead of the journey: start that many tasks one after another and time each one
 //
 // Prints one line per step with how long it took. Exits 1 at the first step that fails.
+//
+// With --starts it prints, for each task, how many seconds after the person pressed Start their screen showed
+// the desktop (the display answered through the relay) and the agent began on what they asked, then deletes
+// the task. These are the two waits a person feels, measured from outside, the way their browser sees them.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -116,7 +121,7 @@ function safeJson(text) {
  * Open the desktop's display through the relay and speak enough of the display's protocol (RFB) to learn the
  * screen's size and name: proof that bytes travel from the browser's side to the desktop and back.
  */
-function openDisplay(taskId, token) {
+function openDisplay(taskId, token, patience = 30_000) {
   return new Promise((resolve, reject) => {
     // The relay takes this stream only from the web app's own pages, so the script says where it came from as a browser would.
     const socket = new WebSocket(`${api.replace(/^http/, "ws")}/api/tasks/${taskId}/desktop`, { protocols: ["binary", `bearer.${token}`], headers: { Origin: web } });
@@ -126,7 +131,7 @@ function openDisplay(taskId, token) {
     const timer = setTimeout(() => {
       socket.close();
       reject(new Error(`the display did not answer (stopped at "${phase}")`));
-    }, 30_000);
+    }, patience);
     socket.onerror = () => {
       clearTimeout(timer);
       reject(new Error("the relay refused the connection"));
@@ -181,6 +186,11 @@ const me = await person.get("/api/me");
 const team = (await person.get("/api/teams")).data[0] ?? fail("signing up gave no team");
 const environment = (await person.get(`/api/teams/${team.id}/environments`)).data[0] ?? fail("the team has no environment");
 step(`signed up as ${me.name}, on "${team.name}", with the environment "${environment.name}" (${environment.apps.join(", ")})`);
+
+if (args.starts) {
+  await timeStarts(Number(args.starts));
+  process.exit(0);
+}
 
 const taskId = randomUUID();
 const startedTask = await person.call("POST", `/api/teams/${team.id}/tasks`, { id: taskId, environmentId: environment.id, prompt, promptKey: randomUUID() });
@@ -250,3 +260,65 @@ if (deleted.status !== 204) fail(`deleting answered ${deleted.status}`);
 if ((await person.get(`/api/teams/${team.id}/tasks`)).data.length !== 0) fail("the deleted task is still listed");
 step("the task is deleted");
 console.log("\nEvery step worked.");
+
+// --- Timing starts (--starts) ------------------------------------------------------------------------------
+
+/** Start one task and time, from the request, when its screen can be watched and when its agent begins. */
+async function timeOneStart() {
+  const id = randomUUID();
+  const began = Date.now();
+  const seconds = () => Math.round((Date.now() - began) / 100) / 10;
+  const made = await person.call("POST", `/api/teams/${team.id}/tasks`, { id, environmentId: environment.id, prompt, promptKey: randomUUID() });
+  if (made.status !== 201) fail(`starting a task answered ${made.status}: ${JSON.stringify(made.body).slice(0, 300)}`);
+  const times = { screen: null, ready: null, working: null, firstLine: null };
+  let failure = null;
+  // The screen: ask the relay for the display until it answers, as the web app does.
+  const screenShown = (async () => {
+    while (times.screen === null && failure === null && seconds() < waitSeconds) {
+      const tried = Date.now();
+      try {
+        await openDisplay(id, person.token, 5000);
+        times.screen = seconds();
+      } catch {
+        await sleep(Math.max(0, 500 - (Date.now() - tried)));
+      }
+    }
+  })();
+  // The agent: the task says it is working once it has taken what the person asked for.
+  while ((times.working === null || times.firstLine === null) && seconds() < waitSeconds) {
+    const conversation = await person.get(`/api/tasks/${id}/messages?after=0`);
+    if (conversation.task.state === "failed") {
+      failure = conversation.task.failure ?? "the desktop failed";
+      break;
+    }
+    if (times.ready === null && conversation.task.state === "ready") times.ready = seconds();
+    if (times.working === null && conversation.task.agentWorking) times.working = seconds();
+    if (times.firstLine === null && conversation.messages.some((message) => message.author === "agent")) times.firstLine = seconds();
+    await sleep(500);
+  }
+  await screenShown;
+  await person.call("DELETE", `/api/tasks/${id}`);
+  return { id, ...times, failure };
+}
+
+async function timeStarts(count) {
+  const column = (value) => String(value ?? "never").padStart(9);
+  console.log(`\n${"task".padEnd(10)}${column("screen")}${column("ready")}${column("working")}${column("1st line")}   seconds after Start`);
+  const runs = [];
+  for (let n = 1; n <= count; n++) {
+    const run = await timeOneStart();
+    runs.push(run);
+    console.log(`${run.id.slice(0, 8).padEnd(10)}${column(run.screen)}${column(run.ready)}${column(run.working)}${column(run.firstLine)}${run.failure ? `   FAILED: ${run.failure}` : ""}`);
+    // The next start is not helped or hindered by this one's machine still being deleted.
+    await sleep(5000);
+  }
+  const middle = (name) => {
+    const values = runs.map((run) => run[name]).filter((value) => value !== null).sort((a, b) => a - b);
+    return values.length === 0 ? null : values[Math.floor((values.length - 1) / 2)];
+  };
+  const range = (name) => {
+    const values = runs.map((run) => run[name]).filter((value) => value !== null);
+    return values.length === 0 ? "never" : `${Math.min(...values)} to ${Math.max(...values)}`;
+  };
+  console.log(`\nScreen shown: median ${middle("screen")} s (${range("screen")}). Agent working: median ${middle("working")} s (${range("working")}).`);
+}

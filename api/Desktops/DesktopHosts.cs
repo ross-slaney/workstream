@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -10,26 +11,77 @@ using Workstream.Api.Domain;
 namespace Workstream.Api.Desktops;
 
 /// <summary>What a machine is made with. The key and the API's address are the only two things it is told; it asks the API for the rest.</summary>
-public sealed record DesktopSpec(string Name, string TaskId, string TeamId, string Size, string ApiUrl, string Key);
+public sealed record DesktopSpec(string Name, string TaskId, string TeamId, string Size, string ApiUrl, string Key)
+{
+    /// <summary>
+    /// What the desktop is told, as its agent reads it (desktop/agent/told.mjs): on a machine this is its user
+    /// data, which only the machine itself can read and which is never written to its disk.
+    /// </summary>
+    public string Told => $"WORKSTREAM_API={ApiUrl}\nWORKSTREAM_KEY={Key}\n";
+}
 
 /// <summary>Where a desktop is: its name at the host, and where the API reaches its display (<c>host:port</c>).</summary>
 public sealed record DesktopPlace(string Host, string Address);
 
+/// <summary>How a machine that was asked to start is doing: on yet or not, or failed, and then why in the host's words.</summary>
+public sealed record MachineState(bool On, string? Failure = null);
+
 /// <summary>
 /// Whatever runs the desktops: Azure virtual machines when deployed, Docker containers in development. The jobs
 /// (<see cref="DesktopJobs"/>) are its only caller. Every method is safe to call again.
+///
+/// Making or starting a machine answers as soon as the host has taken the request and the machine has an
+/// address, long before it is on. The job then follows it with <see cref="StateAsync"/> and
+/// <see cref="DisplayAnswersAsync"/>, so each step of a start is known when it happens.
 /// </summary>
 public interface IDesktopHost
 {
     Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct);
     /// <summary>Start a stopped machine again. Its address may have changed.</summary>
     Task<DesktopPlace> StartAsync(string host, CancellationToken ct);
+    Task<MachineState> StateAsync(string host, CancellationToken ct);
+    /// <summary>Whether the machine's display accepts a connection now: the first moment there is a screen to watch.</summary>
+    Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct);
     /// <summary>Release the machine but keep its disk.</summary>
     Task StopAsync(string host, CancellationToken ct);
     /// <summary>Remove the machine and everything made with it. A machine that is not there is already deleted.</summary>
     Task DeleteAsync(string host, CancellationToken ct);
     /// <summary>Every machine this host holds, by name: what the sweep compares with the tasks to find strays.</summary>
     Task<IReadOnlyList<string>> ListAsync(CancellationToken ct);
+}
+
+/// <summary>A desktop's display, as the API reaches it.</summary>
+public static class Display
+{
+    /// <summary>
+    /// Whether a display is there now: it takes the connection and greets, as a remote-desktop server does
+    /// before it is asked anything (<c>RFB 003.008</c>). Taking the connection alone proves nothing: Docker's
+    /// published port takes one before anything behind it is listening.
+    /// </summary>
+    public static async Task<bool> AnswersAsync(string address, CancellationToken ct)
+    {
+        var separator = address.LastIndexOf(':');
+        using var client = new TcpClient();
+        using var trying = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        trying.CancelAfter(TimeSpan.FromMilliseconds(600));
+        try
+        {
+            await client.ConnectAsync(address[..separator], int.Parse(address[(separator + 1)..]), trying.Token);
+            var greeting = new byte[4];
+            var read = 0;
+            while (read < greeting.Length)
+            {
+                var more = await client.GetStream().ReadAsync(greeting.AsMemory(read), trying.Token);
+                if (more == 0) return false;
+                read += more;
+            }
+            return greeting.AsSpan().SequenceEqual("RFB "u8);
+        }
+        catch (Exception error) when (error is SocketException or IOException || error is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>Settings for the desktops (<c>Workstream:Desktops</c>).</summary>
@@ -56,7 +108,10 @@ public sealed class DesktopOptions
         public string Location { get; set; } = "";
         /// <summary>The subnet desktops join. Its rules admit the API and nothing else (infra/desktops.bicep).</summary>
         public string SubnetId { get; set; } = "";
-        /// <summary>The image a desktop is made from: the gallery image definition, whose latest version is used.</summary>
+        /// <summary>
+        /// The image a desktop is made from: one version of the gallery's image, the one this release was
+        /// deployed with (infra/main.bicep). A machine made from it starts as it is, with nothing to provision.
+        /// </summary>
         public string ImageId { get; set; } = "";
         public Dictionary<string, string> Sizes { get; set; } = new()
         {
@@ -105,6 +160,8 @@ public sealed class NoDesktopHost : IDesktopHost
     const string Words = "This environment has no desktop host. Set Workstream:Desktops:Host to azure or docker.";
     public Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct) => throw new InvalidOperationException(Words);
     public Task<DesktopPlace> StartAsync(string host, CancellationToken ct) => throw new InvalidOperationException(Words);
+    public Task<MachineState> StateAsync(string host, CancellationToken ct) => Task.FromResult(new MachineState(false, Words));
+    public Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct) => Task.FromResult(false);
     public Task StopAsync(string host, CancellationToken ct) => Task.CompletedTask;
     public Task DeleteAsync(string host, CancellationToken ct) => Task.CompletedTask;
     public Task<IReadOnlyList<string>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
@@ -115,6 +172,13 @@ public sealed class NoDesktopHost : IDesktopHost
 /// A machine is one request to make and one to delete: its network interface and disk are declared inside it
 /// with <c>deleteOption: Delete</c>, so nothing outlives it. It has no public address; it reaches the internet
 /// through the subnet's NAT gateway and is reached only by the API, on the private network.
+///
+/// A machine is made from a specialized image (desktop/image/seal.sh): it has no operating-system profile and
+/// nothing provisions it, so it boots straight into the desktop. What it is told is its user data.
+///
+/// Nothing here waits on Azure's own record of an operation. Azure allows few questions about operations
+/// across the whole subscription, and it calls a start finished long after the machine is up. A machine is
+/// asked about instead (<see cref="StateAsync"/>), which is counted per machine.
 /// </summary>
 public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential, DesktopOptions options, ILogger<AzureDesktopHost> log) : IDesktopHost
 {
@@ -129,17 +193,6 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     public async Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct)
     {
         if (!Azure.Sizes.TryGetValue(spec.Size, out var vmSize)) throw new InvalidOperationException($"No machine size is configured for '{spec.Size}'.");
-        // The only two things a desktop is told. It reads the rest from the API with the key (desktop/agent/agent.mjs).
-        var cloudConfig = $"""
-            #cloud-config
-            write_files:
-              - path: /etc/workstream/desktop.env
-                permissions: '0640'
-                owner: root:work
-                content: |
-                  WORKSTREAM_API={spec.ApiUrl}
-                  WORKSTREAM_KEY={spec.Key}
-            """;
         var body = new JsonObject
         {
             ["location"] = Azure.Location,
@@ -157,16 +210,8 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                         ["managedDisk"] = new JsonObject { ["storageAccountType"] = "StandardSSD_LRS" },
                     },
                 },
-                ["osProfile"] = new JsonObject
-                {
-                    ["computerName"] = spec.Name,
-                    // Azure requires an administrator. Nobody signs in as it: the password is random and kept nowhere,
-                    // and the subnet admits no SSH.
-                    ["adminUsername"] = "wsadmin",
-                    ["adminPassword"] = $"Ws!{Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24))}a",
-                    ["customData"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(cloudConfig)),
-                    ["linuxConfiguration"] = new JsonObject { ["disablePasswordAuthentication"] = false },
-                },
+                // The only two things a desktop is told. It reads the rest from the API with the key (desktop/agent/agent.mjs).
+                ["userData"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(spec.Told)),
                 ["securityProfile"] = new JsonObject
                 {
                     ["securityType"] = "TrustedLaunch",
@@ -193,21 +238,43 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 },
             },
         };
-        await CompleteAsync(await SendAsync(HttpMethod.Put, $"{Machine(spec.Name)}?api-version={ComputeApi}", body, ct), ct);
+        (await SendAsync(HttpMethod.Put, $"{Machine(spec.Name)}?api-version={ComputeApi}", body, ct)).Dispose();
         return new DesktopPlace(spec.Name, await AddressAsync(spec.Name, ct));
     }
 
     public async Task<DesktopPlace> StartAsync(string host, CancellationToken ct)
     {
-        await CompleteAsync(await SendAsync(HttpMethod.Post, $"{Machine(host)}/start?api-version={ComputeApi}", null, ct), ct);
+        (await SendAsync(HttpMethod.Post, $"{Machine(host)}/start?api-version={ComputeApi}", null, ct)).Dispose();
         return new DesktopPlace(host, await AddressAsync(host, ct));
     }
 
-    public async Task StopAsync(string host, CancellationToken ct) =>
-        await CompleteAsync(await SendAsync(HttpMethod.Post, $"{Machine(host)}/deallocate?api-version={ComputeApi}", null, ct, missingIsDone: true), ct);
+    public async Task<MachineState> StateAsync(string host, CancellationToken ct)
+    {
+        var machine = await ReadAsync(host, ct);
+        if (machine is null) return new MachineState(false, "The machine is gone.");
+        var statuses = machine["properties"]?["instanceView"]?["statuses"]?.AsArray() ?? [];
+        if (machine["properties"]?["provisioningState"]?.GetValue<string>() == "Failed")
+        {
+            var why = statuses.FirstOrDefault(status => status?["level"]?.GetValue<string>() == "Error")?["message"]?.GetValue<string>();
+            log.LogWarning("Azure could not start the machine {Machine}: {Why}", host, why);
+            return new MachineState(false, why ?? "Azure could not start the machine.");
+        }
+        return new MachineState(Has(statuses, "PowerState/running"));
+    }
 
-    public async Task DeleteAsync(string host, CancellationToken ct) =>
-        await CompleteAsync(await SendAsync(HttpMethod.Delete, $"{Machine(host)}?forceDeletion=true&api-version={ComputeApi}", null, ct, missingIsDone: true), ct);
+    public Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct) => Display.AnswersAsync(place.Address, ct);
+
+    public async Task StopAsync(string host, CancellationToken ct)
+    {
+        (await SendAsync(HttpMethod.Post, $"{Machine(host)}/deallocate?api-version={ComputeApi}", null, ct, missingIsDone: true)).Dispose();
+        await UntilAsync(host, machine => machine is null || Has(machine["properties"]?["instanceView"]?["statuses"]?.AsArray() ?? [], "PowerState/deallocated"), "stop", ct);
+    }
+
+    public async Task DeleteAsync(string host, CancellationToken ct)
+    {
+        (await SendAsync(HttpMethod.Delete, $"{Machine(host)}?forceDeletion=true&api-version={ComputeApi}", null, ct, missingIsDone: true)).Dispose();
+        await UntilAsync(host, machine => machine is null, "be deleted", ct);
+    }
 
     public async Task<IReadOnlyList<string>> ListAsync(CancellationToken ct)
     {
@@ -225,23 +292,74 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
 
     static string NicName(string machine) => $"{machine}-nic";
 
+    static bool Has(JsonArray statuses, string code) => statuses.Any(status => status?["code"]?.GetValue<string>() == code);
+
+    /// <summary>The machine as Azure describes it now, with its power state. Null when it is not there.</summary>
+    async Task<JsonNode?> ReadAsync(string machine, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get, $"{Machine(machine)}?$expand=instanceView&api-version={ComputeApi}", null, ct, missingIsDone: true);
+        return response.StatusCode == System.Net.HttpStatusCode.NotFound ? null : JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
+    }
+
+    /// <summary>Ask about the machine every few seconds until it is as wanted. A question Azure refuses is asked again.</summary>
+    async Task UntilAsync(string machine, Func<JsonNode?, bool> done, string what, CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(20);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            try
+            {
+                var found = await ReadAsync(machine, ct);
+                if (done(found)) return;
+                if (found?["properties"]?["provisioningState"]?.GetValue<string>() == "Failed") throw new InvalidOperationException($"Azure could not make the machine {machine} {what}.");
+            }
+            catch (HttpRequestException)
+            {
+                // Asked too often, or the connection dropped: the next question answers.
+            }
+        }
+        throw new TimeoutException($"The machine {machine} did not {what} in 20 minutes.");
+    }
+
     /// <summary>
-    /// The machine's private address, read from Azure and never from the machine itself. Azure names the
-    /// network interface it makes with a machine itself, starting from the name asked for, so the interface is
-    /// found through the machine.
+    /// The machine's private address, read from Azure and never from the machine itself. Azure makes the
+    /// network interface a moment after it takes the request for the machine, and names it itself starting
+    /// from the name asked for, so the interface is found through the machine, asking until it is there.
     /// </summary>
     async Task<string> AddressAsync(string machine, CancellationToken ct)
     {
-        using var found = await SendAsync(HttpMethod.Get, $"{Machine(machine)}?api-version={ComputeApi}", null, ct);
-        var interfaceId = JsonNode.Parse(await found.Content.ReadAsStringAsync(ct))!["properties"]?["networkProfile"]?["networkInterfaces"]?[0]?["id"]?.GetValue<string>()
-            ?? throw new InvalidOperationException($"The machine {machine} has no network interface.");
-        using var response = await SendAsync(HttpMethod.Get, $"https://management.azure.com{interfaceId}?api-version={NetworkApi}", null, ct);
-        var nic = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-        var address = nic["properties"]?["ipConfigurations"]?[0]?["properties"]?["privateIPAddress"]?.GetValue<string>()
-            ?? throw new InvalidOperationException($"The machine {machine} has no private address yet.");
-        return $"{address}:{options.DisplayPort}";
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(3);
+        while (true)
+        {
+            try
+            {
+                using var found = await SendAsync(HttpMethod.Get, $"{Machine(machine)}?api-version={ComputeApi}", null, ct);
+                var description = JsonNode.Parse(await found.Content.ReadAsStringAsync(ct))!;
+                if (description["properties"]?["provisioningState"]?.GetValue<string>() == "Failed") throw new InvalidOperationException($"Azure could not make the machine {machine}.");
+                var interfaceId = description["properties"]?["networkProfile"]?["networkInterfaces"]?[0]?["id"]?.GetValue<string>();
+                if (interfaceId is not null)
+                {
+                    using var response = await SendAsync(HttpMethod.Get, $"https://management.azure.com{interfaceId}?api-version={NetworkApi}", null, ct, missingIsDone: true);
+                    var address = response.StatusCode == System.Net.HttpStatusCode.NotFound
+                        ? null
+                        : JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["properties"]?["ipConfigurations"]?[0]?["properties"]?["privateIPAddress"]?.GetValue<string>();
+                    if (address is not null) return $"{address}:{options.DisplayPort}";
+                }
+            }
+            catch (HttpRequestException)
+            {
+                // Asked too often, or the connection dropped: the next question answers.
+            }
+            if (DateTimeOffset.UtcNow > deadline) throw new TimeoutException($"The machine {machine} had no address after three minutes.");
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+        }
     }
 
+    /// <summary>
+    /// One request to Azure. A refusal with words is an <see cref="InvalidOperationException"/> carrying them;
+    /// being asked to slow down is an <see cref="HttpRequestException"/>, which callers that ask in a loop wait out.
+    /// </summary>
     async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, JsonNode? body, CancellationToken ct, bool missingIsDone = false)
     {
         var token = await credential.GetTokenAsync(new TokenRequestContext(Scopes), ct);
@@ -251,34 +369,10 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         var response = await http.SendAsync(request, ct);
         if (response.IsSuccessStatusCode || missingIsDone && response.StatusCode == System.Net.HttpStatusCode.NotFound) return response;
         var text = await response.Content.ReadAsStringAsync(ct);
+        var status = response.StatusCode;
         response.Dispose();
-        throw new InvalidOperationException(AzureWords(text) ?? $"Azure answered {(int)response.StatusCode}.");
-    }
-
-    /// <summary>Wait for a long-running request: Azure answers at once and gives an address to ask until it is done.</summary>
-    async Task CompleteAsync(HttpResponseMessage accepted, CancellationToken ct)
-    {
-        using (accepted)
-        {
-            if (accepted.StatusCode == System.Net.HttpStatusCode.NotFound) return;
-            var status = accepted.Headers.TryGetValues("Azure-AsyncOperation", out var values) ? values.FirstOrDefault() : null;
-            if (status is null) return;
-            var deadline = DateTimeOffset.UtcNow.AddMinutes(20);
-            while (DateTimeOffset.UtcNow < deadline)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(4), ct);
-                using var response = await SendAsync(HttpMethod.Get, status, null, ct);
-                var operation = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-                switch (operation["status"]?.GetValue<string>())
-                {
-                    case "Succeeded":
-                        return;
-                    case "Failed" or "Canceled":
-                        throw new InvalidOperationException(operation["error"]?["message"]?.GetValue<string>() ?? "Azure could not finish the request.");
-                }
-            }
-            throw new TimeoutException("Azure did not finish the request in 20 minutes.");
-        }
+        if (status == System.Net.HttpStatusCode.TooManyRequests) throw new HttpRequestException("Azure asked for fewer requests.", null, status);
+        throw new InvalidOperationException(AzureWords(text) ?? $"Azure answered {(int)status}.");
     }
 
     string? AzureWords(string text)
@@ -321,6 +415,14 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
         await RunAsync(["start", host], ct);
         return new DesktopPlace(host, await AddressAsync(host, ct));
     }
+
+    /// <summary>A container is on as soon as Docker has started it.</summary>
+    public async Task<MachineState> StateAsync(string host, CancellationToken ct) =>
+        (await RunAsync(["inspect", "-f", "{{.State.Running}}", host], ct, tolerate: true)).Trim() == "true"
+            ? new MachineState(true)
+            : new MachineState(false, "The container is not running.");
+
+    public Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct) => Display.AnswersAsync(place.Address, ct);
 
     public Task StopAsync(string host, CancellationToken ct) => RunAsync(["stop", "-t", "5", host], ct, tolerate: true);
 

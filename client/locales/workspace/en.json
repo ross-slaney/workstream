@@ -54,7 +54,13 @@
     "label": "The desktop of {title}",
     "starting": {
       "title": "Starting the desktop",
-      "body": "A new computer is being made for this task. It usually takes about two minutes. What you asked for is already waiting for the agent."
+      "body": "What you asked for is already waiting for the agent.",
+      "steps": {
+        "machine": "Getting a computer",
+        "boot": "Turning it on",
+        "agent": "Starting the agent"
+      },
+      "elapsed": "{seconds} s"
     },
     "stopping": {
       "title": "Stopping the desktop",
@@ -86,7 +92,8 @@
     "atDesktop": "From the desktop",
     "waitingForDesktop": "The agent will read this when the desktop is ready.",
     "desktopStopped": "The desktop is stopped. Start it and the agent reads this.",
-    "notSent": "Not sent. Try again."
+    "notSent": "Not sent. Try again.",
+    "agentStarting": "The agent is starting. It reads what you asked for in a moment."
   },
   "newTask": {
     "title": "New task",

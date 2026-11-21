@@ -43,7 +43,7 @@ export type TaskScreenProps = {
   busy: boolean;
   /** Why the last action was refused, in the server's words. */
   error: string | null;
-  /** The live desktop, which the controller draws once the desktop is ready. */
+  /** The live desktop, which the controller draws from the moment there is a screen to watch: a little before the agent joins. */
   desktop: ReactNode;
   /** The desktop screen's width over its height, so a surface can give the picture exactly the room it needs. */
   desktopShape: number;

@@ -29,6 +29,8 @@ param administratorEmail string = ''
 @description('A stage only: the administrator\'s password, the secret ADMINISTRATOR_PASSWORD on the GitHub environment `staging`. Never passed on in production.')
 @secure()
 param administratorPassword string = ''
+@description('The version of the desktops\' image this deployment makes its desktops from, e.g. 0.2.0: the one its release baked, or the newest before it (scripts/desktop-image-version.sh). It is in the gallery before this runs.')
+param desktopImageVersion string
 @description('The agents\' models: the Foundry resource\'s Anthropic endpoint, e.g. https://<resource>.services.ai.azure.com/anthropic. The resource and its deployments are made by hand (README "Models"), never here; empty runs with agents that say models are not set up.')
 param modelEndpoint string = ''
 @secure()
@@ -128,7 +130,7 @@ module api 'api.bicep' = {
     administratorPassword: production ? '' : administratorPassword
     desktopsGroup: desktopsGroup.name
     desktopsSubnetId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Network/virtualNetworks/subnets', 'workstream-net', 'desktops')
-    desktopImageId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images', 'workstream', 'desktop')
+    desktopImageId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images/versions', 'workstream', 'machine', desktopImageVersion)
     modelEndpoint: modelEndpoint
     modelKey: modelKey
   }

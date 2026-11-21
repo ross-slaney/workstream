@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// The agent on a Workstream desktop. One process, started with the desktop (desktop/start.sh), that:
+// The agent on a Workstream desktop. One process, started with the desktop's session (desktop/session.sh)
+// while XFCE is still drawing itself, that:
 //
-//   1. exchanges with the API about once a second, with the desktop's key: it hands over what the agent said
-//      and did and takes what people wrote. The first exchange is what makes the desktop ready to watch;
-//   2. prepares the desktop from its environment, where the person can see it: the variables, the
-//      repository, the setup script in a terminal window, the apps;
-//   3. runs the agent (harness.mjs) and feeds it what people write;
-//   4. serves the agent's own window on the desktop (window.mjs), which shows the same conversation.
+//   1. finds out what the desktop is told: its API's address and its key (told.mjs);
+//   2. exchanges with the API about once a second, with the key: it hands over what the agent said and did
+//      and takes what people wrote. The first exchange tells the API the desktop is up;
+//   3. prepares the desktop from its environment, where the person can see it: the variables, the
+//      repository, the apps on the panel, the setup script in a terminal window;
+//   4. runs the agent (harness.mjs) and feeds it what people write;
+//   5. serves the agent's own window on the desktop (window.mjs), which shows the same conversation.
 //
-// The desktop is told two things, its API's address and its key. Everything else comes from the API.
+// Everything but the two things it is told comes from the API.
 
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -17,35 +19,22 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { startHarness } from "./harness.mjs";
+import { fileURLToPath } from "node:url";
+import { panelFor } from "./panel.mjs";
+import { told } from "./told.mjs";
 import { startWindow } from "./window.mjs";
 
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const home = os.homedir();
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dir = path.join(home, ".workstream");
 const stateFile = path.join(dir, "state.json");
 const conversationFile = path.join(dir, "conversation.jsonl");
 const log = (...args) => console.log(new Date().toISOString(), ...args);
 
-/** The two things the desktop is told: from the environment (a container), else the file cloud-init wrote (a machine). */
-function told() {
-  const values = { ...process.env };
-  const file = "/etc/workstream/desktop.env";
-  if ((!values.WORKSTREAM_API || !values.WORKSTREAM_KEY) && existsSync(file)) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      const at = line.indexOf("=");
-      if (at > 0) values[line.slice(0, at).trim()] = line.slice(at + 1).trim();
-    }
-  }
-  return { api: (values.WORKSTREAM_API ?? "").replace(/\/+$/, ""), key: values.WORKSTREAM_KEY ?? "" };
-}
-
-const { api, key } = told();
-if (!api || !key) {
-  log("This desktop was not told its API or its key (WORKSTREAM_API, WORKSTREAM_KEY). Nothing to do.");
-  process.exit(1);
-}
+const { api, key } = await told({ log });
+log(`Starting. The API is ${api}.`);
 
 await mkdir(dir, { recursive: true });
 /** Kept across restarts of the desktop: where it is in the conversation, and what it has already prepared. */
@@ -186,6 +175,35 @@ async function runSetupScript(script, folder, variables) {
 const start = (command, args, variables) =>
   spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, ...variables } }).on("error", (error) => log(`${command} did not start:`, error.message)).unref();
 
+/** Whether a program of this name is running in the session. */
+const running = (name) => run("pgrep", ["-x", name]).then(() => true, () => false);
+
+/**
+ * XFCE is up: its window manager answers, so a window opened now gets a frame and a place, and its panel is
+ * on screen. The agent starts beside XFCE and reaches this point first.
+ */
+async function sessionReady() {
+  for (let waited = 0; waited < 300; waited++) {
+    const managed = await run("wmctrl", ["-m"], { timeout: 2000 }).then(() => true, () => false);
+    if (managed && (await running("xfce4-panel"))) return;
+    await sleep(100);
+  }
+  log("XFCE did not come up in thirty seconds. Going on without it.");
+}
+
+/**
+ * The panel shows the environment's apps. The desktop is drawn with the default apps (image/configure.sh);
+ * the panel is written again, and started again, only when the environment chose others.
+ */
+async function showApps(apps) {
+  const catalog = JSON.parse(readFileSync(path.join(root, "apps.json"), "utf8"));
+  const panel = panelFor(catalog, apps, state.apps);
+  if (!panel.changed) return;
+  await run(path.join(root, "panel.sh"), panel.apps, { timeout: 20_000 }).catch((error) => log("The panel was not written:", error.message));
+  state.apps = panel.apps;
+  await saveState();
+}
+
 /** Make the desktop what its environment says, once. Answers the folder the agent works in. */
 async function prepare(setup) {
   preparing = true;
@@ -204,6 +222,9 @@ async function prepare(setup) {
       }
       if (existsSync(target)) workspace = target;
     }
+    // Everything from here opens a window.
+    await sessionReady();
+    await showApps(setup.apps);
     if (setup.setupScript && !state.prepared) {
       say("activity", "Running the setup script");
       const code = await runSetupScript(setup.setupScript, workspace, setup.variables);
@@ -231,11 +252,13 @@ async function setupFromApi() {
   }
 }
 
-log(`Starting. The API is ${api}.`);
+// Exchanging starts before anything else: it tells the API the desktop is up, and brings what the person asked for.
+exchangeForever();
+// The harness is the slow part to load, so it loads while the desktop is being prepared.
+const harnessLoading = import("./harness.mjs");
+harnessLoading.catch(() => {});
 const setup = await setupFromApi();
 title = setup.title;
-// Exchanging starts before anything else, so the desktop can be watched while it is being prepared.
-exchangeForever();
 startWindow({
   conversation,
   status: () => ({ title, working: working || preparing }),
@@ -247,6 +270,7 @@ startWindow({
   log,
 });
 const workspace = await prepare(setup);
+const { startHarness } = await harnessLoading;
 harness = startHarness({
   setup, key, workspace, state, saveState, say, prompts, log,
   setWorking: (value) => {

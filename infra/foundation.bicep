@@ -171,33 +171,12 @@ resource communication 'Microsoft.Communication/communicationServices@2023-04-01
 }
 
 // --- The desktops' image ----------------------------------------------------------------------------------
-// One image, baked by release.yml from desktop/image/ and kept here as versions named for the release. The
-// API makes each desktop from the newest.
-resource gallery 'Microsoft.Compute/galleries@2024-03-03' = {
-  name: 'workstream'
-  location: location
-}
-
-resource desktopImage 'Microsoft.Compute/galleries/images@2024-03-03' = {
-  parent: gallery
-  name: 'desktop'
-  location: location
-  properties: {
-    osType: 'Linux'
-    osState: 'Generalized'
-    hyperVGeneration: 'V2'
-    architecture: 'x64'
-    identifier: { publisher: 'workstream', offer: 'desktop', sku: 'debian-13' }
-    // The v7 sizes boot from NVMe disks only.
-    features: [
-      { name: 'SecurityType', value: 'TrustedLaunch' }
-      { name: 'DiskControllerTypes', value: 'SCSI, NVMe' }
-    ]
-  }
+module gallery 'gallery.bicep' = {
+  name: 'gallery'
+  params: { location: location }
 }
 
 // main.bicep finds everything here by name, so a stage can stand on this foundation without deploying it.
 output registryName string = registry.name
 output defaultDomain string = environment.properties.defaultDomain
-output desktopImageId string = desktopImage.id
 output communicationName string = communication.name

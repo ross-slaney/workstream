@@ -8,10 +8,14 @@ using static Workstream.Api.WorkstreamAuthorization;
 
 namespace Workstream.Api;
 
-/// <summary>A task as the list and the screen show it: what it is, who started it, and where its desktop is.</summary>
+/// <summary>
+/// A task as the list and the screen show it: what it is, who started it, and where its desktop is.
+/// <see cref="Step"/> says how far a starting desktop has come: <c>machine</c> (being made or turned on),
+/// <c>boot</c> (on and starting up) or <c>agent</c> (its screen can be watched; the agent has not joined yet).
+/// </summary>
 public sealed record TaskDto(
     string Id, string TeamId, string EnvironmentId, string Title, string CreatedBy, string? CreatedByName, DateTimeOffset CreatedAt,
-    string State, string? Failure, string Size, bool AgentWorking, DateTimeOffset StateChangedAt);
+    string State, string Step, string? Failure, string Size, bool AgentWorking, DateTimeOffset StateChangedAt);
 
 public sealed record RenameTask(string Title);
 
@@ -52,7 +56,7 @@ public static partial class WorkstreamApi
 
     static TaskDto ToDto(WorkTask x, IReadOnlyDictionary<string, string> names) => new(
         x.Id, x.TeamId, x.EnvironmentId, x.Title, x.CreatedBy, names.GetValueOrDefault(x.CreatedBy), x.CreatedAt,
-        x.State.ToString().ToLowerInvariant(), x.Failure, x.Size, x.AgentWorking, x.StateChangedAt);
+        x.State.ToString().ToLowerInvariant(), x.Step.ToString().ToLowerInvariant(), x.Failure, x.Size, x.AgentWorking, x.StateChangedAt);
 
     static async Task<IResult> TaskResultAsync(Outcome<WorkTask> outcome, WorkstreamDbContext db, CancellationToken ct, bool created = false)
     {

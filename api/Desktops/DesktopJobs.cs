@@ -10,8 +10,9 @@ using static Workstream.Api.WorkstreamAuthorization;
 namespace Workstream.Api.Desktops;
 
 /// <summary>
-/// Everything that happens to a desktop outside a request: making and starting its machine, stopping it,
-/// deleting it, and the sweep that stops idle desktops and removes strays. Each job is an operation run by a
+/// Everything that happens to a desktop outside a request: making and starting its machine and following it
+/// until its screen can be watched, stopping it, deleting it, and the sweep that stops idle desktops and
+/// removes strays. Each job is an operation run by a
 /// principal of its own, <c>agent::desktop-operator</c>, which holds <c>desktop_operator</c> on root: it checks
 /// <c>TASK_OPERATE_DESKTOP</c> on every task it touches and pages the tasks it sweeps with the same permission.
 /// A job changes a task only from the state the person's request left it in, so a job that runs twice, or late,
@@ -23,8 +24,14 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
     public const string SweepCron = "*/5 * * * *";
     const string Operator = PlatformSeed.OperatorSubjectId;
     const int PageSize = 200;
+    /// <summary>How long a start job follows a machine. One that has not shown a screen by then is left to the sweep.</summary>
+    static readonly TimeSpan FollowFor = TimeSpan.FromMinutes(5);
+    static readonly TimeSpan AskHostEvery = TimeSpan.FromSeconds(2);
 
-    /// <summary>Make the task's machine, or start the one it has. The desktop's first exchange makes it ready.</summary>
+    /// <summary>
+    /// Make the task's machine, or start the one it has, and follow it until there is a screen to watch,
+    /// writing down each step as it happens. The desktop's first exchange is what makes it ready.
+    /// </summary>
     [AutomaticRetry(Attempts = 0)]
     public async Task StartAsync(string taskId, CancellationToken ct)
     {
@@ -44,13 +51,11 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key);
             }
         }
+        var machine = spec?.Name ?? existing!;
 
-        DesktopPlace place;
-        try
-        {
-            place = spec is not null ? await host.CreateAsync(spec, ct) : await host.StartAsync(existing!, ct);
-        }
-        catch (Exception error) when (error is not OperationCanceledException)
+        // A desktop that failed costs nothing: whatever part of a new machine was made is removed, and a
+        // machine that would not start again is released. Starting the task again begins from there.
+        async Task FailAsync(Exception error)
         {
             log.LogError(error, "The desktop of task {TaskId} did not start.", taskId);
             await ChangeAsync(taskId, async (db, task, now) =>
@@ -59,17 +64,25 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 task.Fail(WordsFor(error), now);
                 await EndRunAsync(db, task.Id, now, ct);
             }, ct);
-            // A desktop that failed costs nothing: whatever part of a new machine was made is removed, and a
-            // machine that would not start again is released. Starting the task again begins from there.
             try
             {
-                if (spec is not null) await host.DeleteAsync(spec.Name, ct);
-                else await host.StopAsync(existing!, ct);
+                if (spec is not null) await host.DeleteAsync(machine, ct);
+                else await host.StopAsync(machine, ct);
             }
             catch (Exception cleanup) when (cleanup is not OperationCanceledException)
             {
                 log.LogWarning(cleanup, "The machine of task {TaskId} could not be cleared after its start failed.", taskId);
             }
+        }
+
+        DesktopPlace place;
+        try
+        {
+            place = spec is not null ? await host.CreateAsync(spec, ct) : await host.StartAsync(existing!, ct);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            await FailAsync(error);
             return;
         }
 
@@ -81,7 +94,60 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             return Task.CompletedTask;
         }, ct);
         // The person stopped or deleted the task while its machine was being made: the machine goes the same way.
-        if (!kept) await SettleAsync(taskId, place.Host, ct);
+        if (!kept)
+        {
+            await SettleAsync(taskId, place.Host, ct);
+            return;
+        }
+
+        // The host has only taken the request. Ask the display every quarter second, since its answer is the
+        // moment there is a screen to watch, and the host every two seconds, for when the machine is on and
+        // in case it could not be started.
+        var began = clock.GetUtcNow();
+        var asked = DateTimeOffset.MinValue;
+        var on = false;
+        while (clock.GetUtcNow() - began < FollowFor)
+        {
+            if (await host.DisplayAnswersAsync(place, ct))
+            {
+                await StepAsync(taskId, (task, run, now) =>
+                {
+                    task.DisplayUp(now);
+                    run?.DisplayUp(now);
+                }, ct);
+                return;
+            }
+            if (clock.GetUtcNow() - asked >= AskHostEvery)
+            {
+                asked = clock.GetUtcNow();
+                var state = new MachineState(on);
+                try
+                {
+                    state = await host.StateAsync(place.Host, ct);
+                }
+                catch (Exception error) when (error is HttpRequestException or InvalidOperationException)
+                {
+                    log.LogWarning(error, "The host did not say how the machine of task {TaskId} is doing.", taskId);
+                }
+                if (state.Failure is not null)
+                {
+                    await FailAsync(new InvalidOperationException(state.Failure));
+                    return;
+                }
+                if (state.On && !on)
+                {
+                    on = true;
+                    await StepAsync(taskId, (task, run, now) =>
+                    {
+                        task.MachineOn(now);
+                        run?.MachineOn(now);
+                    }, ct);
+                }
+                if (!await IsStartingAsync(taskId, ct)) return;
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(250), ct);
+        }
+        log.LogWarning("The display of task {TaskId} did not answer in {Minutes} minutes.", taskId, FollowFor.TotalMinutes);
     }
 
     /// <summary>Release the machine of a task a person, or the sweep, asked to stop.</summary>
@@ -240,6 +306,24 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Write down a step of the task's start, on the task and on the run that is open.</summary>
+    async Task StepAsync(string taskId, Action<WorkTask, DesktopRun?, DateTimeOffset> step, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+        var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct);
+        if (task is null) return;
+        var run = await db.DesktopRuns.Where(x => x.TaskId == taskId && x.EndedAt == null).OrderByDescending(x => x.StartedAt).FirstOrDefaultAsync(ct);
+        step(task, run, clock.GetUtcNow());
+        await db.SaveChangesAsync(ct);
+    }
+
+    async Task<bool> IsStartingAsync(string taskId, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Tasks.AsNoTracking().AnyAsync(x => x.Id == taskId && x.State == DesktopState.Starting, ct);
+    }
+
     /// <summary>A machine that finished being made after its task moved on: stop it, or delete it, as the task now says.</summary>
     async Task SettleAsync(string taskId, string machine, CancellationToken ct)
     {
@@ -261,7 +345,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
     /// <summary>Why a desktop did not start, in words a person can act on. Azure's own words are kept for the usual causes.</summary>
     static string WordsFor(Exception error) => error.Message switch
     {
-        var message when message.Contains("quota", StringComparison.OrdinalIgnoreCase) => "There is no capacity for another desktop right now. Stop one, or try again later.",
+        var message when message.Contains("quota", StringComparison.OrdinalIgnoreCase) || message.Contains("capacity", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("allocation", StringComparison.OrdinalIgnoreCase) => "There is no capacity for another desktop right now. Stop one, or try again later.",
         var message when message.Contains("no desktop host", StringComparison.OrdinalIgnoreCase) => error.Message,
         _ => "The desktop could not be started. Start it again; if it keeps failing, tell us.",
     };
