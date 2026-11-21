@@ -20,6 +20,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<WorkTask> Tasks => Set<WorkTask>();
     public DbSet<TaskMessage> TaskMessages => Set<TaskMessage>();
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
+    public DbSet<Spare> Spares => Set<Spare>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
 
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
@@ -107,9 +108,27 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             run.Property(x => x.TaskId).HasMaxLength(36);
             run.Property(x => x.TeamId).HasMaxLength(100);
             run.Property(x => x.Size).HasMaxLength(20);
+            // Rows from before a run said what it was for were all tasks' runs, made from the image.
+            run.Property(x => x.Purpose).HasMaxLength(20).HasDefaultValue(MachinePurpose.Task);
+            run.Property(x => x.Source).HasMaxLength(20).HasDefaultValue(StartSource.Image);
             run.HasIndex(x => new { x.TeamId, x.StartedAt });
             run.HasIndex(x => new { x.TaskId, x.EndedAt });
             run.HasIndex(x => x.EndedAt);
+        });
+
+        model.Entity<Spare>(spare =>
+        {
+            spare.ToTable("Spares");
+            spare.Property(x => x.Id).HasMaxLength(36);
+            spare.Property(x => x.TeamId).HasMaxLength(100);
+            spare.Property(x => x.EnvironmentId).HasMaxLength(36);
+            spare.Property(x => x.Size).HasMaxLength(20);
+            spare.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
+            spare.Property(x => x.Host).HasMaxLength(100);
+            spare.Property(x => x.Address).HasMaxLength(100);
+            // A team has one spare at most: two people opening the workspace at once make one.
+            spare.HasIndex(x => x.TeamId).IsUnique();
+            spare.HasOne<Team>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
         });
 
         model.Entity<ModelUsage>(usage =>

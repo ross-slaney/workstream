@@ -45,11 +45,12 @@ public sealed record Outcome<T>(OutcomeKind Kind, T? Value, string? Message)
 
 /// <summary>
 /// The principal calling, from the credential validated for this request and never from what the request says:
-/// a person (the token SqlOS validated) or a task's desktop (the key <see cref="DesktopKeys"/> resolved).
+/// a person (the token SqlOS validated) or a desktop (the key <see cref="DesktopKeys"/> resolved). A desktop
+/// is known by its own id. Which task it works on is not part of who it is: that is a grant.
 /// </summary>
-public sealed record Caller(string PrincipalId, string? Scope, string? DesktopTaskId = null)
+public sealed record Caller(string PrincipalId, string? Scope, string? DesktopId = null)
 {
-    public bool IsDesktop => DesktopTaskId is not null;
+    public bool IsDesktop => DesktopId is not null;
 
     /// <summary>Whether the credential was granted this scope: the client's ceiling, never a per-node decision.</summary>
     public bool HasScope(string scope) =>
@@ -63,7 +64,7 @@ public sealed record Caller(string PrincipalId, string? Scope, string? DesktopTa
         return new Caller(userId, token.Scope);
     }
 
-    /// <summary>A task's desktop, from its key. 401 when the request carries none.</summary>
+    /// <summary>A desktop, from its key. 401 when the request carries none.</summary>
     public static Caller Desktop(HttpContext http) =>
         DesktopKeys.CallerOf(http) ?? throw new BadHttpRequestException("Missing desktop key.", StatusCodes.Status401Unauthorized);
 }
