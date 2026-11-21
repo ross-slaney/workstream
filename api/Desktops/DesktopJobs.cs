@@ -129,14 +129,15 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 if (state.On && !on)
                 {
                     on = true;
+                    // What is written is written whole: ending the following never cuts a save short.
                     await StepAsync(taskId, (task, run, now) =>
                     {
                         task.MachineOn(now);
                         run?.MachineOn(now);
-                    }, following.Token);
+                    }, ct);
                 }
                 // The person stopped or deleted the task, or its agent is already there: nothing more to follow.
-                if (!await IsStartingAsync(taskId, following.Token)) return null;
+                if (!await IsStartingAsync(taskId, ct)) return null;
                 await Task.Delay(AskHostEvery, following.Token);
             }
         }, following.Token);
@@ -174,9 +175,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             {
                 await Task.WhenAll(display, hosted);
             }
-            catch (Exception error) when (error is OperationCanceledException or HttpRequestException or InvalidOperationException)
+            catch (Exception error) when (error is not OutOfMemoryException)
             {
-                // The one that was not first, stopped.
+                // The one that was not first, stopped where it was. What it was doing no longer matters.
+                log.LogDebug(error, "The following of task {TaskId} ended.", taskId);
             }
         }
     }
