@@ -76,3 +76,12 @@ export function describe(name, input = {}, workspace = "") {
   }
   return `Used ${short(name.replace(/^mcp__/, "").replaceAll("__", " "), 60)}`;
 }
+
+/**
+ * What the agent said, as the conversation shows it. When the model gateway refuses a call (models not set
+ * up, the team's allowance used), the harness reports it as "API Error: 400 …" followed by the gateway's own
+ * words; the words are written for the person, so they are shown without the prefix.
+ */
+export function spoken(text) {
+  return String(text ?? "").trim().replace(/^API Error: \d{3}\s+/, "");
+}

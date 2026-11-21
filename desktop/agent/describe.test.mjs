@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describe } from "./describe.mjs";
+import { describe, spoken } from "./describe.mjs";
 
 test("a command is one line, however long it was", () => {
   assert.equal(describe("Bash", { command: "npm test\n&& echo done" }), "Ran npm test");
@@ -25,4 +25,10 @@ test("the agent's own bookkeeping is not a line", () => {
 
 test("a tool nobody named still gets a line", () => {
   assert.equal(describe("mcp__github__create_issue", {}), "Used github create_issue");
+});
+
+test("a refusal from the model gateway is said in its own words", () => {
+  assert.equal(spoken("API Error: 400 Your team has used its model allowance for this month. A system administrator can raise it."), "Your team has used its model allowance for this month. A system administrator can raise it.");
+  assert.equal(spoken("  The heading is Example Domain.  "), "The heading is Example Domain.");
+  assert.equal(spoken("I got an API Error: 400 from the site."), "I got an API Error: 400 from the site.");
 });

@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { describe } from "./describe.mjs";
+import { describe, spoken } from "./describe.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -128,7 +128,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
         // A helper's own messages stay with the helper; its result reaches the conversation through the agent.
         if (message.parent_tool_use_id) break;
         for (const block of message.message?.content ?? []) {
-          if (block.type === "text" && block.text.trim()) say("text", block.text.trim());
+          if (block.type === "text" && spoken(block.text)) say("text", spoken(block.text));
           if (block.type === "tool_use") {
             const line = describe(block.name, block.input ?? {}, workspace);
             if (line) say("activity", line);
