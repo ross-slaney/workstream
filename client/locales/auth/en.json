@@ -1,6 +1,22 @@
 {
   "meta": {
-    "signInTitle": "Sign in · Workstream"
+    "signInTitle": "Sign in · Workstream",
+    "deviceTitle": "Sign in the command line · Workstream"
+  },
+  "device": {
+    "opening": "Opening the sign-in request",
+    "signInNote": "The Workstream command line on your computer asked to sign in. Sign in here first, then you can allow it.",
+    "approveTitle": "Allow the command line to act as you?",
+    "approveBody": "The Workstream command line on your computer will be signed in as {email}. It can see your teams and their tasks, and start tasks. It can't change, stop or delete anything, and it can't open a desktop.",
+    "codeLabel": "Check that your terminal shows this code:",
+    "approve": "Allow",
+    "deny": "Don't allow",
+    "approvedTitle": "The command line is signed in",
+    "approvedBody": "Go back to your terminal. You can close this tab.",
+    "deniedTitle": "The command line was not signed in",
+    "deniedBody": "Nothing changed on your account. You can close this tab.",
+    "unusableTitle": "This sign-in link can't be used",
+    "unusable": "It may have expired or been used already. Run workstream login again to get a new one."
   },
   "signIn": {
     "title": "Sign in to Workstream",

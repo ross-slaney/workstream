@@ -50,7 +50,9 @@ public static partial class WorkstreamApi
     static void MapTasks(RouteGroupBuilder api)
     {
         api.MapGet("/teams/{teamId}/tasks", ListTasks).WithName("list_tasks").WithTags("Tasks").Produces<ListPage<TaskDto>>();
-        api.MapPost("/teams/{teamId}/tasks", PostTask).WithName("start_task").WithTags("Tasks").Produces<TaskDto>(201).ProducesProblem(402).ProducesProblem(409);
+        // The command line's one change: it starts tasks with workstream.start, as the person.
+        api.MapPost("/teams/{teamId}/tasks", PostTask).WithName("start_task").WithTags("Tasks").WithMetadata(new AllowsScope(WorkstreamApp.StartScope))
+            .Produces<TaskDto>(201).ProducesProblem(402).ProducesProblem(409);
         api.MapPost("/teams/{teamId}/spare", PostSpare).WithName("want_spare").WithTags("Tasks").Produces(204);
         api.MapGet("/tasks/{id}", GetTask).WithName("get_task").WithTags("Tasks").Produces<TaskDto>();
         api.MapPut("/tasks/{id}", PutTask).WithName("rename_task").WithTags("Tasks").Produces<TaskDto>();

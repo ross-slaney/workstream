@@ -16,7 +16,8 @@ namespace Workstream.Api.Desktops;
 /// client speaks to the desktop's display through it, and this relay copies the display's bytes to the browser
 /// as they are. It reads who is asking: a browser cannot put a bearer token on a WebSocket, so the token rides
 /// in the requested subprotocols as <c>bearer.{token}</c> beside <c>binary</c>, and is validated the way SqlOS
-/// validates it on any request. Then <c>TASK_VIEW</c> on the task to watch, and <c>TASK_DRIVE</c> to use the
+/// validates it on any request; it must be the web app's, with the write scope, so the command line's token
+/// opens no desktop. Then <c>TASK_VIEW</c> on the task to watch, and <c>TASK_DRIVE</c> to use the
 /// mouse and keyboard: what the browser sends is read message by message (<see cref="RfbClientFilter"/>), and
 /// for someone who may only watch, what would act on the desktop is dropped. Both are checked again every
 /// minute for as long as the stream stays open, so an ended or changed share takes effect within one.
@@ -47,7 +48,9 @@ public static class DesktopRelay
         var raw = http.WebSockets.WebSocketRequestedProtocols.FirstOrDefault(p => p.StartsWith(TokenProtocol, StringComparison.Ordinal))?[TokenProtocol.Length..];
         var token = raw is null ? null : await services.GetRequiredService<SqlOSAuthService>().ValidateAccessTokenAsync(raw, app.Resource, http.RequestAborted);
         if (token is not { UserId.Length: > 0, SessionId.Length: > 0 }
-            || !(token.Scope ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(WorkstreamApp.ReadScope))
+            // The stream can carry the mouse and the keyboard, so it takes the web app's write scope: the command
+            // line's token, which reads and starts tasks, cannot open it.
+            || !(token.Scope ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(WorkstreamApp.WriteScope))
         {
             http.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
