@@ -53,7 +53,7 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   test -d /opt/workstream/agent/node_modules/@anthropic-ai/claude-agent-sdk
   systemctl is-enabled workstream-desktop.service workstream-grow-disk.service > /dev/null
   sudo -u work -H dotnet dev-certs https --check
-  # The Android emulator, with the processor's virtualization open to the desktop's person.
+  # The Android emulator, with the processor's virtualization open to the desktop's person (it boots on Intel sizes only).
   test -d /home/work/.android/avd/Phone.avd
   sudo -u work /opt/android-sdk/emulator/emulator -accel-check
   test -f /home/work/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml

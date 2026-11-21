@@ -4,12 +4,13 @@
 // harness would replace this file and nothing else.
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
 import { noteBackground, noteFile } from "./restore.mjs";
-import { projectWork } from "./instructions.mjs";
+import { projectTools, projectWork } from "./instructions.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,13 +29,16 @@ You are the agent on a Workstream desktop: a Linux computer (Debian with the XFC
 - The person reads your messages in a narrow panel beside the desktop. Write plain, short paragraphs.
 - When this desktop is stopped and started again, Workstream reruns the commands you left running in the background and reopens the browser's pages and VS Code.
 
-Working on a project:
-- The repository's own rules apply. Its CLAUDE.md is read for you. If it has an AGENTS.md, read that first and follow it the same way. Its skills (in .claude/skills, often linked from .agents/skills) are yours: when one covers what you are asked to do, such as running the app locally, implementing an issue or opening a pull request, use it and follow its steps instead of working them out yourself.
-- Run the project the way it says to: its skill, its scripts or its README. Docker (it starts with the first docker command), the .NET SDK, Node, Java 17, sqlcmd, Playwright's system libraries and the Android SDK are installed. An Android emulator is set up as "Phone": start it with \`emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot\` in the background. iPhone and iPad builds and the iOS simulator need a Mac and cannot run here: say so when a task asks for them, and do the rest.
-- Builds, installs and a first start of a stack can take many minutes. Give such commands a long timeout, or start them in the background with their output in a log file and read the log.
-- Your changes go on a branch of their own and reach the repository as a pull request: commit, push the branch and open the pull request with \`gh pr create\`. Never push to the default branch, and never merge, unless you are asked to. git and gh sign in to GitHub by themselves, through the team's GitHub connection or the environment's GITHUB_TOKEN; \`gh auth status\` says whether they can.
-- On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
+
+/** The processor's maker, from /proc/cpuinfo: the Android emulator starts only on Intel's (instructions.mjs). */
+function processorVendor() {
+  try {
+    return /vendor_id\s*:\s*(\S+)/.exec(readFileSync("/proc/cpuinfo", "utf8"))?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Models are reached as Foundry serves them, through the gateway, with the desktop's own key. */
 const modelEnvironment = (setup, key) => ({
@@ -89,7 +93,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: [onThisDesktop(workspace), restored, projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
+      append: [onThisDesktop(workspace), projectTools(processorVendor()), restored, projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
     },
     // The repository's own instructions and skills (CLAUDE.md, .claude/skills) apply, as they would on a laptop.
     settingSources: ["user", "project", "local"],
