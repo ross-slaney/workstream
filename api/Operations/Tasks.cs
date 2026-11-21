@@ -74,7 +74,7 @@ public static partial class Operations
     /// checks the parent) and on the environment the desktop comes from.
     /// </summary>
     public static async Task<Outcome<WorkTask>> StartTaskAsync(Caller caller, string teamId, StartTask body,
-        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
+        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions options, CancellationToken ct)
     {
         var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamCreateTask, "You can't start tasks in this team.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<WorkTask>();
@@ -90,14 +90,33 @@ public static partial class Operations
         {
             var now = DateTimeOffset.UtcNow;
             var task = WorkTask.Start(body.Id, team, environment, string.IsNullOrWhiteSpace(body.Title) ? WorkTask.TitleFrom(body.Prompt) : body.Title, caller.PrincipalId, now);
+            var prompt = string.IsNullOrWhiteSpace(body.Prompt)
+                ? null
+                : TaskMessage.Write(task, caller.PrincipalId, MessageAuthor.Person, MessageKind.Text, body.Prompt, body.PromptKey ?? Guid.NewGuid().ToString("D"), now);
+
+            // The team's spare, when it has one that is up and fits: the task starts on a desktop that is
+            // already running. Taking it and making the task are one transaction, so a machine is never
+            // between owners where the sweep could see it as nobody's.
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var spare = await TakeSpareAsync(db, teamId, environment, options, now, ct);
             db.Tasks.Add(task);
-            db.DesktopRuns.Add(DesktopRun.Begin(task, now));
-            if (!string.IsNullOrWhiteSpace(body.Prompt))
+            var run = DesktopRun.Begin(task, now, spare is null ? StartSource.Image : StartSource.Spare);
+            db.DesktopRuns.Add(run);
+            if (prompt is not null) db.TaskMessages.Add(prompt);
+            if (spare is not null)
             {
-                db.TaskMessages.Add(TaskMessage.Write(task, caller.PrincipalId, MessageAuthor.Person, MessageKind.Text, body.Prompt, body.PromptKey ?? Guid.NewGuid().ToString("D"), now));
+                task.TakeSpare(spare, now);
+                run.DisplayUp(now);
+                // What makes it this task's desktop: its account works on the task from now on. Its key is the one it has.
+                await DesktopKeys.GrantAsync(db, spare.Id, task, ct);
+                foreach (var spareRun in await db.DesktopRuns.Where(x => x.TaskId == spare.Id && x.EndedAt == null).ToListAsync(ct)) spareRun.End(now);
             }
             await db.SaveChangesAsync(ct);
-            jobs.Enqueue<DesktopJobs>(job => job.StartAsync(task.Id, CancellationToken.None));
+            await transaction.CommitAsync(ct);
+
+            if (spare is null) jobs.Enqueue<DesktopJobs>(job => job.StartAsync(task.Id, CancellationToken.None));
+            // The next task gets the same: another spare for the team, when the limits allow.
+            else jobs.Enqueue<DesktopJobs>(job => job.RefillSpareAsync(teamId, environment.Id, CancellationToken.None));
             return Outcome<WorkTask>.Ok(task);
         }
         catch (DomainRuleException rule)
@@ -209,18 +228,40 @@ public static partial class Operations
         }
     }
 
-    /// <summary>The task this desktop's key is for, when its service account still holds <c>task_desktop</c> on it.</summary>
-    static async Task<WorkTask?> DesktopTaskAsync(Caller desktop, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    /// <summary>
+    /// The task this desktop works on: the one task its service account holds <c>task_desktop</c> on, read as
+    /// its own page of the tasks. A spare holds it on none, and neither does the desktop of a deleted task,
+    /// whose node is inactive.
+    /// </summary>
+    public static async Task<WorkTask?> DesktopTaskAsync(Caller desktop, WorkstreamDbContext db, CancellationToken ct, bool tracked = true)
     {
-        var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == desktop.DesktopTaskId, ct);
-        return task is not null && task.State != DesktopState.Deleting && await fga.Allows(desktop.PrincipalId, Permissions.TaskRunAgent, task.ResourceId) ? task : null;
+        var tasks = tracked ? db.Tasks : db.Tasks.AsNoTracking();
+        var page = await tasks.OrderBy(x => x.Id).ToPageAsync(desktop.PrincipalId, Permissions.TaskRunAgent, 1, null, ct);
+        return page.Data.FirstOrDefault(x => x.State != DesktopState.Deleting);
+    }
+
+    /// <summary>
+    /// A desktop with no task asked the API something: it is a spare waiting to be given one, and now known to
+    /// be up. Written at most every ten seconds, since a waiting spare asks twice a second.
+    /// </summary>
+    static async Task SpareAskedAsync(Caller desktop, WorkstreamDbContext db, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var spare = await db.Spares.SingleOrDefaultAsync(x => x.Id == desktop.DesktopId, ct);
+        if (spare is null || spare.State == SpareState.Ready && spare.SeenAt is { } seen && now - seen < TimeSpan.FromSeconds(10)) return;
+        spare.Seen(now);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>What a desktop sets itself up from: its environment, with the variables readable, and where its agent calls models.</summary>
     public static async Task<Outcome<DesktopSetup>> DesktopSetupAsync(Caller desktop, WorkstreamDbContext db, ISqlOSFgaAuthService fga,
         IDataProtectionProvider protection, DesktopOptions desktops, ModelOptions model, CancellationToken ct)
     {
-        if (await DesktopTaskAsync(desktop, db, fga, ct) is not { } task) return Outcome<DesktopSetup>.NotFound();
+        if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is not { } task)
+        {
+            await SpareAskedAsync(desktop, db, ct);
+            return Outcome<DesktopSetup>.NotFound();
+        }
         var environment = await db.Environments.AsNoTracking().SingleAsync(x => x.Id == task.EnvironmentId, ct);
         return Outcome<DesktopSetup>.Ok(new DesktopSetup(
             task.Id, task.Title, environment.Apps,
@@ -236,7 +277,11 @@ public static partial class Operations
     /// </summary>
     public static async Task<Outcome<DesktopReply>> ExchangeAsync(Caller desktop, DesktopExchange body, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
-        if (await DesktopTaskAsync(desktop, db, fga, ct) is not { } task) return Outcome<DesktopReply>.NotFound();
+        if (await DesktopTaskAsync(desktop, db, ct) is not { } task)
+        {
+            await SpareAskedAsync(desktop, db, ct);
+            return Outcome<DesktopReply>.NotFound();
+        }
         var now = DateTimeOffset.UtcNow;
         var incoming = (body.Messages ?? []).Take(MaxExchangeMessages).ToList();
         if (incoming.Count > 0)
