@@ -7,6 +7,8 @@ RUN dotnet restore api/Workstream.Api.csproj
 COPY api/ api/
 # The app catalog (desktop/apps.json) is embedded in the API: one list for the API, the image and the panel.
 COPY desktop/apps.json desktop/apps.json
+# So are the emails' words (client/locales/emails), every word a key like the app's.
+COPY client/locales/emails/ client/locales/emails/
 RUN dotnet publish api/Workstream.Api.csproj -c Release -o /out --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

@@ -110,6 +110,22 @@ export function TeamPage(p: TeamScreenProps) {
         <p className="text-[13px] text-muted-foreground">{t("team.adminOnly")}</p>
       )}
 
+      <Section title={t("team.email.title")}>
+        <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
+          <input
+            type="checkbox"
+            checked={p.taskEmails ?? false}
+            disabled={p.taskEmails === null}
+            onChange={(event) => p.onTaskEmails(event.target.checked)}
+            className="mt-0.5 size-4 shrink-0 accent-[rgb(var(--primary))]"
+          />
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="text-sm text-foreground">{t("team.email.taskEmails")}</span>
+            <span className="text-[13px] text-muted-foreground">{t("team.email.taskEmailsHint")}</span>
+          </span>
+        </label>
+      </Section>
+
       {p.invited ? (
         <Dialog title={t("team.invite.linkTitle")} onClose={p.onDismissInvited} footer={<Button label={common("actions.close")} tone="primary" onClick={p.onDismissInvited} />}>
           <p className="text-sm text-muted-foreground">{t(p.invited.emailed ? "team.invite.emailedBody" : "team.invite.linkBody", { email: p.invited.email })}</p>
