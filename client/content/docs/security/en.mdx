@@ -1,6 +1,6 @@
 ---
 title: "Security"
-description: "A desktop has no public address, its screen reaches only signed-in people who may see the task, and its key is never written to its disk."
+description: "A desktop has no public address, its screen reaches only signed-in people who may see the task, its key is never written to its disk, and it reaches GitHub as the person who started the task."
 order: 9
 updated: 2026-11-21
 ---
@@ -29,13 +29,13 @@ Your browser never connects to a desktop. It opens a connection to the Workstrea
 
 ## What a desktop holds
 
-A desktop holds one credential, its own key.
+A desktop holds one credential of its own, its key.
 
-- The key reaches that desktop's own task and nothing else: not another task, not another team, not a person's account.
+- The key reaches that desktop's own task and nothing else: not another task, not another team, not a person's Workstream account.
 - The key is given to the machine when it is made and is never written to its disk. A copy of a desktop's disk carries nobody's key.
 - The key stops working when the task is deleted.
 - A desktop never holds a model key. Its model calls go through Workstream, which adds the key on its side. A leaked desktop key is worth at most what is left of one team's monthly allowance.
-- A desktop has a GitHub token only when its environment's variables hold one. See [GitHub](/docs/github).
+- With its key, a desktop can ask for one more thing: the GitHub token of the person who started its task, so `git` and `gh` push and open pull requests as them. It reaches what that person's GitHub account reaches. It is asked for each time it is needed and never written to the desktop's disk, but it is in the desktop's memory while it is used, so anyone who can use the desktop, or tell its agent what to do, could read it during the task. A desktop whose environment's variables hold a `GITHUB_TOKEN` uses that instead. See [GitHub](/docs/github).
 
 ## Secrets you put on a desktop
 
@@ -45,13 +45,13 @@ The same is true of anything you type or sign in to on a desktop. It stays on th
 
 ## Signing in
 
-People sign in with a code sent to their email address, or with their GitHub account. The [command line](/docs/command-line) signs in through the browser and gets access that can read and start tasks and nothing else, so what a laptop keeps cannot stop or delete a task or open a desktop.
+People sign in with a code sent to their email address, or with their GitHub account, which gives Workstream GitHub's `repo` scope (see [GitHub](/docs/github#what-workstream-can-do-with-your-github-account)). The [command line](/docs/command-line) signs in through the browser and gets access that can read and start tasks and nothing else, so what a laptop keeps cannot stop or delete a task or open a desktop.
 
 ## Where things are kept
 
 | Kept in | What |
 | --- | --- |
-| Workstream's database | People, teams, invitations and sessions; environments, tasks and conversations; usage. A GitHub token is kept only where someone put one in an environment's variables. |
+| Workstream's database | People, teams, invitations and sessions; the GitHub token of each person who signed in with GitHub, encrypted; environments, tasks and conversations; usage. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile and the agent's session. It goes when the task is deleted. |
 | A saved setup | An environment's repository and whatever its setup script installed, and nothing of any task. It goes when the environment is deleted. |
 | Your browser | Your sign-in, and which team you had open last. |

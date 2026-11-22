@@ -1,22 +1,42 @@
 ---
 title: "GitHub"
-description: "Sign in with your GitHub account, and how a task's desktop reaches your repositories."
+description: "Sign in with GitHub, and a task's desktop pushes branches and opens pull requests as you."
 order: 5
 updated: 2026-11-21
 ---
 
 ## Sign in with GitHub
 
-You can sign in to Workstream with your GitHub account instead of a code sent by email. If the address on your GitHub account is one you have already signed in with, you are the same person in Workstream, with the same teams and tasks.
+Press Continue with GitHub on the sign-in page. The first time, GitHub asks you to let Workstream read your profile and email addresses and work with your repositories. After that it is one click.
 
-Signing in with GitHub says who you are. It does not give Workstream or a desktop access to your repositories.
+If the primary address on your GitHub account is one you have already signed in with, you are the same person in Workstream, with the same teams and tasks. So if you have been signing in by email, sign out and sign in again with GitHub to connect your GitHub account. A GitHub account with another address becomes another person in Workstream.
 
-## Giving a desktop access to a repository
+## What Workstream can do with your GitHub account
 
-Add a `GITHUB_TOKEN` (or `GH_TOKEN`) variable to the environment, holding a GitHub token that can read and write the repository. Every desktop made from that environment uses it for `git` and for `gh`. A fine-grained personal access token limited to the one repository, with read and write access to its contents and pull requests, is enough.
+Signing in with GitHub gives Workstream the scopes `read:user`, `user:email` and `repo`. The `repo` scope reaches every repository your GitHub account can reach, public and private, with your permissions on each. Workstream uses it for three things:
 
-Commits, branches and pull requests from the desktop are in the name of the account the token belongs to. See [Environments](/docs/environments#variables) for how variables are kept.
+- To list your repositories and their branches when you [set up an environment](/docs/environments#repository-and-branch), and to read a repository's files to suggest a setup.
+- To save an environment to a repository as [`workstream.yml`](/docs/environments#workstream-yml), when you ask it to.
+- To let the desktop of a task you started push and open pull requests as you.
+
+GitHub keeps the list of apps you have allowed under Settings, Applications, Authorized OAuth Apps. Revoking Workstream there stops all three. Signing in with GitHub again allows them again.
+
+## A task's desktop works as the person who started it
+
+When a task's desktop needs GitHub, `git` and the GitHub CLI (`gh`) on it ask Workstream for a token, each time. Workstream gives them the token of the person who started the task, and no one else's. So:
+
+- The desktop can clone, pull and push every repository that person can, not only the environment's.
+- Branches it pushes and pull requests it opens are in that person's name on GitHub.
+- Someone else on the team who starts a task from the same environment gets a desktop that works as them.
+
+The token is not written to the desktop's disk. It is in the desktop's memory while `git` or `gh` uses it, so the agent, and anyone who can use the desktop, could read it during the task. That includes people the task is [shared](/docs/sharing) with to write to its agent or to use its desktop. Share a task only with people you would let push in your name.
+
+If the person who started a task did not sign in with GitHub, the desktop has no token. The task's screen says so, and `git` and `gh` print a line saying who needs to sign in with GitHub. Once they have, the next push works.
+
+## Using another token
+
+An environment can hold its own token instead, as a `GITHUB_TOKEN` (or `GH_TOKEN`) variable. Every desktop made from that environment then uses that token for `git` and `gh`, whoever started the task, and does not ask for anyone's. A fine-grained personal access token limited to one repository, with read and write access to its contents and pull requests, is enough. Commits and pull requests are then in the name of the token's account. See [Environments](/docs/environments#variables) for how variables are kept.
 
 ## How the agent finishes project work
 
-The agent is told to do project work on a branch of its own and to deliver it as a pull request, never on the default branch. On a desktop that has a token (see below), `git` and the GitHub CLI (`gh`) are signed in with it, so `git push` and `gh pr create` work in the terminal for you as they do for the agent.
+The agent is told to do project work on a branch of its own and to deliver it as a pull request, never on the default branch. `git push` and `gh pr create` work in the desktop's terminal for you as they do for the agent. Commits are made by "Workstream agent" unless you set another name in git on the desktop or in the repository.

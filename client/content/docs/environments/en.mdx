@@ -1,6 +1,6 @@
 ---
 title: "Environments"
-description: "An environment is what a task's desktop starts with: a repository and branch, a setup script, variables, apps and a size. A saved setup does the setup once."
+description: "An environment is what a task's desktop starts with: a repository and branch, a setup script, variables, apps and a size. It can be suggested from the repository, or kept in it as workstream.yml."
 order: 4
 updated: 2026-11-21
 ---
@@ -21,11 +21,59 @@ A new team has one environment, Standard desktop, with the default apps, the Sta
 | Variables | Names and values set in every shell on the desktop. |
 | Instructions | Text added to what the agent is told on every desktop made from the environment. |
 
-The last four are under Advanced when you edit an environment. They are for a project that needs its code, tools and keys in place before the agent starts.
+The setup script, variables and instructions are under Advanced when you edit an environment.
 
 ## Repository and branch
 
-Give the repository's address and, if you want one other than the default, a branch. The repository is cloned when the desktop is made, and the agent starts in its folder. For a private repository on GitHub, see [GitHub](/docs/github).
+If you signed in [with GitHub](/docs/github), the form lists your repositories, the most recently pushed first. Type part of a name to find one, pick it, then pick a branch; its default branch is picked for you. For a repository that is not on GitHub, or one not in the list, press Type an address instead and give its https address.
+
+The repository is cloned when the desktop is made, and the agent starts in its folder.
+
+When you pick a repository, Workstream looks for `workstream.yml` at its root on that branch:
+
+- If it is there, the form is filled from it and says so.
+- If it is not, Workstream suggests a setup (below) and fills the form with that.
+
+Either way, change anything before you save.
+
+## A suggested setup
+
+Workstream reads the repository's files through GitHub, as you: its list of files, and the ones that say how it is built, such as `package.json` and its lockfile, `Dockerfile` and Compose files, the README, `.nvmrc` and `.tool-versions`, `global.json`, the CI workflows, a `Makefile` and a dev container. It sends them to the AI model with a description of what a desktop already has, and the model suggests a setup script, a size, the apps, the names of the variables the project needs, and short instructions for the agent, with one line on what the suggestion is based on.
+
+It takes ten to thirty seconds, and the model's use counts against your team's monthly allowance, like an agent's (see [Usage and limits](/docs/usage-and-limits)). Press Suggest again for another. A suggestion never has variable values: fill those in yourself.
+
+## workstream.yml
+
+An environment can live in its repository, as a file named `workstream.yml` at the repository's root:
+
+```yaml
+size: large                 # small | standard | large
+setup: |                    # the setup script
+  npm ci
+  npx playwright install --with-deps
+apps: [chrome, vscode, terminal]
+variables: [DATABASE_URL]   # names only; the values are set in Workstream
+instructions: |             # extra instructions for the agent
+  Run npm test before you say you are done.
+```
+
+Every setting is optional. One the file leaves out is what a new environment has: the Standard size, the default apps, and no setup script, variables or instructions. The apps are `chrome`, `vscode`, `terminal`, `files`, `writer`, `calc` and `impress`.
+
+The file is read strictly. A setting Workstream does not know, a size or app it does not have, a variable name a shell cannot read, or YAML that does not parse is named in the form with its line, and nothing is filled from the file until it is fixed.
+
+### Workstream reads the file when each task starts
+
+An environment filled from `workstream.yml` follows it. Each time someone starts a task from it, Workstream reads the file again from GitHub, as the person starting the task, and uses what it says now for the size, apps, setup script and instructions. So to change the environment, change the file. If GitHub cannot be reached in a few seconds, the file is gone or has a mistake, or the person starting the task did not sign in with GitHub, the task starts with what the environment last held.
+
+The variables' names in the file are only for filling the form. Their values, and which variables the environment has, stay as they are set in Workstream.
+
+If you change a setting in the form that the file decides, the environment stops following the file, and the form says so. Save it to the repository again to make the two agree.
+
+### Saving an environment to its repository
+
+After you save an environment whose repository is on GitHub and does not follow a `workstream.yml`, the form offers Save as workstream.yml in the repository. Workstream writes the file on the environment's branch as one commit in your name. Variable names go in the file; their values never do.
+
+If the branch takes changes only through pull requests, Workstream puts the file on a new branch and opens a pull request into the environment's branch instead, and links to it. Once it is merged, tasks read the file. If you cannot write to the repository, the form says so.
 
 ## Setup script
 
@@ -62,11 +110,12 @@ The environment's page shows where its saved setup stands:
 | Prepared, out of date | The setup changed, or desktops were updated, since it was prepared. Each task runs the setup itself until it is prepared again. |
 | Preparing failed | The setup script did not finish. Tasks still work: each one runs the setup itself. |
 
-Workstream prepares an environment when it is added with a setup, when its repository, branch, setup script, variables or apps change, and when a task starts and the saved setup is more than a week old. In that last case the task uses the old one and a new one is made behind it. You can also press Prepare again on the environment's page.
+Workstream prepares an environment when it is added with a setup, when its repository, branch, setup script, variables, apps or size change (also when a task's start finds `workstream.yml` changed them), and when a task starts and the saved setup is more than a week old. In that last case the task uses the old one and a new one is made behind it. You can also press Prepare again on the environment's page.
 
 What to know about a saved setup:
 
 - It is saved only when the setup script exits with 0. A preparation has 45 minutes at most.
+- The desktop that prepares it reaches GitHub as the person who last saved the environment.
 - Before the disk is saved, the variables, the logs and the browser's profile are removed from it. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
 - An environment keeps one saved setup. One that no task has started from for 30 days is deleted, and the next task prepares it again.
 - A saved setup counts as storage. See [Usage and limits](/docs/usage-and-limits).
