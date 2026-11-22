@@ -28,7 +28,7 @@ export default function FrontDoor() {
       <Head>
         <title>{t("meta.title")}</title>
       </Head>
-      <LandingPage signInHref="/sign-in" startHref="/sign-in?view=signup" />
+      <LandingPage signInHref="/sign-in" startHref="/sign-in?view=signup" docsHref="/docs" />
     </>
   );
 }

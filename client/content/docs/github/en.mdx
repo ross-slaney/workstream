@@ -1,0 +1,35 @@
+---
+title: "GitHub"
+description: "Sign in with GitHub and a task's desktop clones, pushes and opens pull requests as you. No token to paste."
+order: 5
+updated: 2026-11-21
+---
+
+{/* PENDING GitHub sign-in: the first two sections are written from the plan while sign in with GitHub is being built. Check every sentence in them against what ships. */}
+
+## Sign in with GitHub
+
+You can sign in to Workstream with your GitHub account. When you do, the desktops of the tasks you start work on GitHub as you: they clone the repositories your account can reach, push branches, and open pull requests in your name.
+
+There is no token to paste. You do not create a personal access token or put one in an environment's variables.
+
+## Whose name the work is in
+
+A desktop clones and pushes as the person who started the task. Commits, branches and pull requests from that task are that person's on GitHub, and the desktop can reach the repositories that person can.
+
+{/* PENDING GitHub sign-in: confirm what a teammate who writes to someone else's task can have pushed, and whether a task started by someone who signed in by email falls back to the team's connection below. */}
+Someone else on the team who writes to the agent on your task has the work pushed in your name, because the task is yours.
+
+## How the agent finishes project work
+
+The agent is told to do project work on a branch of its own and to deliver it as a pull request, never on the default branch. On the desktop `git` and the GitHub CLI (`gh`) are already signed in, so `git push` and `gh pr create` work in the terminal for you as they do for the agent.
+
+## A team's GitHub connection
+
+A team's administrator can also connect the whole team to GitHub, on the Team page, by installing Workstream's GitHub App on a GitHub account or organization and choosing which repositories it reaches. Everyone on the team sees the connection and the repositories it reaches, and can pick an environment's repository from them.
+
+Through the connection a desktop gets a token for its own environment's repository alone. The token can read and write the repository's contents and its pull requests, lasts one hour, and is not stored anywhere: the desktop asks for a new one whenever `git` or `gh` needs it. Disconnecting stops the team's desktops getting tokens. The app stays installed on GitHub until someone removes it there.
+
+## A token of your own
+
+If an environment's variables already hold a `GITHUB_TOKEN` or `GH_TOKEN`, the desktop uses that token as it is and asks for no other.

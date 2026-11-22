@@ -11,7 +11,7 @@ Making a machine takes Azure from fifteen seconds to a minute. While someone is 
 | Folder | What it is |
 | --- | --- |
 | `api/` | The API: .NET 10 with SqlOS for sign-in and authorization. One process is the REST API, the relay that carries a desktop's display to the people watching, the gateway every agent's model calls go through, and the background jobs that make and remove desktops. |
-| `client/` | The web app: Expo and expo-router, rendered on the server for public pages and in the browser for signed-in ones. The landing page, sign-in, the workspace and the system administrator's page. |
+| `client/` | The web app: Expo and expo-router, rendered on the server for public pages and in the browser for signed-in ones. The landing page, the docs (`/docs`, written in `client/content/docs`), sign-in, the workspace and the system administrator's page. |
 | `cli/` | The command line: start and follow tasks from a terminal, as yourself, after signing in through the browser. Node 22 and nothing else. |
 | `desktop/` | The desktop: the scripts that make the machine image, and the agent that runs on it (the Claude Agent SDK with its own window on the desktop). |
 | `apphost/` | The .NET Aspire AppHost that runs the whole product on a laptop. |

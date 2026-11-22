@@ -1,0 +1,60 @@
+---
+title: "Running, paused, archived, deleted"
+description: "A desktop runs while it is in use, pauses when it is idle, is archived after a week paused, and is deleted only when a person deletes the task."
+order: 3
+updated: 2026-11-21
+---
+
+{/* PENDING pause/resume/archive: this whole page is written from the approved design while the feature is being built. Check the idle time, the archive time, the resume times and where the team settings are against what ships. */}
+
+<Flow>
+  <Stage name="Running">Someone is using it, or the agent is working.</Stage>
+  <Stage name="Paused">Idle for 30 minutes. The machine is released and the disk is kept.</Stage>
+  <Stage name="Archived">Paused for 7 days. The disk is kept as a snapshot.</Stage>
+</Flow>
+
+Workstream moves a desktop from one state to the next by itself. Nothing is deleted unless a person deletes the task.
+
+| State | The machine | The disk | To resume |
+| --- | --- | --- | --- |
+| Running | On | Attached to the machine | |
+| Paused | Released | Kept | About 30 seconds |
+| Archived | Removed | Kept as a snapshot | Slightly longer than from paused |
+| Deleted | Removed | Deleted | Cannot be resumed |
+
+## Running
+
+A desktop is running while someone is using it or the agent is working. Use means one of three things:
+
+- the agent is working,
+- someone sends a message in the conversation,
+- someone uses the mouse or keyboard on the desktop.
+
+An open browser tab alone is not use. A desktop you are only looking at, with the agent idle, still pauses when the idle time is up.
+
+## Paused
+
+A desktop that has had no use for the team's idle time is paused. The idle time is 30 minutes unless the team has changed it; it is a team setting.
+
+Pausing releases the machine and keeps the disk. To resume, click the desktop or send a message. The desktop is back in about 30 seconds, and a message you sent is read by the agent as soon as it is.
+
+The files and the conversation are kept. When the desktop resumes, what was open is reopened: the long-running commands the agent had started run again in a terminal window, VS Code opens the same files, and the browser opens the same pages.
+
+{/* PENDING hibernation test: the next sentence is the one to change. If a paused desktop resumes with its programs still running, replace it with a sentence saying programs continue where they were. */}
+Programs do not keep what they held in memory, so a command starts again from the beginning instead of continuing where it was.
+
+## Archived
+
+A desktop that has stayed paused for the team's archive time is archived. The archive time is 7 days unless the team has changed it; it is also a team setting.
+
+Archiving saves the disk as a snapshot and removes the machine. The files and the conversation are still kept. Resuming works the same way, by clicking the desktop or sending a message. It takes slightly longer than from paused, and the desktop starts as a fresh boot from the saved disk.
+
+## Deleted
+
+A task is deleted only when a person deletes it. Workstream never deletes a task for being idle.
+
+Deleting a task deletes its desktop, everything on its disk and the conversation, and it cannot be undone. Work the agent pushed to GitHub is on GitHub and stays there, so push anything you want to keep before you delete the task.
+
+## What each state uses
+
+A running desktop counts toward the team's limit of desktops running at once and adds desktop time. A paused or archived desktop does neither, but its disk or snapshot counts as storage. Resuming needs a free place under the limit of running desktops. See [Usage and limits](/docs/usage-and-limits).
