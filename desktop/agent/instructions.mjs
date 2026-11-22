@@ -13,7 +13,7 @@ The project is the repository ${repository.url}${repository.branch ? `, on its b
 - Make a new branch for the work before you commit, named for what it does.
 - Commit there, push the branch, and open a pull request with \`gh pr create\`, saying what changed and why. Give the person its address when you finish.
 - Never push to the default branch or to the branch you started from, and never force-push a branch you did not make.
-- git and gh sign in to GitHub by themselves with a token for this repository. If pushing is refused, say so and leave the work committed on its branch; do not look for another way in.
+- git and gh sign in to GitHub by themselves, as the person who started this task. If they cannot, they print a line starting with "Workstream:" that says why: tell the person that line. If pushing is refused, say so and leave the work committed on its branch; do not look for another way in.
 `.trim()
     : "";
 

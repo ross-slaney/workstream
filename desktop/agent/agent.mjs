@@ -181,8 +181,8 @@ const shims = path.join(root, "agent", "shims");
 
 /**
  * The environment's variables, for every shell on the desktop, and git and gh set up for GitHub: git asks
- * github.mjs for a token whenever it needs one, and gh asks it through its wrapper. The token is for the
- * environment's repository, from the team's GitHub connection, or the GITHUB_TOKEN the environment was given.
+ * github.mjs for a token whenever it needs one, and gh asks it through its wrapper. The token is the GitHub
+ * token of the person who started the task, or the GITHUB_TOKEN the environment was given.
  */
 async function writeVariables(variables) {
   const lines = [`export PATH=${shellQuote(shims)}:"$PATH"`, ...Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`)];
