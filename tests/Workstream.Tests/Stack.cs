@@ -19,7 +19,8 @@ namespace Workstream.Tests;
 /// own, without the api and web resources. The API runs here, in the test process, with the same
 /// <c>AddWorkstreamApi</c>/<c>MapWorkstreamApi</c> as Program.cs, so coverage sees it. Three things are played
 /// instead of real: the desktops (<see cref="FakeDesktops"/>), the model (<see cref="FakeModel"/>), the mail
-/// provider (<see cref="TestMail"/>) and GitHub (<see cref="FakeGitHub"/>). No job
+/// provider (<see cref="TestMail"/>) and GitHub, both as Workstream's GitHub App meets it (<see cref="FakeGitHub"/>)
+/// and as SqlOS meets it when someone signs in with GitHub (<see cref="FakeGitHubSignIn"/>). No job
 /// server runs: a test calls the job it wants (<see cref="Jobs"/>). Tests isolate themselves by signing up
 /// new people, each with a team of their own.
 /// </summary>
@@ -40,6 +41,7 @@ public static class Stack
     public static readonly FakeModel Model = new();
     public static readonly TestMail Mail = new();
     public static readonly FakeGitHub GitHub = new();
+    public static readonly FakeGitHubSignIn GitHubSignIn = new();
 
     static DistributedApplication? aspire;
     static WebApplication? api;
@@ -134,6 +136,9 @@ public static class Stack
         builder.Configuration["Workstream:GitHub:WebhookSecret"] = FakeGitHub.WebhookSecret;
         builder.Configuration["Workstream:GitHub:ApiUrl"] = FakeGitHub.Api;
         builder.Configuration["Workstream:GitHub:WebUrl"] = FakeGitHub.Web;
+        // Sign in with GitHub: GitHub is played in this process, under SqlOS's own client for providers.
+        builder.Configuration[WorkstreamApp.GitHubSignInClientId] = FakeGitHubSignIn.ClientId;
+        builder.Configuration[WorkstreamApp.GitHubSignInClientSecret] = FakeGitHubSignIn.ClientSecret;
         // Every journey invites from this one address; SqlOS's hourly caps are for the public.
         builder.Configuration["SqlOS:Invitations:MaxInvitationsPerIpPerHour"] = "100000";
         builder.AddWorkstreamApi();
@@ -142,6 +147,7 @@ public static class Stack
         // Email as if it were set up: SqlOS renders every message from its stored template and hands it here.
         builder.Services.AddSingleton<ISqlOSEmailSender>(Mail);
         builder.Services.AddHttpClient(GitHubApp.ClientName).ConfigurePrimaryHttpMessageHandler(() => GitHub);
+        builder.Services.AddHttpClient(nameof(SqlOS.AuthServer.Services.SqlOSOidcAuthService)).ConfigurePrimaryHttpMessageHandler(() => GitHubSignIn);
         var app = builder.Build();
         app.MapWorkstreamApi();
         return app;

@@ -137,6 +137,23 @@ public static class CommandLine
             Assert.AreEqual("device-approved", approved["viewModel"]?["view"]?.GetValue<string>(), approved.ToJsonString());
         }
 
+        /// <summary>
+        /// Back from GitHub (GitHubSignInJourneys.cs): the browser returns to SqlOS's callback with GitHub's code
+        /// and follows SqlOS's own redirects until it is handed to the web app. Answers the page it lands on.
+        /// </summary>
+        public async Task<Uri> FollowAsync(Uri authorize, string code)
+        {
+            var asked = QueryHelpers.ParseQuery(authorize.Query);
+            var next = new Uri(QueryHelpers.AddQueryString(asked["redirect_uri"].ToString(), new Dictionary<string, string?> { ["state"] = asked["state"].ToString(), ["code"] = code }));
+            for (var hop = 0; hop < 5 && next.GetLeftPart(UriPartial.Authority) == Stack.Origin.GetLeftPart(UriPartial.Authority); hop++)
+            {
+                using var response = await http.GetAsync(next);
+                Assert.AreEqual(HttpStatusCode.Redirect, response.StatusCode, $"{next.AbsolutePath} answered {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+                next = new Uri(Stack.Origin, response.Headers.Location!);
+            }
+            return next;
+        }
+
         public async Task DenyAsync()
         {
             var denied = await StepAsync("device/deny", new JsonObject { ["requestId"] = RequestId });

@@ -45,6 +45,11 @@ inputs:
   github-webhook-secret:
     description: Optional. The app's webhook secret; without it the webhook is not taken.
     default: ''
+  github-oauth-client-id:
+    description: Sign in with GitHub (infra/README.md, "Sign in with GitHub"). The Client ID of the GitHub OAuth client people sign in with; without it and its secret the sign-in page shows no GitHub button.
+    default: ''
+  github-oauth-client-secret:
+    default: ''
 outputs:
   origin:
     description: Where the web app answers.
@@ -61,6 +66,8 @@ runs:
         ADMINISTRATOR_EMAIL: ${{ inputs.administrator-email }}
         MODEL_ENDPOINT: ${{ inputs.model-endpoint }}
         GH_APP_ID: ${{ inputs.github-app-id }}
+        GH_OAUTH_CLIENT_ID: ${{ inputs.github-oauth-client-id }}
+        GH_OAUTH_CLIENT_SECRET: ${{ inputs.github-oauth-client-secret }}
       run: |
         sub=$(az account show --query id -o tsv)
         oid=$(az account get-access-token --query accessToken -o tsv | cut -d. -f2 | tr '_-' '/+' | { b=$(cat); while [ $(( ${#b} % 4 )) -ne 0 ]; do b="$b="; done; echo "$b"; } | base64 -d | jq -r .oid)
@@ -71,6 +78,11 @@ runs:
         [[ "$ADMINISTRATOR_EMAIL" == *@* ]] || echo "::warning::No administrator address is set: nobody is the system administrator, so nobody reaches /admin."
         [ -n "$MODEL_ENDPOINT" ] || echo "::warning::No model endpoint is set: agents will say models are not set up (infra/README.md, \"Models\")."
         [ -n "$GH_APP_ID" ] || echo "::notice::No GitHub App is set: teams cannot connect GitHub (infra/README.md, \"GitHub\")."
+        if [ -z "$GH_OAUTH_CLIENT_ID" ] && [ -z "$GH_OAUTH_CLIENT_SECRET" ]; then
+          echo "::notice::No GitHub OAuth client is set: people sign in by emailed code only (infra/README.md, \"Sign in with GitHub\")."
+        elif [ -z "$GH_OAUTH_CLIENT_ID" ] || [ -z "$GH_OAUTH_CLIENT_SECRET" ]; then
+          echo "::warning::Only one of GH_OAUTH_CLIENT_ID and GH_OAUTH_CLIENT_SECRET is set: sign in with GitHub stays off until both are (infra/README.md, \"Sign in with GitHub\")."
+        fi
 
     # The images need the registry, and the web image needs the API's address, which is under the container
     # apps environment's own domain. Both come from foundation.bicep, deployed here by itself on a fresh
@@ -150,6 +162,8 @@ runs:
         GH_APP_CLIENT_SECRET: ${{ inputs.github-client-secret }}
         GH_APP_PRIVATE_KEY: ${{ inputs.github-private-key }}
         GH_APP_WEBHOOK_SECRET: ${{ inputs.github-webhook-secret }}
+        GH_OAUTH_CLIENT_ID: ${{ inputs.github-oauth-client-id }}
+        GH_OAUTH_CLIENT_SECRET: ${{ inputs.github-oauth-client-secret }}
       run: |
         # The private key goes on as one line, its PEM in base64, which the API reads either way.
         GH_APP_PRIVATE_KEY_B64=""
@@ -162,7 +176,8 @@ runs:
                administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
                modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" desktopImageVersion="$DESKTOP_IMAGE_VERSION" \
                githubAppId="$GH_APP_ID" githubAppSlug="$GH_APP_SLUG" githubClientId="$GH_APP_CLIENT_ID" githubClientSecret="$GH_APP_CLIENT_SECRET" \
-               githubPrivateKey="$GH_APP_PRIVATE_KEY_B64" githubWebhookSecret="$GH_APP_WEBHOOK_SECRET" && break
+               githubPrivateKey="$GH_APP_PRIVATE_KEY_B64" githubWebhookSecret="$GH_APP_WEBHOOK_SECRET" \
+               gitHubSignInClientId="$GH_OAUTH_CLIENT_ID" gitHubSignInClientSecret="$GH_OAUTH_CLIENT_SECRET" && break
           [ "$attempt" = 1 ] || exit 1
           echo "::warning::The deployment failed once; deploying again."
         done

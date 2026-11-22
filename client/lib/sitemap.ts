@@ -24,6 +24,7 @@ export function robotsTxt(origin: string): string {
   return [
     "User-agent: *",
     "Disallow: /sign-in",
+    "Disallow: /auth/",
     "Disallow: /invite",
     "Disallow: /share",
     "Disallow: /device",

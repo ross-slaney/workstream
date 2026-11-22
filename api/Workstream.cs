@@ -25,6 +25,9 @@ public sealed class WorkstreamApp
     public const string CliClientId = "workstream-cli";
     /// <summary>Where the web app lands after a provider redirect, under <see cref="WebOrigin"/>.</summary>
     public const string WebRedirectPath = "/auth/callback";
+    /// <summary>The GitHub OAuth client people sign in with: its id and secret, set together or not at all.</summary>
+    public const string GitHubSignInClientId = "SqlOS:Oidc:GitHub:ClientId";
+    public const string GitHubSignInClientSecret = "SqlOS:Oidc:GitHub:ClientSecret";
     /// <summary>The web app's sign-in (client/app/sign-in.tsx), under <see cref="WebOrigin"/>.</summary>
     public const string SignInPath = "/sign-in";
     /// <summary>Where an invitation is accepted (client/app/invite.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
@@ -132,8 +135,41 @@ public sealed class WorkstreamApp
         auth.SeedCliClient(CliClientId, "Workstream command line", Resource, [.. CliScopes]);
 
     /// <summary>
+    /// Where GitHub sends a person back after they sign in there: SqlOS's own address for every provider,
+    /// under this API. It is the "Authorization callback URL" of the GitHub OAuth client (infra/README.md,
+    /// "Sign in with GitHub").
+    /// </summary>
+    public string ProviderCallback => $"{Issuer}/oidc/callback";
+
+    /// <summary>
+    /// Sign in with GitHub beside the emailed code, where a GitHub OAuth client is configured
+    /// (<see cref="GitHubSignInClientId"/> and <see cref="GitHubSignInClientSecret"/>). SqlOS owns the whole
+    /// of it: the connection, the round trip to GitHub, and who the person is. It reads their GitHub profile
+    /// and their verified primary email (the scopes <c>read:user</c> and <c>user:email</c>); someone whose
+    /// address already has an account is that person, and someone new gets what a new person gets
+    /// (IdentityProvisioning.cs). Without the two settings nothing is seeded, the sign-in page lists no
+    /// provider and shows no button. Answers whether it is on.
+    /// </summary>
+    public bool SeedGitHubSignIn(SqlOSAuthServerOptions auth, IConfiguration configuration)
+    {
+        var clientId = configuration[GitHubSignInClientId]?.Trim();
+        var clientSecret = configuration[GitHubSignInClientSecret]?.Trim();
+        if (string.IsNullOrEmpty(clientId) && string.IsNullOrEmpty(clientSecret)) return false;
+        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+        {
+            throw new InvalidOperationException($"Set both {GitHubSignInClientId} and {GitHubSignInClientSecret}, or leave both unset.");
+        }
+        auth.SeedGitHubConnection(clientId, clientSecret, ProviderCallback);
+        return true;
+    }
+
+    /// <summary>
     /// Where SqlOS sends a browser that reaches one of its hosted views: the web app's invite page for an
     /// invitation email's link, its device page for the command line's sign-in, its sign-in for anything else.
+    /// Someone who comes back from GitHub without being signed in (GitHub or SqlOS refused, or SqlOS has a
+    /// question left) lands on the sign-in page with the request they began; the page says that signing in with
+    /// GitHub did not work and shows the form again (client/app/sign-in.tsx). SqlOS's own words for the
+    /// refusal and its tokens stay out of the address.
     /// </summary>
     public string SignInUiUrl(SqlOSHeadlessUiRouteContext ui)
     {
@@ -145,6 +181,10 @@ public sealed class WorkstreamApp
         {
             var request = string.IsNullOrEmpty(ui.RequestId) ? "" : $"request={Uri.EscapeDataString(ui.RequestId)}&";
             return $"{WebOrigin}{DevicePath}?{request}view={Uri.EscapeDataString(ui.View)}";
+        }
+        if (!string.IsNullOrEmpty(ui.RequestId) && (!string.IsNullOrEmpty(ui.Error) || !string.IsNullOrEmpty(ui.PendingToken)))
+        {
+            return $"{WebOrigin}{SignInPath}?request={Uri.EscapeDataString(ui.RequestId)}&view={Uri.EscapeDataString(ui.View)}";
         }
         return $"{WebOrigin}{SignInPath}";
     }
@@ -261,6 +301,7 @@ public static class WorkstreamHosting
                 });
                 options.AuthServer.SeedClient(app.ConfigureAppClient);
                 app.SeedCliClient(options.AuthServer);
+                app.SeedGitHubSignIn(options.AuthServer, builder.Configuration);
             });
 
         // After SqlOS's own bootstrap: the system administrators and the desktop operator.

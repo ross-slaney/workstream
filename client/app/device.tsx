@@ -19,19 +19,21 @@ export function generateMetadata(): Metadata {
 
 export default function DeviceRoute() {
   const t = useT("auth");
-  const params = useLocalSearchParams<{ request?: string }>();
+  const params = useLocalSearchParams<{ request?: string; failed?: string }>();
   const request = (Array.isArray(params.request) ? params.request[0] : params.request) || undefined;
+  // Back from GitHub without being signed in (app/sign-in.tsx sends the browser here): the form says so.
+  const providerFailed = params.failed === "provider";
   const status = useSessionStatus();
   return (
     <>
       <Head>
         <title>{t("meta.deviceTitle")}</title>
       </Head>
-      {status === "loading" ? <div className="h-full bg-canvas" /> : <Approve request={request} />}
+      {status === "loading" ? <div className="h-full bg-canvas" /> : <Approve request={request} providerFailed={providerFailed} />}
     </>
   );
 }
 
-function Approve({ request }: { request: string | undefined }) {
-  return <DeviceScreen {...useDeviceSignIn(request)} />;
+function Approve({ request, providerFailed }: { request: string | undefined; providerFailed: boolean }) {
+  return <DeviceScreen {...useDeviceSignIn(request, providerFailed)} />;
 }
