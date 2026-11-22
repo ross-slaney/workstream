@@ -27,16 +27,18 @@ prepare() {
   have=$(stat -c %s "$file" 2>/dev/null || echo 0)
   # A machine given a larger size since has more memory to write.
   if [ "$have" -lt "$memory" ]; then
-    swapoff "$file" 2>/dev/null
     rm -f "$file"
     fallocate -l "$memory" "$file" || { rm -f "$file"; echo "No room on the disk for $memory bytes of memory. This desktop cannot hibernate."; exit 0; }
     chmod 600 "$file"
-    mkswap -q "$file"
   fi
-  # Where the file begins on the disk: what the next boot is told, so it finds the memory and resumes.
+  # Written again at every boot: a boot that did not resume (a copy of a hibernated disk started as another
+  # machine, image/resume-here.sh) leaves the other machine's memory in the file, marked as waiting to be read.
+  mkswap -q -f "$file" > /dev/null
+  # What the next boot is told, so it finds the memory and resumes: where the file begins on the disk, and
+  # which machine this is, because only this one may wake up from it.
   offset=$(filefrag -v "$file" | awk '$1 == "0:" { sub(/\.\.$/, "", $4); print $4 }')
   uuid=$(findmnt -no UUID /)
-  line="GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX resume=UUID=$uuid resume_offset=$offset\""
+  line="GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX resume=UUID=$uuid resume_offset=$offset workstream.machine=$(cat /sys/class/dmi/id/product_uuid)\""
   if [ "$(cat "$settings" 2>/dev/null)" != "$line" ]; then
     echo "$line" > "$settings"
     update-grub
@@ -45,7 +47,7 @@ prepare() {
 
 now() {
   offered || exit 0
-  [ -f "$file" ] || prepare
+  grep -q "workstream.machine=$(cat /sys/class/dmi/id/product_uuid)" "$settings" 2>/dev/null || prepare
   swapon "$file" 2>/dev/null
   # Only what programs hold is written, not the files the kernel is keeping in memory to save reading them
   # again: a smaller image is written sooner and, what matters, read back sooner when the desktop is started.

@@ -141,6 +141,9 @@ if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   # program may not turn swap on); and the swap turned off again once the machine is back. On a machine Azure
   # was not asked to make hibernate, all three do nothing (image/hibernate.sh).
   chmod +x "$ROOT/image/hibernate.sh"
+  # Only the machine that hibernated wakes up from its disk; a copy started as another machine boots afresh.
+  install -m 0755 "$ROOT/image/resume-here.sh" /etc/initramfs-tools/scripts/init-premount/workstream-resume-here
+  update-initramfs -u
   install -m 0644 "$ROOT/image/workstream-hibernate.service" /etc/systemd/system/workstream-hibernate.service
   systemctl enable workstream-hibernate.service
   cat > /etc/udev/rules.d/90-workstream-hibernate.rules <<'RULE'
