@@ -123,7 +123,7 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
   );
 }
 
-const SOURCE: Record<string, string> = { image: "A new machine", save: "A new machine, from a saved setup", spare: "A spare", stopped: "Its own machine, stopped" };
+const SOURCE: Record<string, string> = { image: "A new machine", save: "A new machine, from a saved setup", spare: "A spare", stopped: "Its own machine, paused", archive: "A new machine, from its archive" };
 
 /** How long a start took, from when each step was written down as it happened: the middle start of the last seven days, by what it started from. */
 export function StartsCard({ overview }: { overview: AdminOverview }) {
@@ -157,7 +157,7 @@ export function StartsCard({ overview }: { overview: AdminOverview }) {
   );
 }
 
-const STATE: Record<string, string> = { starting: "Starting", ready: "Ready", stopping: "Stopping", stopped: "Stopped", failed: "Failed", deleting: "Deleting" };
+const STATE: Record<string, string> = { starting: "Starting", ready: "Ready", stopping: "Pausing", stopped: "Paused", archiving: "Archiving", archived: "Archived", failed: "Failed", deleting: "Deleting" };
 
 export const desktopState = (desktop: RunningDesktop) => STATE[desktop.state] ?? desktop.state;
 export const agentState = (desktop: RunningDesktop) => (desktop.agentWorking ? "Working" : "Waiting");

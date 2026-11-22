@@ -38,7 +38,9 @@ export type TaskScreenProps = {
   onRetry: (entryId: string) => void;
   /** Ask the agent to stop what it is doing. */
   onInterrupt: () => void;
+  /** Bring back a paused or archived desktop, or start a failed one again. Clicking a paused pane does this. */
   onStartDesktop: () => void;
+  /** Pause the desktop: its machine is released, its files kept. */
   onStopDesktop: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
@@ -48,7 +50,7 @@ export type TaskScreenProps = {
   onClose: () => void;
   /** An action on the task is under way. */
   busy: boolean;
-  /** Why the last action was refused, in the server's words. */
+  /** Why the last action, or the last message, was refused, in the server's words. */
   error: string | null;
   /** The live desktop, which the controller draws from the moment there is a screen to watch: a little before the agent joins. */
   desktop: ReactNode;

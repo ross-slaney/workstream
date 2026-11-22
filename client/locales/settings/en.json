@@ -108,6 +108,16 @@
       "emailedBody": "We emailed {email} an invitation. You can also send them this link yourself. It works once, and only for that address."
     },
     "adminOnly": "Only an administrator can invite people or change who is on the team.",
+    "desktops": {
+      "title": "Desktops",
+      "body": "A desktop that nobody is using is paused: its machine is released and its files are kept, and it resumes in about half a minute when someone clicks it or writes to its agent. Use is a person's mouse or keyboard, a message, or the agent working. Having a task open is not. A desktop that stays paused is archived: its disk is saved and its machine deleted, and it comes back in about a minute. Only deleting a task deletes its files.",
+      "pauseAfter": "Pause after, in minutes without use",
+      "pauseAfterHint": "Between {min} and {max} minutes.",
+      "archiveAfter": "Archive after, in days paused",
+      "archiveAfterHint": "Between {min} and {max} days.",
+      "save": "Save",
+      "now": "Paused after {minutes, plural, one {# minute} other {# minutes}} without use, and archived after {days, plural, one {# day} other {# days}} paused. An administrator can change this."
+    },
     "email": {
       "title": "Email",
       "taskEmails": "Email me when a task I started or wrote in is finished or needs me",

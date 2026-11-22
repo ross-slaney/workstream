@@ -6,6 +6,7 @@ import { ErrorNote, ReadState } from "@/components/kit/status";
 import { useT } from "@/lib/i18n";
 import type { TeamPerson } from "@/lib/workstream/api";
 import { Section, SettingsPage } from "../page";
+import { ARCHIVE_DAYS, desktopTimesOf, PAUSE_MINUTES } from "./desktop-times";
 import type { TeamScreenProps } from "./props";
 
 /** The page, the same on every surface. */
@@ -110,6 +111,8 @@ export function TeamPage(p: TeamScreenProps) {
         <p className="text-[13px] text-muted-foreground">{t("team.adminOnly")}</p>
       )}
 
+      <DesktopsSection {...p} admin={admin} />
+
       <GitHubSection {...p} admin={admin} />
 
       <Section title={t("team.email.title")}>
@@ -165,6 +168,71 @@ export function TeamPage(p: TeamScreenProps) {
         </Dialog>
       ) : null}
     </SettingsPage>
+  );
+}
+
+/**
+ * When the team's desktops are paused and archived. Everyone on the team sees the two times; an administrator
+ * changes them.
+ */
+function DesktopsSection(p: TeamScreenProps & { admin: boolean }) {
+  const t = useT("settings");
+  const [minutes, setMinutes] = useState(p.team ? String(p.team.pauseAfterMinutes) : "");
+  const [days, setDays] = useState(p.team ? String(p.team.archiveAfterDays) : "");
+  useEffect(() => setMinutes(p.team ? String(p.team.pauseAfterMinutes) : ""), [p.team?.pauseAfterMinutes]);
+  useEffect(() => setDays(p.team ? String(p.team.archiveAfterDays) : ""), [p.team?.archiveAfterDays]);
+  if (!p.team) return null;
+  const times = desktopTimesOf(minutes, days);
+  const changed = times !== null && (times.pauseAfterMinutes !== p.team.pauseAfterMinutes || times.archiveAfterDays !== p.team.archiveAfterDays);
+
+  return (
+    <Section title={t("team.desktops.title")}>
+      <p className="max-w-[620px] text-sm text-muted-foreground">{t("team.desktops.body")}</p>
+      {p.admin ? (
+        <form
+          className="flex flex-wrap items-start gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (times && changed) p.onDesktopTimes(times.pauseAfterMinutes, times.archiveAfterDays);
+          }}
+        >
+          <div className="min-w-[220px] flex-1">
+            <TextField
+              label={t("team.desktops.pauseAfter")}
+              hint={t("team.desktops.pauseAfterHint", PAUSE_MINUTES)}
+              type="number"
+              inputMode="numeric"
+              min={PAUSE_MINUTES.min}
+              max={PAUSE_MINUTES.max}
+              step={1}
+              value={minutes}
+              onChangeText={setMinutes}
+            />
+          </div>
+          <div className="min-w-[220px] flex-1">
+            <TextField
+              label={t("team.desktops.archiveAfter")}
+              hint={t("team.desktops.archiveAfterHint", ARCHIVE_DAYS)}
+              type="number"
+              inputMode="numeric"
+              min={ARCHIVE_DAYS.min}
+              max={ARCHIVE_DAYS.max}
+              step={1}
+              value={days}
+              onChangeText={setDays}
+            />
+          </div>
+          {/* Level with the fields, under a gap the height of their labels. */}
+          <div className="pt-[26px]">
+            <Button type="submit" label={t("team.desktops.save")} busy={p.busy} disabled={!changed} />
+          </div>
+        </form>
+      ) : (
+        <p className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground">
+          {t("team.desktops.now", { minutes: p.team.pauseAfterMinutes, days: p.team.archiveAfterDays })}
+        </p>
+      )}
+    </Section>
   );
 }
 
