@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GitHubRepository } from "@/lib/workstream/api";
 import type { EnvironmentDraft } from "../props";
-import { changesFileSettings, fillFromFile, fillFromSuggestion, gitHubName, matchingRepositories, sameRepository } from "../repository";
+import { changesFileSettings, fillFromFile, gitHubName, matchingRepositories, sameRepository } from "../repository";
 
 describe("a repository picked from GitHub and one typed", () => {
   it("are the same however the address ends", () => {
@@ -51,14 +51,6 @@ describe("filling the form from the repository", () => {
       { name: "DATABASE_URL", value: "", saved: false },
       { name: "API_KEY", value: "", saved: true },
     ]);
-  });
-
-  it("takes a suggestion, which the environment does not follow", () => {
-    const filled = fillFromSuggestion({ ...draft, fromFile: true }, {
-      size: "standard", apps: ["chrome", "vscode"], setupScript: "pnpm install", variables: ["REDIS_URL"], instructions: "Run pnpm test.", why: "A pnpm app.",
-    });
-    expect(filled).toMatchObject({ size: "standard", setupScript: "pnpm install", instructions: "Run pnpm test.", fromFile: false });
-    expect(filled.variables.map((x) => x.name)).toEqual(["REDIS_URL", "API_KEY"]);
   });
 
   it("knows a change to what the file decides from one that is not", () => {

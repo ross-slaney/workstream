@@ -11,7 +11,7 @@ namespace Workstream.Tests;
 /// <summary>
 /// GitHub as the people who signed in with it reach it: a task's desktop gets the token of the person who
 /// started the task, and nobody else's; the environment form lists a person's repositories and branches, reads
-/// a repository's workstream.yml, and asks for a suggested setup; the environment is saved back to the
+/// a repository's workstream.yml; the environment is saved back to the
 /// repository as workstream.yml, by a commit or, where the branch is protected, a pull request; and a task's
 /// start reads the file again.
 /// </summary>
@@ -384,109 +384,5 @@ public sealed class GitHubJourneys
         repository.With("workstream.yml", "size: small\n");
         Assert.AreEqual("large", (await StartAsync(ada, team.Id, environment)).Size);
         Assert.AreEqual("pnpm install", (await LoadAsync(environment)).SetupScript);
-    }
-
-    // A suggestion.
-
-    /// <summary>The model's answer, as Foundry gives it for a request with a JSON schema output format.</summary>
-    static string Suggested(object input) => new JsonObject
-    {
-        ["id"] = "msg_1", ["type"] = "message", ["role"] = "assistant", ["model"] = "claude-sonnet-5-5",
-        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = System.Text.Json.JsonSerializer.Serialize(input) }),
-        ["stop_reason"] = "end_turn",
-        ["usage"] = new JsonObject { ["input_tokens"] = 20_000, ["output_tokens"] = 600 },
-    }.ToJsonString();
-
-    [TestMethod]
-    public async Task A_suggestion_reads_the_repository_through_GitHub_asks_the_model_and_is_charged_to_the_team()
-    {
-        var (ada, team) = await Person.WithTeamAsync();
-        var token = SignedInWithGitHub(ada);
-        var repository = Stack.GitHub.Give(token)
-            .With("package.json", """{ "name": "app", "packageManager": "pnpm@9.1.0", "scripts": { "test": "vitest" } }""")
-            .With("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
-            .With(".nvmrc", "20\n")
-            .With("README.md", "# App\nRun pnpm dev.\n")
-            .With(".github/workflows/ci.yml", "jobs:\n  test:\n    steps:\n      - run: pnpm test\n")
-            .With("docker-compose.yml", "services:\n  db:\n    image: postgres:16\n")
-            .With("src/index.ts", "export {};\n")
-            .With("node_modules/left-pad/package.json", "{}");
-        var answered = Stack.Model.Answer;
-        Stack.Model.Answer = () => FakeModel.Json(Suggested(new
-        {
-            setup_script = "corepack enable\npnpm install --frozen-lockfile", size = "huge", apps = new[] { "chrome", "vscode", "terminal", "photoshop" },
-            variables = new[] { "DATABASE_URL", "not a name" }, instructions = "Start the database with docker compose up -d first.", why = "A pnpm app with Postgres in Docker Compose.",
-        }));
-        var calls = Stack.Model.Calls.Count;
-        try
-        {
-            var suggestion = await ada.PostAsync<EnvironmentSuggestion>($"/api/teams/{team.Id}/environment-suggestions", new SuggestEnvironment(repository.Url, null));
-            Assert.AreEqual("corepack enable\npnpm install --frozen-lockfile", suggestion.SetupScript);
-            // What a desktop cannot have is dropped: a size it does not come in, an app it does not have, a name a shell cannot read.
-            Assert.AreEqual("standard", suggestion.Size);
-            CollectionAssert.AreEqual(new[] { "chrome", "vscode", "terminal" }, suggestion.Apps.ToArray());
-            CollectionAssert.AreEqual(new[] { "DATABASE_URL" }, suggestion.Variables.ToArray());
-            Assert.AreEqual("A pnpm app with Postgres in Docker Compose.", suggestion.Why);
-
-            // The model was asked once, with the files that say how the repository is built and not what it vendors.
-            Assert.AreEqual(calls + 1, Stack.Model.Calls.Count);
-            var call = Stack.Model.Calls.Last();
-            Assert.AreEqual("/anthropic/v1/messages", call.Uri.AbsolutePath);
-            Assert.AreEqual(Stack.ModelKey, call.Headers["x-api-key"]);
-            var asked = JsonNode.Parse(call.Body)!;
-            Assert.AreEqual("json_schema", asked["output_config"]!["format"]!["type"]!.GetValue<string>());
-            Assert.IsNull(asked["tool_choice"]);
-            var prompt = asked["messages"]![0]!["content"]!.GetValue<string>();
-            foreach (var file in new[] { "package.json", "pnpm-lock.yaml", ".nvmrc", "README.md", ".github/workflows/ci.yml", "docker-compose.yml" })
-            {
-                StringAssert.Contains(prompt, $"<file path=\"{file}\"");
-            }
-            Assert.IsFalse(prompt.Contains("<file path=\"src/index.ts\""));
-            Assert.IsFalse(prompt.Contains("left-pad"));
-
-            // It is the team's model spending, like an agent's.
-            var usage = await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage");
-            Assert.IsTrue(usage.ModelSpentUsd > 0);
-        }
-        finally
-        {
-            Stack.Model.Answer = answered;
-        }
-    }
-
-    [TestMethod]
-    public async Task A_suggestion_is_for_someone_who_may_add_an_environment_with_GitHub_and_allowance_left()
-    {
-        var (ada, team) = await Person.WithTeamAsync();
-        var token = SignedInWithGitHub(ada);
-        var repository = Stack.GitHub.Give(token).With("package.json", "{}");
-        var path = $"/api/teams/{team.Id}/environment-suggestions";
-
-        using var stranger = await Person.SignUpAsync("Mallory");
-        await stranger.PostAsync(path, new SuggestEnvironment(repository.Url, null)).IsAsync(HttpStatusCode.NotFound);
-        var lin = await MemberAsync(ada, team.Id);
-        await lin.PostAsync(path, new SuggestEnvironment(repository.Url, null)).IsAsync(HttpStatusCode.Forbidden, "Sign in with GitHub");
-        await ada.PostAsync(path, new SuggestEnvironment("https://gitlab.com/acme/app", null)).IsAsync(HttpStatusCode.BadRequest);
-        await ada.PostAsync(path, new SuggestEnvironment(repository.Url, "no-such-branch")).IsAsync(HttpStatusCode.BadRequest, "has no branch no-such-branch");
-
-        var answered = Stack.Model.Answer;
-        try
-        {
-            // An answer that does not use the tool is said plainly.
-            Stack.Model.Answer = () => FakeModel.Json(FakeModel.Message("claude-sonnet-5-5", input: 10, output: 10));
-            await ada.PostAsync(path, new SuggestEnvironment(repository.Url, null)).IsAsync(HttpStatusCode.ServiceUnavailable, "could not be read");
-            Stack.Model.Answer = () => FakeModel.Json("""{"type":"error"}""", HttpStatusCode.InternalServerError);
-            await ada.PostAsync(path, new SuggestEnvironment(repository.Url, null)).IsAsync(HttpStatusCode.ServiceUnavailable, "did not answer");
-        }
-        finally
-        {
-            Stack.Model.Answer = answered;
-        }
-
-        // A team that used its allowance gets no suggestion.
-        using var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
-        await administrator.PutAsync($"/api/admin/teams/{team.Id}/limits", new SetLimits(0m, 2)).IsAsync(HttpStatusCode.OK);
-        Stack.Services.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>().Remove(Workstream.Api.Model.ModelGateway.AllowanceKey(team.Id));
-        await ada.PostAsync(path, new SuggestEnvironment(repository.Url, null)).IsAsync(HttpStatusCode.PaymentRequired, "allowance");
     }
 }

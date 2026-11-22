@@ -118,12 +118,6 @@ public sealed class FakeGitHub : HttpMessageHandler
                 ? Json(new { @ref = $"refs/heads/{branch}", @object = new { sha = CommitOf(branch) } })
                 : Status(HttpStatusCode.NotFound);
         }
-        if (request.Method == HttpMethod.Get && rest.StartsWith("git/trees/", StringComparison.Ordinal))
-        {
-            var branch = BranchOfCommit(rest["git/trees/".Length..]);
-            if (branch is null || !repository.Branches.TryGetValue(branch, out var tree)) return Status(HttpStatusCode.NotFound);
-            return Json(new { sha = rest["git/trees/".Length..], truncated = false, tree = tree.Select(x => new { path = x.Key, type = "blob", size = Encoding.UTF8.GetByteCount(x.Value) }) });
-        }
         if (rest.StartsWith("contents/", StringComparison.Ordinal))
         {
             var file = rest["contents/".Length..];

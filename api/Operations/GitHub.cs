@@ -28,8 +28,6 @@ public sealed record GitHubBranches(string DefaultBranch, IReadOnlyList<string> 
 /// </summary>
 public sealed record RepositoryFile(bool Found, WorkstreamFileSettings? Settings, IReadOnlyList<string> Errors);
 
-/// <summary>Which repository and branch to suggest an environment for. A null branch is the repository's default.</summary>
-public sealed record SuggestEnvironment(string? RepositoryUrl, string? Branch);
 
 /// <summary>
 /// <c>workstream.yml</c> saved in the repository: committed to the environment's branch (<c>commit</c>), or, where
@@ -125,62 +123,6 @@ public static partial class Operations
         {
             return Outcome<RepositoryFile>.Unavailable(GitHubDidNotAnswer);
         }
-    }
-
-    /// <summary>
-    /// Suggest an environment for a repository: its files are read from GitHub as the person, the ones that say
-    /// how it is built are shown to the model, and its answer comes back as settings for the form. The model's
-    /// call is charged to the team's allowance, like an agent's. Someone who may add an environment to the team
-    /// may ask (<c>TEAM_CREATE_ENVIRONMENT</c>).
-    /// </summary>
-    public static async Task<Outcome<EnvironmentSuggestion>> SuggestEnvironmentAsync(Caller caller, string teamId, SuggestEnvironment body, WorkstreamDbContext db,
-        ISqlOSFgaAuthService fga, IGitHubTokens tokens, GitHubClient github, TeamModel model, ModelOptions models, CancellationToken ct)
-    {
-        var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamCreateEnvironment, "You can't add environments to this team.", db, fga, ct);
-        if (!allowed.IsOk) return allowed.As<EnvironmentSuggestion>();
-        if (GitHubRepositoryName.Of(body.RepositoryUrl) is not { } repository) return Outcome<EnvironmentSuggestion>.Invalid("Pick a repository on GitHub to suggest a setup for.");
-        if (await tokens.ForUserAsync(caller.PrincipalId, ct) is not { } token) return Outcome<EnvironmentSuggestion>.Forbidden(SignInWithGitHub);
-        GitHubTree tree;
-        List<AnalysisFile> files;
-        string branch;
-        try
-        {
-            if (await github.RepositoryAsync(token, repository, ct) is not { } found) return Outcome<EnvironmentSuggestion>.NotFound();
-            branch = Branch(body.Branch) ?? found.DefaultBranch;
-            if (await github.TreeAsync(token, repository, branch, ct) is not { } read) return Outcome<EnvironmentSuggestion>.Invalid($"{repository.FullName} has no branch {branch}.");
-            tree = read;
-            var picked = RepositoryAnalysis.Pick(tree.Files.Select(x => (x.Path, x.Size)));
-            // A few at a time: GitHub limits how many requests a person makes at once.
-            using var gate = new SemaphoreSlim(6);
-            var reads = picked.Select(async path =>
-            {
-                await gate.WaitAsync(ct);
-                try
-                {
-                    return await github.FileAsync(token, repository, branch, path, ct);
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            });
-            files = [.. (await Task.WhenAll(reads)).OfType<GitHubFile>().Where(x => x.Text.Length > 0).Select(x => RepositoryAnalysis.Cut(x.Path, x.Text))];
-        }
-        catch (GitHubRefused refused) when (refused.Status == HttpStatusCode.Unauthorized)
-        {
-            return Outcome<EnvironmentSuggestion>.Forbidden(GitHubSignInExpired);
-        }
-        catch (Exception error) when (GitHubFailed(error, ct))
-        {
-            return Outcome<EnvironmentSuggestion>.Unavailable(GitHubDidNotAnswer);
-        }
-
-        var request = RepositoryAnalysis.Request(models.Sonnet, repository.FullName, branch, [.. tree.Files.Select(x => x.Path)], tree.Truncated, files);
-        var answer = await model.MessagesAsync(teamId, request, ct);
-        if (!answer.IsOk) return answer.As<EnvironmentSuggestion>();
-        return RepositoryAnalysis.Read(answer.Value!) is { } suggestion
-            ? Outcome<EnvironmentSuggestion>.Ok(suggestion)
-            : Outcome<EnvironmentSuggestion>.Unavailable("The suggestion could not be read. Try again.");
     }
 
     /// <summary>

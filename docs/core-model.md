@@ -69,7 +69,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TEAM_VIEW_USAGE` | team | See what the team used this month: models, desktop hours by size, storage by kind. |
 | `TEAM_MANAGE_MEMBERS` | team | Invite, remove and change people. |
 | `TEAM_MANAGE_SETTINGS` | team | Rename the team; change when its desktops are paused and archived. |
-| `TEAM_CREATE_ENVIRONMENT` | team | Add an environment, and ask for a setup suggested from a repository, which spends the team's model allowance. |
+| `TEAM_CREATE_ENVIRONMENT` | team | Add an environment. |
 | `TEAM_CREATE_TASK` | team | Start a task. |
 | `ENVIRONMENT_VIEW` | environment | See an environment and start tasks from it. Variable values are never returned. |
 | `ENVIRONMENT_EDIT` | environment | Change or delete it, including its variables, ask for its setup to be prepared again, and save it to its repository as workstream.yml (as the person, with their GitHub token). |
@@ -170,7 +170,7 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `DesktopRuns` | When each machine ran, at which size, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own paused machine, its archive), and when each step of it happened. | Usage, cost, and how long starts take. |
 | `StorageRuns` | Each stretch of a team keeping something at one size: the kind (`disk`, `archive`, `setup`), the task or environment it belongs to, the gigabytes, and when it began and ended. | Usage and cost, like `DesktopRuns`. It relates a team to an amount, not a principal to a node, and is derived: a job makes the open rows agree with what the tasks and environments say is kept, so nothing else writes them. |
 | `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
-| `ModelUsage` | Tokens and cost of each model call. A call the API makes itself for a team, a suggested setup, has no task (`TaskId` is empty). | Usage. |
+| `ModelUsage` | Tokens and cost of each model call an agent makes. | Usage. |
 | `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
 | `TaskWatchers` | When each person last had a task's desktop on screen, one row a person a task. Removed with the task. | A fact about what someone did, like `Tasks.CreatedBy`, and never a permission: whether they may watch is `TASK_VIEW`. It is read only to keep from emailing someone about the task they are looking at. |
 
@@ -193,7 +193,7 @@ Someone GitHub did not sign in comes back to the form, which says so and still t
 
 A person on several teams whom GitHub signed in is asked by SqlOS which team the session is for. SqlOS hands the browser to the sign-in page with the request, `view=organization` and its pending token (`SignInUiUrl`): the token is good once, for this request, and the code it leads to can be redeemed only with the PKCE verifier the tab kept for the trip, so it may travel in the address where SqlOS's cookie on the API's address would not reach a page on another site. The page reads the request again, which lists the teams (SqlOS 11.5.0), answers with the first, as it does after an emailed code (`useProviderTeamChoice`, `client/hooks/use-sign-in.ts`), and exchanges the code. The app does not care which: every request names its team in its address.
 
-SqlOS keeps the token GitHub gave it at each sign-in, beside the person's GitHub identity, encrypted, and never sends it to a browser; the connection is seeded with keeping tokens on. The app reads a person's current token through one interface (`IGitHubTokens.ForUserAsync`, `api/GitHub/GitHub.cs`), and nowhere else. It asks SqlOS for the person's current token for the `github` connection (`SqlOSGitHubTokens`, `SqlOSOidcAuthService.GetProviderAccessTokenAsync`, SqlOS 11.5.0), which answers with none when they never signed in with GitHub, GitHub refused the token, or GitHub could not be reached. The token is what lists the person's repositories, reads a repository for a suggested setup, saves workstream.yml, and lets the desktops of tasks they start push as them (below). A person who signed in by email has none until they sign in with GitHub.
+SqlOS keeps the token GitHub gave it at each sign-in, beside the person's GitHub identity, encrypted, and never sends it to a browser; the connection is seeded with keeping tokens on. The app reads a person's current token through one interface (`IGitHubTokens.ForUserAsync`, `api/GitHub/GitHub.cs`), and nowhere else. It asks SqlOS for the person's current token for the `github` connection (`SqlOSGitHubTokens`, `SqlOSOidcAuthService.GetProviderAccessTokenAsync`, SqlOS 11.5.0), which answers with none when they never signed in with GitHub, GitHub refused the token, or GitHub could not be reached. The token is what lists the person's repositories, reads and saves workstream.yml, and lets the desktops of tasks they start push as them (below). A person who signed in by email has none until they sign in with GitHub.
 
 An invitation's link carries a token. Signing in, or creating an account, with the token attached is what accepts it: the link proves the mailbox, so someone new only gives their name. They land in the team that invited them, and someone who created their account this way gets no team of their own.
 
@@ -304,11 +304,11 @@ A desktop works on GitHub as the person who started its task.
 
 The token is the person's: it reaches every repository their GitHub account reaches, with their permissions, and GitHub decides how long it lasts. It is never written to the desktop's disk; it is in the desktop's memory while git or gh uses it. Someone a task is shared with who may write to its agent (`task_prompter`) or use its desktop (`task_driver`) can have work pushed in the starter's name, as the team's people can, while the share lasts.
 
-### Picking a repository, and a suggested setup
+### Picking a repository
 
 The environment form lists the signed-in person's repositories (`GET /api/github/repositories`, most recently pushed first, up to three hundred) and a picked repository's branches (`GET /api/github/repositories/{owner}/{name}/branches`), read from GitHub with their token. Nothing is checked in Workstream: it is their GitHub, read as them.
 
-Picking a repository reads its workstream.yml on the branch (below). Without one, the form asks for a suggested setup (`POST /api/teams/{id}/environment-suggestions`, `TEAM_CREATE_ENVIRONMENT`): the API reads the repository's tree and the files that say how it is built (manifests, the first lines of lockfiles, Dockerfiles and Compose files, the README, version files, CI workflows, a Makefile, a dev container; `api/Domain/RepositoryAnalysis.cs` picks and caps them), and asks the model gateway's Sonnet deployment, with Workstream's key, for a setup script, a size, apps, variable names, instructions and one line on why, through a tool it must answer with. The call is checked against the team's allowance and recorded in `ModelUsage` for the team, as an agent's is. The answer is kept to what a desktop can have, and fills the form; nothing is saved until the person saves.
+Picking a repository reads its workstream.yml on the branch (below), which fills the form. Without one, the form shows an example of the file and the person fills in the settings. Workstream never guesses a setup: what a desktop starts with is what the file or the form says.
 
 ### workstream.yml
 

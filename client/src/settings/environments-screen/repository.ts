@@ -1,4 +1,4 @@
-import type { EnvironmentSuggestion, GitHubRepository, WorkstreamFileSettings } from "@/lib/workstream/api";
+import type { GitHubRepository, WorkstreamFileSettings } from "@/lib/workstream/api";
 import type { EnvironmentDraft, VariableDraft } from "./props";
 
 /** Whether two addresses name the same repository: GitHub's own, and one typed with `.git` or a slash at its end. */
@@ -23,7 +23,7 @@ export function matchingRepositories(repositories: GitHubRepository[], query: st
 function withVariables(current: VariableDraft[], names: string[]): VariableDraft[] {
   const byName = new Map(current.filter((variable) => variable.name.trim()).map((variable) => [variable.name.trim(), variable]));
   const listed = names.map((name) => byName.get(name) ?? { name, value: "", saved: false });
-  // Variables already in the draft that the file or the suggestion does not name stay: their values are the person's.
+  // Variables already in the draft that the file does not name stay: their values are the person's.
   const rest = current.filter((variable) => variable.name.trim() && !names.includes(variable.name.trim()));
   return [...listed, ...rest];
 }
@@ -38,19 +38,6 @@ export function fillFromFile(draft: EnvironmentDraft, file: WorkstreamFileSettin
     instructions: file.instructions ?? "",
     variables: withVariables(draft.variables, file.variables),
     fromFile: true,
-  };
-}
-
-/** The draft filled from Workstream's suggestion, for the person to check and change. */
-export function fillFromSuggestion(draft: EnvironmentDraft, suggestion: EnvironmentSuggestion): EnvironmentDraft {
-  return {
-    ...draft,
-    size: suggestion.size,
-    apps: suggestion.apps,
-    setupScript: suggestion.setupScript ?? "",
-    instructions: suggestion.instructions ?? "",
-    variables: withVariables(draft.variables, suggestion.variables),
-    fromFile: false,
   };
 }
 

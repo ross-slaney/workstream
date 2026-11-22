@@ -63,16 +63,6 @@ export type WorkstreamFileSettings = { size: DesktopSize; apps: string[]; setup:
 /** A repository's workstream.yml on a branch: whether it is there, its settings, or what is wrong with it, a line each. */
 export type RepositoryFile = { found: boolean; settings: WorkstreamFileSettings | null; errors: string[] };
 
-/** What Workstream suggests for a repository's environment, and one line on what it was based on. */
-export type EnvironmentSuggestion = {
-  size: DesktopSize;
-  apps: string[];
-  setupScript: string | null;
-  variables: string[];
-  instructions: string | null;
-  why: string;
-};
-
 /** workstream.yml saved in the repository: a `commit` to the environment's branch, or a `pull_request` from a new `branch`. */
 export type SavedRepositoryFile = { kind: "commit" | "pull_request"; url: string; branch: string };
 
@@ -288,8 +278,6 @@ export const workstream = {
   /** "Prepare again": the environment's setup is done again on a machine of its own, and saved for its tasks. */
   prepareEnvironment: (environmentId: string) => apiSend<Environment>("POST", `/api/environments/${id(environmentId)}/setup`),
   /** Read the repository through GitHub and ask the model for its setup. It takes a while: ten to thirty seconds. */
-  suggestEnvironment: (teamId: string, repositoryUrl: string, branch: string | null) =>
-    apiSend<EnvironmentSuggestion>("POST", `/api/teams/${id(teamId)}/environment-suggestions`, { repositoryUrl, branch }),
   /** Save the environment as workstream.yml in its repository, as the person: a commit, or a pull request where the branch is protected. */
   saveRepositoryFile: (environmentId: string) => apiSend<SavedRepositoryFile>("POST", `/api/environments/${id(environmentId)}/workstream-file`),
 

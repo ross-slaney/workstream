@@ -11,7 +11,7 @@ vi.mock("@/components/theme/theme", () => ({ useTheme: () => ({ colors: new Prox
 import { EnvironmentsPage } from "../parts";
 import type { EnvironmentDraft, EnvironmentsScreenProps, RepositoryFileOffer, RepositoryReading } from "../props";
 
-/* The environment form's repository: picked from the person's GitHub, read for workstream.yml or a suggested setup, and saved back as workstream.yml. */
+/* The environment form's repository: picked from the person's GitHub, read for workstream.yml, and saved back as workstream.yml. */
 
 const nothing = () => {};
 const draft = (changes: Partial<EnvironmentDraft> = {}): EnvironmentDraft => ({
@@ -37,7 +37,7 @@ const page = (options: {
       apps={[{ id: "chrome", name: "Chrome", description: "The web browser.", launcher: "chromium.desktop", default: true }]}
       picker={{
         repositories: options.repositories ?? { kind: "ready", value: github() }, branches: options.branches ?? null, reading: options.reading ?? { kind: "none" },
-        onPick: nothing, onBranch: nothing, onSuggest: nothing, onSignInWithGitHub: nothing, onRetry: nothing,
+        onPick: nothing, onBranch: nothing, onReadAgain: nothing, onSignInWithGitHub: nothing, onRetry: nothing,
       }}
       onRetry={nothing} onAdd={nothing} onEdit={nothing}
       editor={{ id: options.id ?? null, draft: options.draft ?? draft(), busy: false, error: null, setup: null, preparing: false, prepareError: null, file: options.file ?? null }}
@@ -92,24 +92,30 @@ describe("what Workstream does with the picked repository", () => {
     expect(page({ draft: picked, reading: { kind: "fileChanged" } })).toContain("no longer follows the file");
   });
 
-  it("names the file's mistakes and offers a suggestion instead", () => {
+  it("names the file's mistakes, to read it again once they are fixed", () => {
     const drawn = page({ draft: picked, reading: { kind: "badFile", errors: ["Line 1: size is small, standard or large, not huge."] } });
     expect(drawn).toContain("has mistakes, so nothing was filled from it");
     expect(drawn).toContain("Line 1: size is small, standard or large, not huge.");
-    expect(drawn).toContain("Suggest a setup instead");
+    expect(drawn).toContain("Read workstream.yml again");
   });
 
-  it("shows progress while it suggests a setup, then why, or why not", () => {
-    expect(page({ draft: picked, reading: { kind: "suggesting" } })).toContain("This takes up to half a minute.");
-    const suggested = page({ draft: picked, reading: { kind: "suggested", why: "A pnpm app with Postgres." } });
-    expect(suggested).toContain("Suggested from the repository: A pnpm app with Postgres. Check it before you save.");
-    expect(suggested).toContain("Suggest again");
+  it("shows how to write the file when the repository has none, and never guesses a setup", () => {
+    const drawn = page({ draft: picked, reading: { kind: "noFile", branch: "main" } });
+    expect(drawn).toContain("acme/web has no workstream.yml on main.");
+    expect(drawn).toContain("apps: [chrome, vscode, terminal]");
+    expect(drawn).toContain("Or fill in the settings below.");
+    expect(drawn).toContain('href="/docs/environments#workstreamyml"');
+    expect(drawn).not.toContain("Suggest");
+  });
+
+  it("says why the file could not be read", () => {
     const failed = page({ draft: picked, reading: { kind: "failed", message: "GitHub did not answer." } });
-    expect(failed).toContain("No setup could be suggested. GitHub did not answer.");
+    expect(failed).toContain("workstream.yml could not be read. GitHub did not answer.");
+    expect(failed).toContain("Read workstream.yml again");
   });
 
-  it("offers a suggestion for a repository it has done nothing with yet", () => {
-    expect(page({ draft: picked, id: "e" })).toContain("Suggest a setup");
+  it("shows nothing more for a repository it has not read", () => {
+    expect(page({ draft: picked, id: "e" })).not.toContain("workstream.yml on");
   });
 });
 

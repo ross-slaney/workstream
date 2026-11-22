@@ -18,10 +18,10 @@ export type EnvironmentDraft = {
 };
 
 /**
- * What Workstream is doing with the repository picked for the draft: nothing yet; looking for its
- * workstream.yml; filled from the file (and whether the person has since changed what the file decides); found
- * a file with mistakes; suggesting a setup from the repository's files, which takes up to half a minute; or
- * suggested one, with a line on why; or it failed, in the server's words.
+ * What Workstream found in the repository picked for the draft: nothing read yet; looking for its
+ * workstream.yml; filled from the file (and whether the person has since changed what the file decides); a
+ * file with mistakes; no file on the branch, so the form shows how to write one; or the read failed, in the
+ * server's words.
  */
 export type RepositoryReading =
   | { kind: "none" }
@@ -29,8 +29,7 @@ export type RepositoryReading =
   | { kind: "file"; branch: string }
   | { kind: "fileChanged" }
   | { kind: "badFile"; errors: string[] }
-  | { kind: "suggesting" }
-  | { kind: "suggested"; why: string }
+  | { kind: "noFile"; branch: string }
   | { kind: "failed"; message: string };
 
 /**
@@ -42,12 +41,12 @@ export type RepositoryPicker = {
   /** The picked repository's branches, its default one first. Null while they are read, or when there is no GitHub repository. */
   branches: string[] | null;
   reading: RepositoryReading;
-  /** Pick a repository (null: none). Its default branch comes with it, and its workstream.yml is read or a setup suggested. */
+  /** Pick a repository (null: none). Its default branch comes with it, and its workstream.yml is read. */
   onPick: (repository: GitHubRepository | null) => void;
   /** Another branch of the picked repository, whose workstream.yml is read again. */
   onBranch: (branch: string) => void;
-  /** Suggest a setup from the repository's files, or again. */
-  onSuggest: () => void;
+  /** Read the repository's workstream.yml again, after a mistake in it is fixed or a read failed. */
+  onReadAgain: () => void;
   /** Sign out and sign in again with GitHub, so Workstream has the person's GitHub token. */
   onSignInWithGitHub: () => void;
   onRetry: () => void;
@@ -62,8 +61,7 @@ export type RepositoryFileOffer = { justSaved: boolean; busy: boolean; error: st
 
 /**
  * A team's environments, and the editor for one. The editor starts with a name and the repository, picked
- * from the person's GitHub repositories; the repository's workstream.yml, or a setup Workstream suggests from
- * its files, fills the rest, which the person changes as they like. The setup script, variables and
+ * from the person's GitHub repositories; the repository's workstream.yml, when it has one, fills the rest, which the person changes as they like. The setup script, variables and
  * instructions sit under Advanced.
  */
 export type EnvironmentsScreenProps = {

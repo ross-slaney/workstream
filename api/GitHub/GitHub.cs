@@ -51,14 +51,6 @@ public sealed record GitHubUser(long Id, string Login, string? Name)
 /// <summary>A file in a repository: its text and the blob's id, which GitHub needs to replace it.</summary>
 public sealed record GitHubFile(string Path, string Text, string Sha);
 
-/// <summary>A file in a repository's tree, with its size in bytes.</summary>
-public sealed record GitHubTreeEntry(string Path, long Size);
-
-/// <summary>
-/// A commit's files. <see cref="Truncated"/> says GitHub stopped listing them (a very large repository): what is
-/// listed is still right, just not all.
-/// </summary>
-public sealed record GitHubTree(string Commit, IReadOnlyList<GitHubTreeEntry> Files, bool Truncated);
 
 /// <summary>GitHub answered, and not with success. <see cref="Status"/> is what it answered.</summary>
 public sealed class GitHubRefused(HttpStatusCode status, string message) : Exception(message)
@@ -140,15 +132,6 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
         {
             return null;
         }
-    }
-
-    /// <summary>Every file at the branch's commit, or null when there is no such branch.</summary>
-    public async Task<GitHubTree?> TreeAsync(string token, GitHubRepositoryName repository, string branch, CancellationToken ct)
-    {
-        if (await BranchCommitAsync(token, repository, branch, ct) is not { } commit) return null;
-        using var request = Request(HttpMethod.Get, $"/repos/{Path(repository)}/git/trees/{commit}?recursive=1", token);
-        var answer = await SendAsync<Tree>(request, ct);
-        return new GitHubTree(commit, [.. answer.Entries.Where(x => x.Type == "blob").Select(x => new GitHubTreeEntry(x.Path, x.Size ?? 0))], answer.Truncated);
     }
 
     /// <summary>A file on a branch (the repository's default one when null), read as UTF-8 text; null when it is not there or is not a file.</summary>
@@ -247,8 +230,6 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
     sealed record ReferenceObject([property: JsonPropertyName("sha")] string Sha);
     sealed record Reference([property: JsonPropertyName("ref")] string Ref, [property: JsonPropertyName("object")] ReferenceObject Object);
     sealed record NewReference([property: JsonPropertyName("ref")] string Ref, [property: JsonPropertyName("sha")] string Sha);
-    sealed record TreeEntry([property: JsonPropertyName("path")] string Path, [property: JsonPropertyName("type")] string Type, [property: JsonPropertyName("size")] long? Size);
-    sealed record Tree([property: JsonPropertyName("tree")] List<TreeEntry> Entries, [property: JsonPropertyName("truncated")] bool Truncated);
     sealed record Contents(
         [property: JsonPropertyName("type")] string Type, [property: JsonPropertyName("content")] string? Content, [property: JsonPropertyName("sha")] string Sha);
     sealed record PutContents(

@@ -13,7 +13,7 @@ const day = (at: string) => new Date(at).toLocaleDateString(undefined, { month: 
 /**
  * The environment's repository. Signed in with GitHub, the person finds one of their repositories by name and
  * picks it, then its branch; otherwise, or for an address that is not on GitHub, they type it. Under it, what
- * Workstream is doing with the picked repository: reading its workstream.yml, or suggesting a setup.
+ * Workstream found in the picked repository: its workstream.yml, mistakes in it, or how to write one.
  */
 export function RepositorySection({ picker, draft, onChange }: { picker: RepositoryPicker; draft: EnvironmentDraft; onChange: (change: Partial<EnvironmentDraft>) => void }) {
   const t = useT("settings");
@@ -73,7 +73,7 @@ export function RepositorySection({ picker, draft, onChange }: { picker: Reposit
         <Finder repositories={github?.repositories ?? []} more={github?.more ?? false} onPick={picker.onPick} onType={() => setTyping(true)} />
       )}
 
-      {name && signedIn ? <Reading reading={picker.reading} repository={name} fromFile={draft.fromFile} onSuggest={picker.onSuggest} /> : null}
+      {name && signedIn ? <Reading reading={picker.reading} repository={name} fromFile={draft.fromFile} onReadAgain={picker.onReadAgain} /> : null}
     </div>
   );
 }
@@ -157,8 +157,8 @@ function Picked({ name, url, branch, branches, onBranch, onChange }: {
   );
 }
 
-/** What Workstream is doing with the picked repository, said plainly, with what can be done next. */
-export function Reading({ reading, repository, fromFile, onSuggest }: { reading: RepositoryReading; repository: string; fromFile: boolean; onSuggest: () => void }) {
+/** What Workstream found in the picked repository, said plainly, with what can be done next. */
+export function Reading({ reading, repository, fromFile, onReadAgain }: { reading: RepositoryReading; repository: string; fromFile: boolean; onReadAgain: () => void }) {
   const t = useT("settings");
   const box = "flex flex-col items-start gap-2 rounded-lg border px-3 py-2.5 text-[13px]";
   switch (reading.kind) {
@@ -167,13 +167,6 @@ export function Reading({ reading, repository, fromFile, onSuggest }: { reading:
         <p role="status" className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <Spinner label={t("environments.editor.reading", { repository: reading.repository })} className="size-3" />
           {t("environments.editor.reading", { repository: reading.repository })}
-        </p>
-      );
-    case "suggesting":
-      return (
-        <p role="status" className={cn(box, "flex-row items-center border-border text-muted-foreground")}>
-          <Spinner label={t("environments.editor.suggesting")} className="size-3 shrink-0" />
-          {t("environments.editor.suggesting")}
         </p>
       );
     case "file":
@@ -193,30 +186,49 @@ export function Reading({ reading, repository, fromFile, onSuggest }: { reading:
               <li key={error}>{error}</li>
             ))}
           </ul>
-          <Button size="small" label={t("environments.editor.suggestInstead")} onClick={onSuggest} />
+          <Button size="small" label={t("environments.editor.readAgain")} onClick={onReadAgain} />
         </div>
       );
-    case "suggested":
-      return (
-        <div role="status" className={cn(box, "border-primary/40 bg-primary-soft")}>
-          <p className="text-foreground">{reading.why ? t("environments.editor.suggested", { why: reading.why }) : t("environments.editor.suggestedNoReason")}</p>
-          <Button size="small" tone="quiet" label={t("environments.editor.suggestAgain")} onClick={onSuggest} />
-        </div>
-      );
+    case "noFile":
+      return <FileGuide repository={repository} branch={reading.branch} onReadAgain={onReadAgain} />;
     case "failed":
       return (
         <div className="flex flex-col items-start gap-2">
-          <ErrorNote message={t("environments.editor.suggestFailed", { message: reading.message })} />
-          <Button size="small" label={t("environments.editor.suggestAgain")} onClick={onSuggest} />
+          <ErrorNote message={t("environments.editor.readFailed", { message: reading.message })} />
+          <Button size="small" label={t("environments.editor.readAgain")} onClick={onReadAgain} />
         </div>
       );
     case "none":
-      return fromFile ? (
-        <p role="status" className={cn(box, "border-primary/40 bg-primary-soft text-foreground")}>{t("environments.editor.followsFile")}</p>
-      ) : (
-        <Button size="small" className="self-start" label={t("environments.editor.suggest")} onClick={onSuggest} />
-      );
+      return fromFile ? <p role="status" className={cn(box, "border-primary/40 bg-primary-soft text-foreground")}>{t("environments.editor.followsFile")}</p> : null;
   }
+}
+
+/** The workstream.yml every setting can go in, as an example to copy. Not translated: it is the file's own syntax. */
+const EXAMPLE_FILE = `size: standard              # small | standard | large
+setup: |                    # runs once on a new desktop, in the repository's folder
+  npm ci
+  docker pull postgres:17
+apps: [chrome, vscode, terminal]
+variables: [DATABASE_URL]   # names only; set their values here in Workstream
+instructions: |             # added to what the agent is told
+  Run npm test before you say you are done.`;
+
+/** The repository has no workstream.yml on the branch: how to write one, and that the form works without it. */
+function FileGuide({ repository, branch, onReadAgain }: { repository: string; branch: string; onReadAgain: () => void }) {
+  const t = useT("settings");
+  return (
+    <section aria-label={t("environments.editor.noFileTitle")} className="flex flex-col items-start gap-2 rounded-lg border border-border px-3 py-3">
+      <p className="text-[13px] text-foreground">{t("environments.editor.noFile", { repository, branch })}</p>
+      <pre className="w-full overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-[12px] leading-5 text-foreground">{EXAMPLE_FILE}</pre>
+      <p className="text-[12.5px] text-muted-foreground">
+        {t("environments.editor.noFileOr")}{" "}
+        <a href="/docs/environments#workstreamyml" target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-2 hover:underline">
+          {t("environments.editor.fileReference")}
+        </a>
+      </p>
+      <Button size="small" tone="quiet" label={t("environments.editor.readAgain")} onClick={onReadAgain} />
+    </section>
+  );
 }
 
 /** Saving the saved environment to its repository as workstream.yml, and what that made on GitHub. */

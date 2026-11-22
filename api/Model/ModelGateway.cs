@@ -97,9 +97,7 @@ public static class ModelGateway
     public static WebApplicationBuilder AddModelGateway(this WebApplicationBuilder builder)
     {
         builder.Services.AddSingleton(builder.Configuration.GetSection("Workstream:Model").Get<ModelOptions>() ?? new ModelOptions());
-        // The API's own calls for a team, such as an environment's suggestion (TeamModel.cs).
         builder.Services.AddMemoryCache();
-        builder.Services.AddScoped<TeamModel>();
         // An agent's turn can stream for many minutes: no overall timeout, only the caller going away ends it.
         builder.Services.AddHttpClient(ClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler

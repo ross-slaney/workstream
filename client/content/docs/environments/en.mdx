@@ -1,6 +1,6 @@
 ---
 title: "Environments"
-description: "What a task's desktop starts with: a repository, a setup script, variables, apps and a size, suggested from the repository or kept in it as workstream.yml."
+description: "What a task's desktop starts with: a repository, a setup script, variables, apps and a size, set in Workstream or kept in the repository as workstream.yml."
 order: 4
 updated: 2026-11-21
 ---
@@ -32,19 +32,13 @@ The repository is cloned when the desktop is made, and the agent starts in its f
 When you pick a repository, Workstream looks for `workstream.yml` at its root on that branch:
 
 - If it is there, the form is filled from it and says so.
-- If it is not, Workstream suggests a setup (below) and fills the form with that.
+- If it is not, the form shows an example of the file. Add one to the repository and press Read workstream.yml again, or fill in the settings yourself.
 
-Either way, change anything before you save.
-
-## A suggested setup
-
-Workstream reads the repository's files through GitHub, as you: its list of files, and the ones that say how it is built, such as `package.json` and its lockfile, `Dockerfile` and Compose files, the README, `.nvmrc` and `.tool-versions`, `global.json`, the CI workflows, a `Makefile` and a dev container. It sends them to the AI model with a description of what a desktop already has, and the model suggests a setup script, a size, the apps, the names of the variables the project needs, and short instructions for the agent, with one line on what the suggestion is based on.
-
-It takes ten to thirty seconds, and the model's use counts against your team's monthly allowance, like an agent's (see [Usage and limits](/docs/usage-and-limits)). Press Suggest again for another. A suggestion never has variable values: fill those in yourself.
+Workstream never guesses a setup. What a desktop starts with is what the file or the form says.
 
 ## workstream.yml
 
-An environment can live in its repository, as a file named `workstream.yml` at the repository's root:
+An environment can live in its repository, as a file named `workstream.yml` at the repository's root. Keeping it there means it is reviewed and changed with the code, and every environment made from the repository gets the same setup:
 
 ```yaml
 size: large                 # small | standard | large

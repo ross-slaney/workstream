@@ -10,7 +10,7 @@ import { valueOf } from "@/lib/online";
 import { newId } from "@/lib/utils";
 import { workstream, type Environment, type GitHubRepository, type SavedRepositoryFile, type WriteEnvironment } from "@/lib/workstream/api";
 import { EnvironmentsScreen, type EnvironmentDraft, type RepositoryReading } from "@/src/settings/environments-screen";
-import { changesFileSettings, fillFromFile, fillFromSuggestion, gitHubName } from "@/src/settings/environments-screen/repository";
+import { changesFileSettings, fillFromFile, gitHubName } from "@/src/settings/environments-screen/repository";
 
 const blank = (apps: string[]): EnvironmentDraft => ({
   name: "", apps, size: "standard", repositoryUrl: "", repositoryBranch: "", setupScript: "", instructions: "", variables: [], fromFile: false,
@@ -48,8 +48,8 @@ type Editing = { id: string | null; draft: EnvironmentDraft; justSaved: boolean 
 
 /**
  * /t/{team}/environments: the team's environments, and the editor for one. Picking a repository from the
- * person's GitHub reads its workstream.yml, which fills the form; without one, Workstream suggests a setup
- * from the repository's files, which also fills it. A saved environment whose settings are not the file's is
+ * person's GitHub reads its workstream.yml, which fills the form; without one, the form shows how to
+ * write it and the person fills the settings in. A saved environment whose settings are not the file's is
  * offered to the repository as workstream.yml.
  */
 export default function EnvironmentsRoute() {
@@ -95,21 +95,8 @@ export default function EnvironmentsRoute() {
     );
   };
 
-  /** Suggest a setup from the repository's files: ten to thirty seconds of reading and the model. */
-  const suggest = async (url: string, branch: string | null, ticket = ++looking.current) => {
-    setReading({ kind: "suggesting" });
-    try {
-      const suggestion = await workstream.suggestEnvironment(teamId, url, branch);
-      if (ticket !== looking.current) return;
-      change((draft) => fillFromSuggestion(draft, suggestion));
-      setReading({ kind: "suggested", why: suggestion.why });
-    } catch (failure) {
-      if (ticket === looking.current) setReading({ kind: "failed", message: failure instanceof Error ? failure.message : "" });
-    }
-  };
-
-  /** The repository's workstream.yml on the branch fills the form; without one, a setup is suggested. */
-  const look = async (repository: { fullName: string; url: string }, branch: string) => {
+  /** The repository's workstream.yml on the branch fills the form; without one, the form shows how to write it. */
+  const look = async (repository: { fullName: string }, branch: string) => {
     const ticket = ++looking.current;
     setReading({ kind: "reading", repository: repository.fullName });
     try {
@@ -124,7 +111,7 @@ export default function EnvironmentsRoute() {
         setReading({ kind: "badFile", errors: file.errors });
       } else {
         change((draft) => ({ ...draft, fromFile: false }));
-        await suggest(repository.url, branch, ticket);
+        setReading({ kind: "noFile", branch });
       }
     } catch (failure) {
       if (ticket === looking.current) setReading({ kind: "failed", message: failure instanceof Error ? failure.message : "" });
@@ -178,11 +165,11 @@ export default function EnvironmentsRoute() {
             if (!editing) return;
             const fullName = fullNameOf(editing.draft);
             change((draft) => ({ ...draft, repositoryBranch: branch }));
-            if (fullName) void look({ fullName, url: editing.draft.repositoryUrl }, branch);
+            if (fullName) void look({ fullName }, branch);
           },
-          onSuggest: () => {
-            if (!editing) return;
-            void suggest(editing.draft.repositoryUrl, editing.draft.repositoryBranch || null);
+          onReadAgain: () => {
+            const fullName = editing ? fullNameOf(editing.draft) : null;
+            if (editing && fullName) void look({ fullName }, editing.draft.repositoryBranch);
           },
           onSignInWithGitHub: () => {
             // Signing in with GitHub is a new sign-in: SqlOS keeps GitHub's token from it, and the person comes back here.
