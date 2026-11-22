@@ -4,6 +4,8 @@ Workstream gives each task its own cloud desktop with an AI agent working on it.
 
 A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. A team's administrator can connect the team to GitHub through Workstream's GitHub App; each desktop then gets a token for its own repository that lasts an hour, and its agent finishes the work as a branch and a pull request ([infra/README.md](infra/README.md), "GitHub").
 
+A desktop runs while someone is using it or its agent is working. One that nobody has used for half an hour is paused: its machine is released and its files are kept, and it resumes in about half a minute when someone clicks it or writes to its agent. One that stays paused for a week is archived: its disk is saved and the machine deleted, and it comes back in about a minute. A team's administrator sets both times on the team's page. Having a task open in a browser tab is not using it, and only deleting a task deletes its files ([docs/core-model.md](docs/core-model.md#pause-archive-delete)).
+
 Making a machine takes Azure from fifteen seconds to a minute. While someone is in a team's workspace, Workstream keeps one desktop running ahead of them, so the task they start begins on it at once.
 
 ## What is in this repository

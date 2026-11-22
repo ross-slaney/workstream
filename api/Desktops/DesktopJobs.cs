@@ -653,12 +653,13 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }
 
         var kept = false;
-        await ChangeAsync(taskId, (_, task, now) =>
+        await ChangeAsync(taskId, async (db, task, now) =>
         {
-            if (task.State != DesktopState.Archiving) return Task.CompletedTask;
+            if (task.State != DesktopState.Archiving) return;
             task.Archived(archive, bytes, now);
+            // No machine holds the desktop's key any more, so it is ended. The machine the desktop comes back on is given a new one.
+            await DesktopKeys.RetireForTaskAsync(db, task, ct);
             kept = true;
-            return Task.CompletedTask;
         }, ct);
         // The task was deleted while its disk was being copied: the copy is nobody's, and the delete job removes the machine.
         if (!kept)

@@ -372,7 +372,7 @@ public sealed class PauseJourneys
         const long onDisk = 7_516_192_768;
         var read = (await desktop.PostAsync("/api/desktop/exchange", new DesktopExchange(false, 0, null, onDisk))).EnsureSuccessStatusCode();
         read.Dispose();
-        desktop.Dispose();
+        using var _ = desktop;
         await PauseAsync(ada, task.Id);
 
         // Six days paused is not yet the team's week.
@@ -393,6 +393,8 @@ public sealed class PauseJourneys
         Assert.AreEqual(machine, Stack.Desktops.Archives[archived.Archive].Machine);
         CollectionAssert.Contains(Stack.Desktops.Deleted.ToList(), machine);
         Assert.IsFalse(Stack.Desktops.Made.ContainsKey(machine));
+        // The deleted machine's key died with it.
+        await desktop.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.Unauthorized);
         // Nothing is running and there is no screen; the task, its conversation and its place in the list are all there.
         Assert.AreEqual(0, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).RunningDesktops);
         Assert.AreEqual(HttpStatusCode.Conflict, (await Watching.OpenAsync(task.Id, ada.Token)).Status);
@@ -413,6 +415,7 @@ public sealed class PauseJourneys
         Assert.IsNull(spec.Save);
         Assert.AreNotEqual(firstKey, spec.Key);
         Assert.AreEqual(task.Id, (await back.SetupAsync()).TaskId);
+        await desktop.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.Unauthorized);
         await back.ExchangeAsync();
         Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
         // The machine has shown its screen, so the archive is no longer needed and is gone.
@@ -424,6 +427,44 @@ public sealed class PauseJourneys
         using var scope = Stack.Services.CreateScope();
         var last = await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().DesktopRuns.AsNoTracking().Where(x => x.TaskId == task.Id).OrderByDescending(x => x.StartedAt).FirstAsync();
         Assert.AreEqual(StartSource.Archive, last.Source);
+    }
+
+    [TestMethod]
+    public async Task A_task_that_started_on_a_spare_is_archived_and_comes_back_on_a_machine_of_its_own()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        // The team's spare, up and asking what it is for, and the task that starts on it.
+        await ada.PostAsync($"/api/teams/{team.Id}/spare", new WantSpare(null)).IsAsync(HttpStatusCode.NoContent);
+        string spareId;
+        using (var scope = Stack.Services.CreateScope())
+        {
+            spareId = (await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Spares.AsNoTracking().SingleAsync(x => x.TeamId == team.Id)).Id;
+        }
+        await Stack.Jobs.StartSpareAsync(spareId, CancellationToken.None);
+        using var spare = Desktop.Of(spareId);
+        await spare.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.NotFound);
+        var task = await StartAsync(ada, team.Id, environment);
+        await spare.ExchangeAsync();
+        Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
+        Assert.AreEqual(spare.Host, (await RowAsync(task.Id)).Host);
+
+        await PauseAsync(ada, task.Id);
+        await InStateForAsync(task.Id, TimeSpan.FromDays(8));
+        await SweepAsync();
+        Assert.AreEqual("archived", (await TaskAsync(ada, task.Id)).State);
+        CollectionAssert.Contains(Stack.Desktops.Deleted.ToList(), spare.Host);
+        // The spare's key, which worked on the task, is ended with its machine.
+        await spare.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.Unauthorized);
+
+        // It comes back as the task's own desktop: a machine named for the task, with a key of its own.
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        using var back = await Desktop.StartAsync(task.Id);
+        Assert.AreEqual(DesktopHosting.NameFor(task.Id), back.Host);
+        Assert.AreNotEqual(spare.Host, back.Host);
+        Assert.AreEqual(task.Id, (await back.SetupAsync()).TaskId);
+        await back.ExchangeAsync();
+        Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
+        await spare.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.Unauthorized);
     }
 
     [TestMethod]
