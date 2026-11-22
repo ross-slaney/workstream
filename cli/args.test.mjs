@@ -100,5 +100,8 @@ test("describe says where a desktop is in words", () => {
   assert.equal(describe({ state: "starting", step: "agent" }), "The desktop is up; the agent is starting");
   assert.equal(describe({ state: "ready", agentWorking: true }), "Ready; the agent is working");
   assert.equal(describe({ state: "failed", failure: "No capacity" }), "Failed: No capacity");
-  assert.equal(describe({ state: "stopped" }), "Stopped");
+  assert.equal(describe({ state: "stopping" }), "Pausing");
+  assert.equal(describe({ state: "stopped" }), "Paused");
+  assert.equal(describe({ state: "archiving" }), "Being archived");
+  assert.equal(describe({ state: "archived" }), "Archived");
 });

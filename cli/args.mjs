@@ -154,10 +154,15 @@ export function describe(task) {
       return task.step === "agent" ? "The desktop is up; the agent is starting" : task.step === "boot" ? "The desktop is starting up" : "Making the desktop";
     case "ready":
       return task.agentWorking ? "Ready; the agent is working" : "Ready";
+    // The API's own words for pausing and paused.
     case "stopping":
-      return "Stopping";
+      return "Pausing";
     case "stopped":
-      return "Stopped";
+      return "Paused";
+    case "archiving":
+      return "Being archived";
+    case "archived":
+      return "Archived";
     case "failed":
       return task.failure ? `Failed: ${task.failure}` : "Failed";
     case "deleting":

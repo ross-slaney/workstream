@@ -13,7 +13,8 @@ export type Me = { userId: string; name: string; email: string | null; systemAdm
 /** The person's own settings: `taskEmails` is whether they are emailed when a task they started or wrote in is finished or needs them. */
 export type MySettings = { taskEmails: boolean };
 
-export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number };
+/** `pauseAfterMinutes`: a desktop nobody has used for that long is paused. `archiveAfterDays`: a desktop paused for that long is archived. */
+export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number; pauseAfterMinutes: number; archiveAfterDays: number };
 
 export type TeamPerson = { userId: string; name: string; email: string | null; admin: boolean; joinedAt: string };
 
@@ -115,7 +116,12 @@ export type WriteEnvironment = {
   variables: VariableChange[];
 };
 
-export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "failed" | "deleting";
+/**
+ * Where a task's desktop is. `stopping` and `stopped` are what people read as pausing and paused: the machine
+ * is released and its disk kept. `archived`: the disk is kept as a copy and the machine is deleted; starting
+ * makes a new machine from the copy.
+ */
+export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "archiving" | "archived" | "failed" | "deleting";
 
 /**
  * How far a starting desktop has come: its machine is being made or turned on, the machine is on and starting
@@ -206,7 +212,7 @@ export type SpareNow = { teamId: string; teamName: string; size: string; state: 
 /** The machines' time this month by purpose and size, the storage kept by kind, and the spares running now. */
 export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; spares: SpareNow[] };
 
-/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
+/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`, `archive`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
 
 export type AdminOverview = {
@@ -235,6 +241,8 @@ export const workstream = {
   team: (teamId: string) => apiJson<Team>(`/api/teams/${id(teamId)}`),
   createTeam: (name: string) => apiSend<Team>("POST", "/api/teams", { name }),
   renameTeam: (teamId: string, name: string) => apiSend<Team>("PUT", `/api/teams/${id(teamId)}`, { name }),
+  setDesktopTimes: (teamId: string, pauseAfterMinutes: number, archiveAfterDays: number) =>
+    apiSend<Team>("PUT", `/api/teams/${id(teamId)}/desktop-times`, { pauseAfterMinutes, archiveAfterDays }),
   usage: (teamId: string) => apiJson<TeamUsage>(`/api/teams/${id(teamId)}/usage`),
 
   people: (teamId: string) => apiJson<TeamPerson[]>(`/api/teams/${id(teamId)}/people`),

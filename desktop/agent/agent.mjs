@@ -120,10 +120,19 @@ async function call(method, route, body) {
   return response.status === 204 ? null : response.json();
 }
 
+/** How much is on the disk, said every five minutes: what an archive of this desktop would hold. */
+const SAY_DISK_EVERY = 5 * 60_000;
+let diskSaidAt = 0;
+
 /** One exchange: hand over what is new, take what people wrote, hear whether they asked the agent to stop. */
 async function exchange() {
   const sending = outbox.slice(0, 50);
-  const reply = await call("POST", "/api/desktop/exchange", { working: working || preparing, after: state.after, messages: sending });
+  const sayDisk = Date.now() - diskSaidAt >= SAY_DISK_EVERY;
+  const diskBytes = sayDisk ? usedBytes(await run("df", ["-B1", "--output=used", "/"]).then((result) => result.stdout, () => "")) : 0;
+  const reply = await call("POST", "/api/desktop/exchange", {
+    working: working || preparing, after: state.after, messages: sending, ...(diskBytes > 0 ? { diskBytes } : {}),
+  });
+  if (sayDisk) diskSaidAt = Date.now();
   outbox.splice(0, sending.length);
   title = reply.title ?? title;
   let changed = false;

@@ -16,8 +16,10 @@ namespace Workstream.Api.Desktops;
 /// for a spare; <see cref="Purpose"/> is one of <see cref="MachinePurpose"/>, and is written on the machine so
 /// a person looking at the host can tell them apart. <see cref="Save"/> names the saved setup the machine
 /// starts from, when its environment has one; without it the machine starts from the image.
+/// <see cref="Archive"/> names the task's own archive, for a machine that brings an archived desktop back: it
+/// starts from that and from nothing else.
 /// </summary>
-public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task, string? Save = null)
+public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task, string? Save = null, string? Archive = null)
 {
     /// <summary>
     /// What the desktop is told, as its agent reads it (desktop/agent/told.mjs): on a machine this is its user
@@ -67,6 +69,18 @@ public interface IDesktopHost
     Task DeleteSaveAsync(string name, CancellationToken ct);
     /// <summary>Every saved setup this host holds: what the sweep compares with the environments to find strays.</summary>
     Task<IReadOnlyList<HostedMachine>> ListSavesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Copy a stopped machine's disk to an archive under this name: what a machine made with
+    /// <see cref="DesktopSpec.Archive"/> starts from. Answers how many bytes the host says the archive holds,
+    /// when it knows. The machine is left as it was; whoever archives deletes it once the archive is written
+    /// down, so a disk is never without an owner.
+    /// </summary>
+    Task<long?> ArchiveAsync(string host, string name, CancellationToken ct);
+    /// <summary>Remove an archive. One that is not there is already removed.</summary>
+    Task DeleteArchiveAsync(string name, CancellationToken ct);
+    /// <summary>Every archive this host holds: what the sweep compares with the tasks to find strays.</summary>
+    Task<IReadOnlyList<HostedMachine>> ListArchivesAsync(CancellationToken ct);
 }
 
 /// <summary>A desktop's display, as the API reaches it.</summary>
@@ -111,8 +125,13 @@ public sealed class DesktopOptions
     public string Host { get; set; } = "none";
     /// <summary>The API's address as a desktop reaches it. PUBLIC_ORIGIN when deployed; the Docker host's name in development.</summary>
     public string ApiUrl { get; set; } = "";
-    /// <summary>A ready desktop nobody has watched or written to for this long, whose agent is idle, is stopped.</summary>
-    public int IdleMinutes { get; set; } = 30;
+    /// <summary>
+    /// What a new team starts with: a desktop nobody has used for this many minutes, whose agent is not
+    /// working, is paused. Each team's administrators change their own (<see cref="Team.PauseAfterMinutes"/>).
+    /// </summary>
+    public int IdleMinutes { get; set; } = Team.DefaultPauseAfterMinutes;
+    /// <summary>What a new team starts with: a desktop paused for this many days is archived (<see cref="Team.ArchiveAfterDays"/>).</summary>
+    public int ArchiveDays { get; set; } = Team.DefaultArchiveAfterDays;
     /// <summary>A desktop that has not exchanged with the API this long after being asked to start has failed.</summary>
     public int StartTimeoutMinutes { get; set; } = 15;
     /// <summary>
@@ -288,6 +307,15 @@ public static class DesktopHosting
     /// a retry finds what an earlier try made.
     /// </summary>
     public static string NameFor(string desktopId) => "ws-" + Guid.Parse(desktopId).ToString("N")[..16];
+
+    /// <summary>What every archive's name starts with, which tells an archive from a saved setup at the host.</summary>
+    public const string ArchivePrefix = "wsa-";
+
+    /// <summary>
+    /// A name for a new archive of a task's disk: the task's, and different each time, so an archive that was
+    /// made and never written down is nobody's, and the sweep removes it.
+    /// </summary>
+    public static string NewArchiveNameFor(string taskId) => $"{ArchivePrefix}{Guid.Parse(taskId).ToString("N")[..16]}-{Guid.NewGuid().ToString("N")[..8]}";
 }
 
 /// <summary>An environment with no way to run desktops: the tests' default, and a deployment that forgot to configure one.</summary>
@@ -304,6 +332,9 @@ public sealed class NoDesktopHost : IDesktopHost
     public Task SaveAsync(string host, string name, CancellationToken ct) => throw new InvalidOperationException(Words);
     public Task DeleteSaveAsync(string name, CancellationToken ct) => Task.CompletedTask;
     public Task<IReadOnlyList<HostedMachine>> ListSavesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostedMachine>>([]);
+    public Task<long?> ArchiveAsync(string host, string name, CancellationToken ct) => throw new InvalidOperationException(Words);
+    public Task DeleteArchiveAsync(string name, CancellationToken ct) => Task.CompletedTask;
+    public Task<IReadOnlyList<HostedMachine>> ListArchivesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostedMachine>>([]);
 }
 
 /// <summary>
@@ -338,6 +369,8 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     public async Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct)
     {
         if (!Azure.Sizes.TryGetValue(spec.Size, out var vmSize)) throw new InvalidOperationException($"No machine size is configured for '{spec.Size}'.");
+        // The snapshot the machine's disk is made from: the task's own archive, or its environment's saved setup.
+        var source = spec.Archive ?? spec.Save;
         var body = new JsonObject
         {
             ["location"] = Azure.Location,
@@ -345,7 +378,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
             ["properties"] = new JsonObject
             {
                 ["hardwareProfile"] = new JsonObject { ["vmSize"] = vmSize },
-                ["storageProfile"] = spec.Save is null
+                ["storageProfile"] = source is null
                     ? new JsonObject
                     {
                         ["imageReference"] = new JsonObject { ["id"] = Azure.ImageId },
@@ -358,7 +391,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                             ["managedDisk"] = new JsonObject { ["storageAccountType"] = DiskType },
                         },
                     }
-                    // From a saved setup: a disk made from it first (about two seconds), which the machine takes as its own.
+                    // From a saved setup or the task's archive: a disk made from it first (about two seconds), which the machine takes as its own.
                     : new JsonObject
                     {
                         ["osDisk"] = new JsonObject
@@ -397,12 +430,12 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 },
             },
         };
-        if (spec.Save is not null) await DiskFromSaveAsync(spec, ct);
+        if (source is not null) await DiskFromSaveAsync(spec, source, ct);
         try
         {
             (await SendAsync(HttpMethod.Put, $"{Machine(spec.Name)}?api-version={ComputeApi}", body, ct)).Dispose();
         }
-        catch when (spec.Save is not null)
+        catch when (source is not null)
         {
             // Azure refused the machine: the disk made for it would be nobody's.
             (await SendAsync(HttpMethod.Delete, $"{DiskOf(spec.Name)}?api-version={DiskApi}", null, CancellationToken.None, missingIsDone: true)).Dispose();
@@ -411,8 +444,12 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         return new DesktopPlace(spec.Name, await AddressAsync(spec.Name, ct));
     }
 
-    /// <summary>A disk made from a saved setup, for the machine that is about to take it. It carries the save's security type with it.</summary>
-    async Task DiskFromSaveAsync(DesktopSpec spec, CancellationToken ct)
+    /// <summary>
+    /// A disk made from a saved setup or an archive, for the machine that is about to take it. It carries the
+    /// snapshot's security type with it, and is the snapshot's size, which for an archive is the size the
+    /// task's disk was.
+    /// </summary>
+    async Task DiskFromSaveAsync(DesktopSpec spec, string snapshot, CancellationToken ct)
     {
         var disk = new JsonObject
         {
@@ -421,7 +458,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
             ["sku"] = new JsonObject { ["name"] = DiskType },
             ["properties"] = new JsonObject
             {
-                ["creationData"] = new JsonObject { ["createOption"] = "Copy", ["sourceResourceId"] = IdOf(Snapshot(spec.Save!)) },
+                ["creationData"] = new JsonObject { ["createOption"] = "Copy", ["sourceResourceId"] = IdOf(Snapshot(snapshot)) },
             },
         };
         (await SendAsync(HttpMethod.Put, $"{DiskOf(spec.Name)}?api-version={DiskApi}", disk, ct)).Dispose();
@@ -491,7 +528,26 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         (await SendAsync(HttpMethod.Delete, $"{DiskOf(host)}?api-version={DiskApi}", null, ct, missingIsDone: true)).Dispose();
     }
 
-    public async Task SaveAsync(string host, string name, CancellationToken ct)
+    public Task SaveAsync(string host, string name, CancellationToken ct) => SnapshotAsync(host, name, "saved-setup", $"The saved setup {name}", ct);
+
+    /// <summary>
+    /// An archive is a snapshot like a saved setup, told apart by its name and its tag. Azure does not say how
+    /// much of a snapshot is used, so what is answered is the disk's whole size: the most it can hold.
+    /// </summary>
+    public async Task<long?> ArchiveAsync(string host, string name, CancellationToken ct)
+    {
+        await SnapshotAsync(host, name, "archive", $"The archive {name}", ct);
+        using var response = await SendAsync(HttpMethod.Get, $"{Snapshot(name)}?api-version={DiskApi}", null, ct);
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["properties"]?["diskSizeBytes"]?.GetValue<long>();
+    }
+
+    public Task DeleteArchiveAsync(string name, CancellationToken ct) => DeleteSaveAsync(name, ct);
+
+    public async Task<IReadOnlyList<HostedMachine>> ListArchivesAsync(CancellationToken ct) =>
+        [.. (await ListSavesAsync(ct)).Where(snapshot => snapshot.Name.StartsWith(DesktopHosting.ArchivePrefix, StringComparison.Ordinal))];
+
+    /// <summary>A full copy of a stopped machine's disk, as a snapshot under this name.</summary>
+    async Task SnapshotAsync(string host, string name, string purpose, string what, CancellationToken ct)
     {
         var machine = await ReadAsync(host, ct) ?? throw new InvalidOperationException($"The machine {host} is gone.");
         var disk = machine["properties"]?["storageProfile"]?["osDisk"]?["managedDisk"]?["id"]?.GetValue<string>()
@@ -500,7 +556,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         var body = new JsonObject
         {
             ["location"] = Azure.Location,
-            ["tags"] = new JsonObject { ["project"] = "workstream", ["purpose"] = "saved-setup" },
+            ["tags"] = new JsonObject { ["project"] = "workstream", ["purpose"] = purpose },
             ["sku"] = new JsonObject { ["name"] = "Standard_LRS" },
             ["properties"] = new JsonObject
             {
@@ -509,7 +565,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
             },
         };
         (await SendAsync(HttpMethod.Put, $"{Snapshot(name)}?api-version={DiskApi}", body, ct)).Dispose();
-        await MadeAsync($"{Snapshot(name)}?api-version={DiskApi}", $"The saved setup {name}", ct);
+        await MadeAsync($"{Snapshot(name)}?api-version={DiskApi}", what, ct);
     }
 
     public async Task DeleteSaveAsync(string name, CancellationToken ct) =>
@@ -666,7 +722,7 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
             // gives it to every container; Docker Engine on Linux gives it only when asked, like this.
             "--add-host", "host.docker.internal:host-gateway",
             "-e", "WORKSTREAM_API=" + spec.ApiUrl, "-e", "WORKSTREAM_KEY=" + spec.Key,
-            spec.Save is null ? options.Docker.Image : SaveImage(spec.Save),
+            spec.Archive is not null ? ArchiveImage(spec.Archive) : spec.Save is null ? options.Docker.Image : SaveImage(spec.Save),
         ], ct);
         return new DesktopPlace(spec.Name, await AddressAsync(spec.Name, ct));
     }
@@ -685,6 +741,32 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             // Docker says when in words; a save it lists is taken as old enough to be judged.
             .Select(tag => new HostedMachine(tag, DateTimeOffset.MinValue)).ToList();
+
+    /// <summary>An archive, locally: the stopped container kept as an image, like a saved setup, in a repository of its own.</summary>
+    const string ArchiveRepository = "workstream-archive";
+    static string ArchiveImage(string name) => $"{ArchiveRepository}:{name}";
+
+    public async Task<long?> ArchiveAsync(string host, string name, CancellationToken ct)
+    {
+        await RunAsync(["commit", "--change", "ENV WORKSTREAM_API=", "--change", "ENV WORKSTREAM_KEY=", host, ArchiveImage(name)], ct);
+        return long.TryParse((await RunAsync(["image", "inspect", "-f", "{{.Size}}", ArchiveImage(name)], ct, tolerate: true)).Trim(), out var bytes) ? bytes : null;
+    }
+
+    public Task DeleteArchiveAsync(string name, CancellationToken ct) => RunAsync(["rmi", "-f", ArchiveImage(name)], ct, tolerate: true);
+
+    public async Task<IReadOnlyList<HostedMachine>> ListArchivesAsync(CancellationToken ct)
+    {
+        var tags = (await RunAsync(["images", ArchiveRepository, "--format", "{{.Tag}}"], ct, tolerate: true))
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var archives = new List<HostedMachine>();
+        foreach (var tag in tags)
+        {
+            var created = (await RunAsync(["image", "inspect", "-f", "{{.Created}}", ArchiveImage(tag)], ct, tolerate: true)).Trim();
+            // One Docker gives no date for is taken as new, so nothing here calls it a stray too early.
+            archives.Add(new HostedMachine(tag, DateTimeOffset.TryParse(created, out var at) ? at : DateTimeOffset.UtcNow));
+        }
+        return archives;
+    }
 
     public async Task<DesktopPlace> StartAsync(string host, CancellationToken ct)
     {

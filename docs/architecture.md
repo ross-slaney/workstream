@@ -85,11 +85,25 @@ The Azure host's part of this is checked against Azure itself by `tests/Workstre
 
 So a machine made from a save starts like one made from the image, what the setup left is all there and reads at the disk's own speed, and the save is ready seconds after the setup ends. Azure's own times vary from run to run: in another run of the same check a machine took 52 seconds to be on, and Azure's guest agent, which a desktop does not wait for, took four minutes to answer.
 
-Stopping a task deallocates its machine and keeps its disk. Starting it again brings the same desktop back, and the agent resumes the same conversation. Deleting a task deletes the machine, its disk and its network interface, and ends its key. A desktop nobody watches or writes to, whose agent is idle, is stopped after half an hour by a sweep that also fails a desktop that never arrived, and deletes a machine no task knows once it has been there half an hour (a newer one may belong to a task that has just started).
+## Running, paused, archived
+
+A desktop costs its machine by the hour while it runs and its disk by the month for as long as the disk exists, so a desktop nobody is using is stepped down in two stages ([the core model](core-model.md#pause-archive-delete) has the rules and who may do what):
+
+- **Paused.** `IDesktopHost.StopAsync` releases the machine (Azure: deallocate; Docker: stop) and keeps its disk. A person pauses a desktop from its menu; the sweep (`DesktopJobs.SweepAsync`, every five minutes) pauses each ready desktop that has not been used for its team's pause time, 30 minutes unless the team changed it. Resuming starts the same machine (`StartAsync`), which takes Azure between fifteen seconds and a minute, and the agent picks the conversation up where it was.
+- **Archived.** The sweep archives a desktop that has been paused for its team's archive time, 7 days unless the team changed it (`DesktopJobs.ArchiveAsync`). It copies the disk (`IDesktopHost.ArchiveAsync`: on Azure a full snapshot on standard storage, named `wsa-…` and tagged `archive`; in Docker the stopped container committed as a `workstream-archive` image), writes the archive's name and size on the task (`Archive`, `ArchiveBytes`), and then deletes the machine and its disk. Bringing it back is making a machine with `DesktopSpec.Archive`: on Azure a disk is made from the snapshot and attached, the same way a machine is made from a saved setup, and the machine gets a new key in its user data. The archive is deleted once the new machine's display has answered; a start that fails before that removes the machine and keeps the archive.
+- **Deleted.** Only when a person deletes the task: the machine, its disk and its network interface, the archive if there is one, and its key.
+
+What counts as use is decided in three places. The desktop's exchange says whether the agent is working, and the task's `ActiveAt` moves with it and once more when it stops. A person's message moves it. And the relay moves it when a key or pointer event reaches the display (below). Nothing else does: an open pane does not, and the web app closes its stream while the browser tab is hidden.
+
+`ArchiveBytes` is how much was on the disk, which the agent says in its exchange every five minutes (`df`, as a preparing machine does); Azure does not say how much of a snapshot is used, so for a desktop that never said, it is the disk's whole size.
+
+The same sweep fails a desktop that never arrived, and deletes a machine or an archive no task knows once it has been there half an hour (a newer one may belong to a task that has just started, or be a copy being made now).
 
 ## The display
 
 A desktop's display is a VNC server with no password, on a network that admits one caller: the API. The browser never reaches a desktop. It opens `GET /api/tasks/{id}/desktop` as a WebSocket carrying the person's access token; the API validates the token (the web app's, with `workstream.write`), checks `TASK_VIEW` on the task, connects to the desktop's private address, and passes bytes both ways. What the browser sends is read message by message (`api/Desktops/RfbClientFilter.cs`): for someone a task is shared with only to watch or to write to the agent, without `TASK_DRIVE`, key and pointer events and the clipboard are dropped there, and the browser draws their screen view-only. It does this from the moment the display has answered, which is before the agent's first exchange, until the desktop is asked to stop. It checks again every minute and closes the stream when access is gone. The browser draws it with noVNC.
+
+The same filter notices use. A key event that passes it, or a pointer event that moves the pointer or changes a button, is a person at the desktop, and the relay writes that on the task at once and then at most once a minute while it goes on (`DesktopRelay.UseAsync`). Requests for the picture are not use, however long the stream stays open, and neither is the clipboard or a pointer event that repeats where the pointer already is, which a browser can send by itself. The web app closes the stream when its tab is hidden and opens it again when the tab is shown (`client/components/app/desktop-stream.tsx`). A paused or archived desktop has no stream: its pane says so, and a click on it, or a message, starts it again.
 
 VNC rather than RDP for two reasons: the screen has to exist before anyone connects, because the agent works on it whether or not a person is watching, and several people can watch the same screen at once. There is no outside service and no VPN between the person and the desktop.
 
@@ -103,7 +117,7 @@ Another harness would replace `harness.mjs` and nothing else: the rest of the ag
 
 ### After a stop
 
-A stopped desktop keeps its disk and loses every program. So the agent keeps, in `~/.workstream/state.json`, what it would need to bring them back (`desktop/agent/restore.mjs`): the long-running commands the agent started (the harness notes every Bash call made with `run_in_background`, or ending in a lone `&`) with the folder each ran in, the pages open in the browser (read from Chromium's debugging port every fifteen seconds), and the files the agent opened in VS Code.
+A paused desktop keeps its disk and loses every program, and so does one brought back from its archive, whose disk is a copy of the one it had. So the agent keeps, in `~/.workstream/state.json`, what it would need to bring them back (`desktop/agent/restore.mjs`): the long-running commands the agent started (the harness notes every Bash call made with `run_in_background`, or ending in a lone `&`) with the folder each ran in, the pages open in the browser (read from Chromium's debugging port every fifteen seconds), and the files the agent opened in VS Code.
 
 The first time the agent runs on a machine that has just started, which it knows because its mark in `/dev/shm` is gone, and the desktop was prepared before, it brings them back: the commands run again in a terminal window titled Restored, VS Code opens on the workspace with those files, and the browser opens the pages, a page on one of the desktop's own servers once that server answers. The agent is told so in one line of its instructions, and the conversation gets one line saying it happened. An agent that restarts on a running desktop brings nothing back, since nothing stopped.
 
@@ -197,7 +211,8 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | Kept in | What |
 | --- | --- |
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
-| The app's tables | Teams' limits, environments, tasks, messages, how the setup script went on a task's desktop (its state and last lines), desktop runs (for hours by size), storage runs (for GB-months by kind), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
+| The app's tables | Teams' limits and their pause and archive times, environments, tasks, messages, how the setup script went on a task's desktop (its state and last lines), desktop runs (for hours by size), storage runs (for GB-months by kind), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
+| A task's archive (a snapshot in the desktops' group) | A copy of that disk, in place of the disk, while the task is archived. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |
 | The browser | The session's tokens, and which team was open last. |

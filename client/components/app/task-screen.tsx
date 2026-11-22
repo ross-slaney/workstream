@@ -22,6 +22,10 @@ type Unsent = { key: string; text: string; failed: boolean };
  * writes, and does what they ask of the task. Each read also says what the person may do with it, so a share
  * that changes or ends shows on the screen at the next read; the team shares the task from here. The view
  * and the live desktop below it know nothing of the API.
+ *
+ * A paused or archived desktop comes back when the person clicks its pane (`onStartDesktop`) or sends a
+ * message, which the API starts it for. Reading the conversation, which this does for as long as the screen
+ * is open, starts nothing.
  */
 export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const t = useT("workspace");
@@ -41,6 +45,8 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
   const [desktopShape, setDesktopShape] = useState(4 / 3);
   const last = useRef(0);
   const action = useAction();
+  // Why the last message was refused, when the server said: the team's limit of running desktops, most often.
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const take = useCallback((incoming: Message[]) => {
     if (incoming.length === 0) return;
@@ -63,6 +69,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
     setMissing(false);
     setMessages([]);
     setUnsent([]);
+    setSendError(null);
     const read = async () => {
       if (reading || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
       reading = true;
@@ -95,13 +102,18 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
 
   const send = useCallback(
     async (key: string, text: string) => {
+      setSendError(null);
       try {
         take([await workstream.say(taskId, text, key)]);
         setUnsent((current) => current.filter((entry) => entry.key !== key));
       } catch (error) {
         // 409: an earlier try already wrote it, and the next read brings it.
         if (error instanceof ApiError && error.status === 409) setUnsent((current) => current.filter((entry) => entry.key !== key));
-        else setUnsent((current) => current.map((entry) => (entry.key === key ? { ...entry, failed: true } : entry)));
+        else {
+          setUnsent((current) => current.map((entry) => (entry.key === key ? { ...entry, failed: true } : entry)));
+          // A paused desktop the team has no room to resume: the message is not kept, and the server says why.
+          if (error instanceof ApiError && (error.status === 402 || error.status === 400) && error.message) setSendError(error.message);
+        }
       }
     },
     [taskId, take],
@@ -180,7 +192,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         }}
         onClose={onClose}
         busy={action.busy}
-        error={action.error}
+        error={action.error ?? sendError}
         // There is a screen to watch as soon as the display answers, which is before the agent has joined.
         desktop={
           task && (task.state === "ready" || (task.state === "starting" && task.step === "agent")) ? (

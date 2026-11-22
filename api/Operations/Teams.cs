@@ -95,6 +95,26 @@ public static partial class Operations
         }
     }
 
+    /// <summary>
+    /// Change when the team's unused desktops are paused and when its paused ones are archived. The sweep reads
+    /// them each time it runs, so a change reaches every desktop of the team within five minutes.
+    /// </summary>
+    public static async Task<Outcome<Team>> SetDesktopTimesAsync(Caller caller, string teamId, int pauseAfterMinutes, int archiveAfterDays, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    {
+        var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamManageSettings, "Only a team administrator can change when desktops are paused and archived.", db, fga, ct);
+        if (!allowed.IsOk) return allowed;
+        try
+        {
+            allowed.Value!.SetDesktopTimes(pauseAfterMinutes, archiveAfterDays);
+            await db.SaveChangesAsync(ct);
+            return allowed;
+        }
+        catch (DomainRuleException rule)
+        {
+            return Outcome<Team>.Invalid(rule);
+        }
+    }
+
     /// <summary>Who is on the team: SqlOS's memberships, with who administers it read from the grants.</summary>
     public static async Task<Outcome<IReadOnlyList<TeamPerson>>> PeopleAsync(Caller caller, string teamId, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {

@@ -11,7 +11,7 @@ import { useSession } from "@/lib/session";
 import { workstream, type PendingInvitation } from "@/lib/workstream/api";
 import { TeamScreen } from "@/src/settings/team-screen";
 
-/** /t/{team}/team: who is on the team, inviting someone, and the team's GitHub connection. */
+/** /t/{team}/team: who is on the team, inviting someone, when its desktops are paused and archived, and the team's GitHub connection. */
 export default function TeamRoute() {
   const t = useT("settings");
   const router = useRouter();
@@ -61,6 +61,7 @@ export default function TeamRoute() {
         error={action.error}
         onRetry={people.reload}
         onRename={(name) => then(team.refresh)(() => workstream.renameTeam(teamId, name))}
+        onDesktopTimes={(pauseAfterMinutes, archiveAfterDays) => then(team.refresh)(() => workstream.setDesktopTimes(teamId, pauseAfterMinutes, archiveAfterDays))}
         onInvite={(email, asAdmin) => then(invitations.refresh)(async () => setInvited(await workstream.invite(teamId, email, asAdmin)))}
         onDismissInvited={() => setInvited(null)}
         onTaskEmails={(on) => void action.run(async () => settings.replace(await workstream.changeMySettings({ taskEmails: on })))}

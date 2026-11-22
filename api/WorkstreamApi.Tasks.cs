@@ -11,6 +11,8 @@ namespace Workstream.Api;
 
 /// <summary>
 /// A task as the list and the screen show it: what it is, who started it, and where its desktop is.
+/// <see cref="State"/> is <c>starting</c>, <c>ready</c>, <c>stopping</c> and <c>stopped</c> (which people read
+/// as pausing and paused), <c>archiving</c>, <c>archived</c>, <c>failed</c> or <c>deleting</c>.
 /// <see cref="Step"/> says how far a starting desktop has come: <c>machine</c> (being made or turned on),
 /// <c>boot</c> (on and starting up) or <c>agent</c> (its screen can be watched; the agent has not joined yet).
 /// </summary>
@@ -62,7 +64,7 @@ public static partial class WorkstreamApi
         api.MapPost("/tasks/{id}/start", StartDesktop).WithName("start_desktop").WithTags("Tasks").Produces<TaskDto>().ProducesProblem(402);
         api.MapPost("/tasks/{id}/interrupt", Interrupt).WithName("interrupt_agent").WithTags("Tasks");
         api.MapGet("/tasks/{id}/messages", ListMessages).WithName("list_messages").WithTags("Tasks").Produces<ConversationDto>();
-        api.MapPost("/tasks/{id}/messages", SayMessage).WithName("say").WithTags("Tasks").Produces<MessageDto>(201).ProducesProblem(409);
+        api.MapPost("/tasks/{id}/messages", SayMessage).WithName("say").WithTags("Tasks").Produces<MessageDto>(201).ProducesProblem(402).ProducesProblem(409);
 
         api.MapGet("/shared-tasks", ListSharedTasks).WithName("list_shared_tasks").WithTags("Sharing").Produces<ListPage<TaskDto>>();
         api.MapGet("/tasks/{id}/access", GetTaskAccess).WithName("list_task_access").WithTags("Sharing").Produces<TaskAccessList>().ProducesProblem(403);
@@ -202,10 +204,10 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(new AcceptedTaskInvitation(outcome.Value!)) : ToResult(outcome);
     }
 
-    static async Task<IResult> SayMessage(string id, Say body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> SayMessage(string id, Say body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
         var caller = CallerOf(http);
-        var outcome = await Operations.SayAsync(caller, id, body.Text, body.Key, db, fga, ct);
+        var outcome = await Operations.SayAsync(caller, id, body.Text, body.Key, db, fga, jobs, ct);
         if (!outcome.IsOk) return ToResult(outcome);
         return Results.Created($"/api/tasks/{id}/messages", ToDto(outcome.Value!, await NamesAsync(db, [caller.PrincipalId], ct), caller.PrincipalId));
     }

@@ -9,15 +9,16 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { DesktopState, StartStep, Task, TaskSetup } from "@/lib/workstream/api";
 import type { ChatEntry, TaskScreenProps } from "./props";
+import { chatNoteOf, restingOf, type Resting } from "./resting";
 import { RichText } from "./rich-text";
 import { lastLines } from "./setup-output";
 
-/** A dot and a word for where a desktop is: green when it is up, amber while it changes, grey when it is off. */
+/** A dot and a word for where a desktop is: green when it is up, amber while it changes, grey when it is paused or archived. */
 export function StateBadge({ state, working }: { state: DesktopState; working: boolean }) {
   const t = useT("workspace");
   const tone =
     state === "ready" ? "text-positive"
-    : state === "starting" || state === "stopping" ? "text-warning"
+    : state === "starting" || state === "stopping" || state === "archiving" ? "text-warning"
     : state === "failed" ? "text-destructive"
     : "text-muted-foreground";
   const label = state === "ready" && working ? t("state.working") : t(`state.${state}`);
@@ -51,8 +52,9 @@ export function ScreenHeader(p: TaskScreenProps & { filled: boolean; onToggleFil
             <Menu onClose={() => setMenu(false)}>
               <MenuItem label={t("share.open")} onSelect={p.onShare} />
               <MenuItem label={t("task.rename")} onSelect={() => setRenaming(true)} />
-              {task.state === "ready" || task.state === "starting" ? <MenuItem label={t("task.stop")} onSelect={p.onStopDesktop} /> : null}
-              {task.state === "stopped" || task.state === "failed" ? <MenuItem label={t("task.start")} onSelect={p.onStartDesktop} /> : null}
+              {task.state === "ready" || task.state === "starting" ? <MenuItem label={t("task.pause")} onSelect={p.onStopDesktop} /> : null}
+              {task.state === "stopped" || task.state === "archived" ? <MenuItem label={t("task.resume")} onSelect={p.onStartDesktop} /> : null}
+              {task.state === "failed" ? <MenuItem label={t("task.start")} onSelect={p.onStartDesktop} /> : null}
               <MenuItem label={t("task.delete")} danger onSelect={() => setDeleting(true)} />
             </Menu>
           ) : null}
@@ -173,11 +175,8 @@ export function Chat(p: TaskScreenProps) {
     if (pinned.current && list.current) list.current.scrollTop = list.current.scrollHeight;
   }, [p.entries.length, p.entries.at(-1)?.pending]);
 
-  const note =
-    !task ? null
-    : task.state === "starting" ? (task.step === "agent" ? t("chat.agentStarting") : t("chat.waitingForDesktop"))
-    : task.state === "stopped" || task.state === "stopping" || task.state === "failed" ? t("chat.desktopStopped")
-    : null;
+  const noteKey = task ? chatNoteOf(task.state, task.step) : null;
+  const note = noteKey ? t(`chat.${noteKey}`) : null;
   // The setup script runs before the agent starts on what was asked: while it does, it is what is said here.
   const settingUp = task?.state === "ready" && p.setup?.state === "running";
   const working = task?.state === "ready" && task.agentWorking && !settingUp;
@@ -343,14 +342,20 @@ function Entry({ entry, onRetry }: { entry: ChatEntry; onRetry: () => void }) {
   );
 }
 
-/** Where the desktop goes: the live picture from the moment there is one, and otherwise what is happening to it and what to do. */
+/**
+ * Where the desktop goes: the live picture from the moment there is one, and otherwise what is happening to it
+ * and what to do. A paused or archived desktop says so and comes back when the person clicks the pane; having
+ * the pane open does nothing.
+ */
 export function DesktopPane(p: TaskScreenProps) {
   const t = useT("workspace");
   const task = p.task;
-  // Only the team starts a desktop again.
-  const manages = p.access?.manage ?? false;
+  // Whoever may use the desktop may start it again.
+  const starts = p.access?.drive ?? false;
   if (p.missing) return <Stage title={t("task.missing")} />;
   if (!task) return <Stage busy title={t("desktop.connecting")} />;
+  const resting = restingOf(task.state, p.access);
+  if (resting) return <RestingPane resting={resting} busy={p.busy} onResume={p.onStartDesktop} />;
   // One place for the picture, so it stays connected as a starting desktop becomes ready.
   if (p.desktop && (task.state === "ready" || task.state === "starting")) {
     return <div className="relative min-h-0 min-w-0 flex-1 bg-stage">{p.desktop}</div>;
@@ -359,20 +364,37 @@ export function DesktopPane(p: TaskScreenProps) {
     case "ready":
     case "starting":
       return <Starting step={task.step} since={task.stateChangedAt} />;
-    case "stopping":
-    case "deleting":
-      return <Stage busy title={t("desktop.stopping.title")} body={t("desktop.stopping.body")} />;
+    case "archiving":
+      return <Stage busy title={t("desktop.archiving.title")} body={t("desktop.archiving.body")} />;
     case "failed":
-      return <Stage title={t("desktop.failed.title")} body={task.failure ?? undefined} action={manages ? <StageButton label={t("desktop.failed.cta")} busy={p.busy} onClick={p.onStartDesktop} /> : undefined} />;
+      return <Stage title={t("desktop.failed.title")} body={task.failure ?? undefined} action={starts ? <StageButton label={t("desktop.failed.cta")} busy={p.busy} onClick={p.onStartDesktop} /> : undefined} />;
     default:
-      return (
-        <Stage
-          title={t("desktop.stopped.title")}
-          body={manages ? t("desktop.stopped.body") : t("share.stoppedBody")}
-          action={manages ? <StageButton label={t("desktop.stopped.cta")} busy={p.busy} onClick={p.onStartDesktop} /> : undefined}
-        />
-      );
+      return <Stage busy title={t("desktop.pausing.title")} body={t("desktop.pausing.body")} />;
   }
+}
+
+/**
+ * A paused or archived desktop. For whoever may use it the whole pane is one button: a click anywhere on it
+ * brings the desktop back. Someone who may only write to its agent is told a message does; someone who only
+ * watches is told who can.
+ */
+function RestingPane({ resting, busy, onResume }: { resting: Resting; busy: boolean; onResume: () => void }) {
+  const t = useT("workspace");
+  const title = t(`desktop.${resting.kind}.title`);
+  const body = t(`desktop.${resting.kind}.${resting.resume}`);
+  if (resting.resume !== "click") return <Stage title={title} body={body} />;
+  return (
+    <button
+      type="button"
+      onClick={onResume}
+      disabled={busy}
+      className="flex min-h-0 min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-3 bg-stage px-6 text-center text-stage-foreground outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/70 disabled:cursor-default disabled:opacity-70"
+    >
+      <span className="text-[15px] font-semibold text-white">{title}</span>
+      <span className="max-w-[380px] text-[13px] leading-relaxed">{body}</span>
+      <span className="mt-1 inline-flex h-9 items-center rounded-md bg-white px-4 text-[13px] font-semibold text-black">{t(`desktop.${resting.kind}.cta`)}</span>
+    </button>
+  );
 }
 
 const START_STEPS: StartStep[] = ["machine", "boot", "agent"];

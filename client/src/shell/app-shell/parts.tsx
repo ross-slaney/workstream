@@ -110,7 +110,7 @@ function TaskRow({ task, onOpen, onOpenBeside }: { task: ShellTask; onOpen: () =
   const { colors } = useTheme();
   const dot =
     task.state === "ready" ? "bg-positive"
-    : task.state === "starting" || task.state === "stopping" ? "bg-warning"
+    : task.state === "starting" || task.state === "stopping" || task.state === "archiving" ? "bg-warning"
     : task.state === "failed" ? "bg-destructive"
     : "bg-input";
   const state = task.state === "ready" && task.working ? t("state.working") : t(`state.${task.state}`);
