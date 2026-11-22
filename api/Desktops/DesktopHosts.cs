@@ -149,7 +149,7 @@ public sealed class DesktopOptions
         /// <summary>
         /// Each size's disk, in GiB: at least the image's 64. A large desktop is for a whole project's stack (its
         /// containers, packages and builds), so it has twice the room. A machine grows its file system to its disk
-        /// when it boots (desktop/image/configure.sh). Priced in <see cref="PriceOptions.DiskMonthlyUsd"/>.
+        /// when it boots (desktop/image/configure.sh). Priced by the gigabyte in <see cref="PriceOptions.StorageGbMonthUsd"/>.
         /// </summary>
         public Dictionary<string, int> DiskSizesGb { get; set; } = new()
         {
@@ -219,10 +219,15 @@ public sealed class DesktopOptions
         public double HoursPerDay { get; set; } = 6;
     }
 
+    /// <summary>The disk a desktop of this size is made with, in gigabytes: what its storage is counted at.</summary>
+    public int DiskGbOf(string size) => Azure.DiskSizesGb.GetValueOrDefault(size, Azure.DiskSizesGb.GetValueOrDefault(DesktopSizes.Standard, 64));
+
     /// <summary>
     /// What Workstream pays for the desktops: Azure's list prices in West US 3, in dollars, in one place. A
-    /// running machine by the hour and by size; a machine's disk by the month, which is all a stopped desktop
-    /// costs. What the desktops cost is the runs' hours times these (<see cref="DesktopRun"/>).
+    /// running machine by the hour and by size, and storage by the gigabyte a month and by kind. What the
+    /// desktops cost is the runs' hours (<see cref="DesktopRun"/>) and the storage's GB-months
+    /// (<see cref="StorageRun"/>) times these. They are costs, not what a customer is charged: nothing here
+    /// is shown to a team.
     /// </summary>
     public PriceOptions Prices { get; set; } = new();
 
@@ -234,21 +239,24 @@ public sealed class DesktopOptions
             [DesktopSizes.Standard] = 0.182m,
             [DesktopSizes.Large] = 0.364m,
         };
-        /// <summary>Each size's disk by the month: a Standard SSD of 64 GiB (E6) or 128 GiB (E10), as <see cref="AzureOptions.DiskSizesGb"/> sets it.</summary>
-        public Dictionary<string, decimal> DiskMonthlyUsd { get; set; } = new()
+        /// <summary>
+        /// A gigabyte kept for a month, by <see cref="StorageKind"/>. A desktop's disk is a Standard SSD, $4.80
+        /// a month for 64 GiB (E6) and $9.60 for 128 GiB (E10), which is $0.075 a gigabyte whichever size it is.
+        /// An archived task and a saved setup are full snapshots on standard storage.
+        /// </summary>
+        public Dictionary<string, decimal> StorageGbMonthUsd { get; set; } = new()
         {
-            [DesktopSizes.Small] = 4.80m,
-            [DesktopSizes.Standard] = 4.80m,
-            [DesktopSizes.Large] = 9.60m,
+            [StorageKind.Disk] = 0.075m,
+            [StorageKind.Archive] = 0.05m,
+            [StorageKind.Setup] = 0.05m,
         };
-        /// <summary>A saved setup, for each gigabyte on it, a month: a full snapshot on standard storage.</summary>
-        public decimal SaveGbMonthlyUsd { get; set; } = 0.05m;
-
-        public decimal SaveMonthlyOf(long bytes) => Math.Round(bytes / 1_073_741_824m * SaveGbMonthlyUsd, 2);
 
         public decimal HourOf(string size) => HourlyUsd.GetValueOrDefault(size, HourlyUsd.GetValueOrDefault(DesktopSizes.Standard));
 
-        public decimal DiskOf(string size) => DiskMonthlyUsd.GetValueOrDefault(size, DiskMonthlyUsd.GetValueOrDefault(DesktopSizes.Standard));
+        public decimal GbMonthOf(string kind) => StorageGbMonthUsd.GetValueOrDefault(kind);
+
+        /// <summary>What a saved setup with this much on it costs to keep for a month.</summary>
+        public decimal SaveMonthlyOf(long bytes) => Math.Round(StorageRun.GbOf(bytes) * GbMonthOf(StorageKind.Setup), 2);
     }
 }
 

@@ -62,6 +62,11 @@ var api = builder
     .WithEnvironment("Workstream__GitHub__ClientSecret", Setting("WORKSTREAM_GITHUB_CLIENT_SECRET", ""))
     .WithEnvironment("Workstream__GitHub__PrivateKey", Setting("WORKSTREAM_GITHUB_PRIVATE_KEY", ""))
     .WithEnvironment("Workstream__GitHub__WebhookSecret", Setting("WORKSTREAM_GITHUB_WEBHOOK_SECRET", ""))
+    // Sign in with GitHub: a GitHub OAuth client of the developer's own whose callback is this API's
+    // /sqlos/auth/oidc/callback (infra/README.md, "Sign in with GitHub"). Without both, the sign-in page
+    // shows no GitHub button.
+    .WithEnvironment("SqlOS__Oidc__GitHub__ClientId", Setting("WORKSTREAM_GITHUB_OAUTH_CLIENT_ID", ""))
+    .WithEnvironment("SqlOS__Oidc__GitHub__ClientSecret", Setting("WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET", ""))
     .WithUrl(apiOrigin, "API")
     .WithUrl($"{apiOrigin}/sqlos", "SqlOS")
     .WithUrl($"{apiOrigin}/openapi/v1.json", "OpenAPI")

@@ -100,8 +100,9 @@ public sealed class AzureSavedSetupLive
             // What a setup script leaves: a file in the person's work folder, written to the disk. The answer
             // also says the disk grew to this size's disk and the desktop's own service came up.
             var wrote = await TimedAsync("its guest answers, and the file is written as a setup would", () => arm.RunAsync(preparing.Name,
-                $"sudo -u work bash -c 'mkdir -p ~/work/project && echo {marker} > ~/work/project/marker' && sync && df -BG --output=size / | tail -1 && systemctl is-active workstream-desktop.service", ct));
+                $"sudo -u work bash -c 'mkdir -p ~/work/project && echo {marker} > ~/work/project/marker' && sync && df -BG --output=size / | tail -1 && systemctl is-active workstream-desktop.service && {BootFacts}", ct));
             StringAssert.Contains(wrote, "active");
+            Say($"           {BootOf(wrote)}");
             Assert.IsTrue(DiskGbOf(wrote) >= diskGb - 3, $"The disk did not grow to {diskGb} GB: {wrote}");
             // A real setup leaves gigabytes: packages, images, a build. Written here as data that does not
             // compress, so the save and the disk made from it carry all of it.
@@ -121,8 +122,9 @@ public sealed class AzureSavedSetupLive
             await DoAsync("make a second machine from the save (a disk from the snapshot, then the machine, and it has an address)", () => host.CreateAsync(task, ct));
             await DoAsync("the second machine is on", () => OnAsync(host, task.Name, ct));
             var read = await TimedAsync("its guest answers, and the file is there", () => arm.RunAsync(task.Name,
-                "cat /home/work/work/project/marker && stat -c %U /home/work/work/project/marker && df -BG --output=size / | tail -1 && systemctl is-active workstream-desktop.service", ct));
+                $"cat /home/work/work/project/marker && stat -c %U /home/work/work/project/marker && df -BG --output=size / | tail -1 && systemctl is-active workstream-desktop.service && {BootFacts}", ct));
             StringAssert.Contains(read, marker, "The second machine's disk does not have what the first one wrote.");
+            Say($"           {BootOf(read)}");
             StringAssert.Contains(read, "work");
             StringAssert.Contains(read, "active");
             Assert.IsTrue(DiskGbOf(read) >= diskGb - 3, $"The disk made from the save is not {diskGb} GB: {read}");
@@ -168,6 +170,15 @@ public sealed class AzureSavedSetupLive
     }
 
     void Say(string line) => TestContext.WriteLine(line);
+
+    /// <summary>
+    /// What the machine itself says of its start, since a run command is answered only once Azure's guest
+    /// agent is ready, which can be minutes after the desktop is: how long the machine had been up when the
+    /// command ran, and how many seconds after its kernel started the desktop's own service did.
+    /// </summary>
+    const string BootFacts = "echo \"boot: up $(cut -d. -f1 /proc/uptime) s when asked; the desktop's service started $(( $(systemctl show -p ActiveEnterTimestampMonotonic --value workstream-desktop.service) / 1000000 )) s after the kernel\"";
+
+    static string BootOf(string output) => output.Split('\n', StringSplitOptions.TrimEntries).LastOrDefault(line => line.StartsWith("boot:", StringComparison.Ordinal)) ?? "boot: not said";
 
     /// <summary>The size of the root file system in a `df -BG --output=size /` answer: the one line that is a number and a G.</summary>
     static int DiskGbOf(string output) =>

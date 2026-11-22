@@ -19,7 +19,7 @@ a person's browser
                                  └── calls the API at its public address, with its own key
 ```
 
-- **The web app** has no secrets and no database. Public pages (the landing page, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session.
+- **The web app** has no secrets and no database. Public pages (the landing page, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session. Its `/auth/callback` page is where SqlOS sends the browser, with a code, after someone signs in with GitHub.
 - **The API** is one process: the REST API with SqlOS for sign-in and authorization, the relay that carries a desktop's display to the people watching it, the gateway every agent's model calls go through, and the background jobs (Hangfire, in the app's own database) that make, stop and delete desktops.
 - **A desktop** is a Debian virtual machine with the XFCE desktop on a TigerVNC display, made from one image. A machine made from the image starts as it is: nothing provisions it, and it learns what it is for from its user data. In development it is a Docker container built from the same two scripts.
 
@@ -68,7 +68,7 @@ Cloning the repository and running the setup script is the slow part of a new de
 - A task's machine is made from the save while the save is for the environment's setup inputs (a fingerprint of the repository, branch, script, variables, apps and size, since a save is one size's disk) and for this release's image version. On Azure a disk is made from the snapshot with `createOption: Copy`, stating no security profile because it inherits Trusted Launch from the snapshot, and the machine attaches it (`createOption: Attach`). The task's agent finds `prepared.json`, pulls the branch, skips the setup script, and says "Started from the setup prepared 2 days ago (main at a1b2c3d), 14 commits newer now."
 - Anything else starts from the image and does the setup itself, as before: an environment never prepared, a save out of date, a preparation that failed, and a task started while its environment is still being prepared.
 
-What it can cost is limited by settings (`Workstream:Desktops:Saves`): one machine preparing at once over every team, four hours of preparing a day, each attempt as long as the setup script may run and half an hour more ("The setup script", above), one save an environment, deleted after 30 days nothing started from it. Its time is a line of its own on the system administrator's page, and so are the saves kept.
+What it can cost is limited by settings (`Workstream:Desktops:Saves`): one machine preparing at once over every team, four hours of preparing a day, each attempt as long as the setup script may run and half an hour more ("The setup script", above), one save an environment, deleted after 30 days nothing started from it. Its time is a line of its own on the system administrator's page, and so is the storage the saves take.
 
 The Azure host's part of this is checked against Azure itself by `tests/Workstream.Tests/AzureSavedSetupLive.cs`, which runs `AzureDesktopHost` in a resource group of its own when it is told one ([infra/README.md](../infra/README.md), "What it costs when people use it"): a machine from the gallery image, a file written on its disk, the machine stopped and its disk saved, a second machine made from the save with the file there, and all of it removed. Measured in West US 3 on 21 November 2026, from image 0.6.0:
 
@@ -119,7 +119,7 @@ A team's real project usually runs as several programs at once: a database in a 
 | Standard | 4 cores, 16 GB (`Standard_D4as_v7`) | 64 GB |
 | Large | 8 cores, 32 GB (`Standard_D8as_v7`) | 128 GB |
 
-The disk of each size is a setting (`Workstream:Desktops:Azure:DiskSizesGb`) priced beside the machines (`DesktopOptions.Prices`). The image is 64 GB, so a machine with a larger disk grows its file system to it when it first boots (`image/grow-disk.sh`). A project with a database, an API and a web bundler wants Large.
+The disk of each size is a setting (`Workstream:Desktops:Azure:DiskSizesGb`), and is what the desktop's storage is counted at ("What the desktops cost" below). The image is 64 GB, so a machine with a larger disk grows its file system to it when it first boots (`image/grow-disk.sh`). A project with a database, an API and a web bundler wants Large.
 
 The Android emulator runs on every size, on AMD's processors as on Intel's. `/dev/kvm` is open to the desktop's person through the `kvm` group, which the desktop's service carries, and the emulator boots as that person to Android's home screen, with `adb` listing it. Measured on desktops made from image 0.6.0, started on the desktop's display as the agent starts it:
 
@@ -143,6 +143,25 @@ A desktop started again after a stop starts Docker when it has containers, so th
 
 The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, and deliver changes on a branch of their own as a pull request opened with `gh`. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
 
+## What the desktops cost
+
+Two kinds of rows are what usage and cost are added up from, and neither holds a price:
+
+- `DesktopRun`: one stretch of a machine running, with its size and what it ran for (a task's desktop, a spare, a machine preparing an environment). Hours by size are a team's desktop time; hours by purpose and size are what the machines cost.
+- `StorageRun`: one stretch of a team keeping something at one size. A desktop's disk (`disk`) is counted at its full size, since that is what a provisioned disk is billed at; an archived task (`archive`) and a saved setup (`setup`) are snapshots, counted at what is on them. Gigabytes times hours kept, over 730, is GB-months.
+
+Storage rows are derived, not written by the jobs that make and remove disks. `StorageJobs.ReconcileAsync` runs every fifteen minutes on the same Hangfire server: it lists what every team keeps now (tasks with a machine or an archive, environments with a save) and makes the open rows agree, beginning, ending, or ending and beginning again when a size changed (`StorageRun.Reconcile`, [the core model](core-model.md#usage-and-limits)). A row is therefore exact to fifteen minutes, and the job can be run again, or miss a run, without counting anything twice.
+
+The rates are one table, `DesktopOptions.Prices` (`Workstream:Desktops:Prices`), and they are what Workstream pays Azure, in West US 3:
+
+| Line | Rate |
+| --- | --- |
+| A running machine, by size | $0.091 (small), $0.182 (standard), $0.364 (large) an hour |
+| A desktop's disk (`disk`) | $0.075 a gigabyte a month: a Standard SSD, $4.80 for 64 GiB and $9.60 for 128 |
+| An archived task (`archive`), a saved setup (`setup`) | $0.05 a gigabyte a month: a full snapshot on standard storage |
+
+The system administrator's page multiplies each line by its rate. A team's Usage page shows the same lines as amounts, hours by size and GB-months by kind, with no dollars: there is no customer price yet, and when there is one it is a second column in this table, not new rows. A spare's and a preparing machine's own disks last minutes and are not counted.
+
 ## Models
 
 The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.
@@ -150,6 +169,8 @@ The harness calls models the way it calls Microsoft Foundry, at `…/api/model/a
 The prices are a table in `ModelOptions`, with the two things that make a call cost more than its plain rate: a cache write kept for an hour, and Haiku's higher rate for a prompt over 100,000 tokens. They are what Workstream pays; `Markup` is 1 until there is billing.
 
 ## GitHub
+
+GitHub appears twice, and the two do not meet. People may sign in with GitHub, which is SqlOS's own connection to a GitHub OAuth client and reads a person's profile and verified address only ([the core model](core-model.md), "Sign up and sign in"); SqlOS keeps no GitHub token from it. Repositories are reached through Workstream's GitHub App, below.
 
 A team connects GitHub by installing Workstream's GitHub App on its account or organization ([the core model](core-model.md), "Connect GitHub"). The API holds the app's private key and signs, with it, the short JWT GitHub takes from an app (`api/GitHub/GitHubApp.cs`, RS256, nine minutes). With that it asks GitHub for an installation token whenever a desktop asks for one, for that desktop's repository alone, and hands it over without keeping it.
 
@@ -174,7 +195,7 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | Kept in | What |
 | --- | --- |
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
-| The app's tables | Teams' limits, environments, tasks, messages, how the setup script went on a task's desktop (its state and last lines), desktop runs (for hours), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
+| The app's tables | Teams' limits, environments, tasks, messages, how the setup script went on a task's desktop (its state and last lines), desktop runs (for hours by size), storage runs (for GB-months by kind), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |
 | The browser | The session's tokens, and which team was open last. |

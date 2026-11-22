@@ -145,12 +145,12 @@ public sealed class SetupJourneys
         Assert.IsNull((await SetupOfAsync(added.Id))!.WantedAt);
 
         // The system administrator sees the preparing time as a line of its own, the save kept, and the start from it.
+        await Stack.Storage.ReconcileAsync(CancellationToken.None);
         using (var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword))
         {
             var overview = await administrator.GetAsync<AdminOverview>("/api/admin/overview");
             Assert.IsTrue(overview.Machines.ThisMonth.Any(x => x.Purpose == MachinePurpose.Prepare));
-            Assert.IsTrue(overview.Machines.Saves >= 1);
-            Assert.IsTrue(overview.Machines.SavesMonthlyUsd >= 0.50m);
+            Assert.IsTrue(overview.Machines.Storage.Single(x => x.Kind == StorageKind.Setup) is { Kept: >= 1, Gb: >= 10m });
             Assert.IsTrue(overview.Starts.Any(x => x.Source == StartSource.Save));
         }
         // The team's usage is its tasks' desktops: preparing is Workstream's cost.

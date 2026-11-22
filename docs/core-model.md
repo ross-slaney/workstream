@@ -29,7 +29,7 @@ Any column that names an actor holds a principal id.
 | `group` | System administrators | `group::system_admins` | Seeded. Its members belong to the platform, not to a team. |
 | `service_account` | A desktop | `service_account::desktop-{desktopId}` | What the agent on that desktop signs in as, with a key only that desktop holds. The id is the task's for a desktop made for a task, and the spare's own for a spare. The key says which desktop is calling; what it may do is the grant below. |
 | `service_account` | The machine preparing an environment | `service_account::desktop-{setupId}` | One for each environment, with an id made from the environment's id (`EnvironmentSetup.DesktopIdFor`), so it is never a task's or a spare's. Each attempt to prepare gives it a new key, so a machine from an earlier attempt cannot speak for the current one. |
-| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare and prepare environments. No credential: the jobs run in the API process. |
+| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare, prepare environments, and write down what each team keeps on storage. No credential: the jobs run in the API process. |
 | `agent` | The task notifier | `agent::task-notifier` | The background job that emails a task's people when the agent's turn ends. No credential. |
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
@@ -63,7 +63,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | --- | --- | --- |
 | `ADMIN_VIEW` | root | The system administrator's dashboard, and changing a team's limits. |
 | `TEAM_VIEW` | team | See the team, its people, its limits, and its GitHub connection with the repositories it reaches. |
-| `TEAM_VIEW_USAGE` | team | See what the team used this month. |
+| `TEAM_VIEW_USAGE` | team | See what the team used this month: models, desktop hours by size, storage by kind. |
 | `TEAM_MANAGE_MEMBERS` | team | Invite, remove and change people. |
 | `TEAM_MANAGE_SETTINGS` | team | Rename the team; connect and disconnect GitHub. |
 | `TEAM_CREATE_ENVIRONMENT` | team | Add an environment. |
@@ -75,7 +75,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_DRIVE` | task | Use the desktop's mouse, keyboard and clipboard. Without it the relay drops what the browser would send them. |
 | `TASK_MANAGE` | task | Rename, stop, start and delete it; share it, see who it is shared with, and take a share back. |
 | `TASK_RUN_AGENT` | task | The desktop's own: read its setup, say how its setup script is going, exchange messages, call the model, and get a GitHub token for its environment's repository. |
-| `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop. |
+| `TASK_OPERATE_DESKTOP` | task | The operator's own: start, stop and delete the desktop, and count the disk or archive the task keeps. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
 | `TASK_NOTIFY` | task | The notifier's own: read what the agent last said and email the task's people about it. |
 | `ENVIRONMENT_RUN_SETUP` | environment | The preparing desktop's own: read the environment's setup, with its variables, and say how it went. |
@@ -143,12 +143,13 @@ Grants are derived from these events. Nothing revokes "the grant this action mad
 | A team's environments | `Environments` in the team | `ENVIRONMENT_VIEW` | `Name` |
 | A task's messages | `TaskMessages` of the task, after an id | `TASK_VIEW` | `Id` |
 | Desktops the operator sweeps | `Tasks` | `TASK_OPERATE_DESKTOP` | `Id` |
+| What the tasks keep, for the storage job | `Tasks` that have a machine or an archive | `TASK_OPERATE_DESKTOP`, as the operator | `Id` |
 | The task a desktop works on | `Tasks` | `TASK_RUN_AGENT`, as the desktop | `Id`, first one |
 | The environment a desktop prepares | `Environments` | `ENVIRONMENT_RUN_SETUP`, as the desktop | `Id`, first one |
 
 "Shared with me" leaves out the teams the person is on (their SqlOS memberships), so what the page finds is what a task grant reaches. The filter is applied under each of the person's nodes, so the page also reads past their own teams' tasks under their team grants.
 
-A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Who a task is shared with is SqlOS's grants on the task's node with the three sharing roles whose `EffectiveTo` has not passed, and its waiting invitations are `TaskInvitations` rows, both read after one `TASK_MANAGE` check on the task. Usage and the administrator's numbers are sums, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
+A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Who a task is shared with is SqlOS's grants on the task's node with the three sharing roles whose `EffectiveTo` has not passed, and its waiting invitations are `TaskInvitations` rows, both read after one `TASK_MANAGE` check on the task. Usage and the administrator's numbers are sums over `ModelUsage`, `DesktopRuns` and `StorageRuns`, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
 
 ## App data, and why SqlOS does not hold it
 
@@ -161,7 +162,8 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `TaskSetups` | The environment's setup script as it ran on a task's own desktop: running, done, failed or stopped for running too long, its exit code, the last lines it wrote, when, and the limit it ran under. One row a task that ran one, deleted with it. | A lifecycle and content of the task's, like its desktop's state: it is read with the task's conversation after `TASK_VIEW`, and written only by the task's own desktop (`TASK_RUN_AGENT`). |
 | `TaskMessages` | The conversation. | Content. |
 | `TaskInvitations` | A task shared with an address that has no account yet: the address, the role and end it will be granted with, who shared it, the hash of the link's token, and when the link stops working (a week, or sooner if the access ends sooner). | There is no principal to grant yet. SqlOS's invitations are memberships of an organization, and this person is not joining the team, so the grant waits here until they take the link; then it is a grant and the row is gone. If SqlOS gains an invitation to a role on a node, this table goes. |
-| `DesktopRuns` | When each machine ran, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own stopped machine), and when each step of it happened. | Usage, cost, and how long starts take. |
+| `DesktopRuns` | When each machine ran, at which size, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own stopped machine), and when each step of it happened. | Usage, cost, and how long starts take. |
+| `StorageRuns` | Each stretch of a team keeping something at one size: the kind (`disk`, `archive`, `setup`), the task or environment it belongs to, the gigabytes, and when it began and ended. | Usage and cost, like `DesktopRuns`. It relates a team to an amount, not a principal to a node, and is derived: a job makes the open rows agree with what the tasks and environments say is kept, so nothing else writes them. |
 | `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
 | `ModelUsage` | Tokens and cost of each model call. | Usage. |
 | `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
@@ -175,6 +177,17 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 ### Sign up and sign in
 
 The app draws sign-in itself against SqlOS's headless endpoints: an emailed code in production, or a password where `Workstream:Auth:PasswordSignIn` is on (development and tests). A new person gets a team named after them, a default environment, and `team_admin` on the team.
+
+Where the deployment has a GitHub OAuth client (`SqlOS:Oidc:GitHub:ClientId` and `ClientSecret`; infra/README.md, "Sign in with GitHub"), the form also shows Continue with GitHub, on the sign-in page and on the command line's page. It is SqlOS's own GitHub connection, seeded in code (`api/Workstream.cs`, `SeedGitHubSignIn`); the app adds no table, no flow and no rule of its own:
+
+1. SqlOS lists GitHub with the sign-in flow, and the form shows the button. Without the two settings it lists nothing and the form has no button.
+2. Pressing it asks SqlOS where to go (`/headless/provider/start`) and the browser leaves for GitHub, which asks the person for their profile and their email addresses (`read:user`, `user:email`) and nothing of their repositories.
+3. GitHub sends the browser to SqlOS's callback on the API (`/sqlos/auth/oidc/callback`). SqlOS reads the GitHub account's number and its verified primary address. An account it has seen before is that person. Otherwise an address that already has an account is that person, and the GitHub account is attached to them. Otherwise it is someone new, who gets what a new person gets. A GitHub account with no verified primary address is refused.
+4. SqlOS sends the browser to the web app's `/auth/callback` with a code, which the page exchanges with what the sign-in page kept for the trip (its `state` and PKCE verifier, in the tab's storage). On the command line's page SqlOS hands the browser back to that page, signed in, to allow the command line or not.
+
+Someone GitHub did not sign in comes back to the form, which says so and still takes their email. That includes a person on several teams: SqlOS asks which team the session is for, and after a trip to a provider SqlOS 11.4.1 does not tell a page of the app's own which teams there are, so the page cannot answer as it does for an emailed code. They sign in with their email. An invitation is for one address, so its form shows no GitHub button.
+
+Signing in with GitHub says who a person is and nothing more. SqlOS does not keep the token GitHub gave it, or hand it to the app, so a desktop's repository access still comes from the team's GitHub connection ("Connect GitHub" below).
 
 An invitation's link carries a token. Signing in, or creating an account, with the token attached is what accepts it: the link proves the mailbox, so someone new only gives their name. They land in the team that invited them, and someone who created their account this way gets no team of their own.
 
@@ -277,7 +290,23 @@ On the desktop, git's credential helper and the wrapper around gh ask for the to
 
 ### Usage and limits
 
-A team has a model allowance for the calendar month and a limit on desktops running at once. People on the team see what was used. A system administrator sees every running desktop and can change a team's limits. Payments are not built; the numbers that a bill would be made from are.
+A team has a model allowance for the calendar month and a limit on desktops running at once. People on the team see what was used this month (`GET /api/teams/{id}/usage`, `TEAM_VIEW_USAGE`), in the units a bill would use:
+
+- **Models**: dollars spent against the allowance, from `ModelUsage`.
+- **Desktop time**: hours for each size the team's tasks ran on (small, standard, large), from `DesktopRuns` with the purpose `task`. A spare and a machine preparing an environment are Workstream's cost, not the team's. How many are running now is shown beside the limit.
+- **Storage**: GB-months for each kind the team kept, from `StorageRuns`, with the gigabytes kept now.
+
+| Kind | What is kept | Counted at |
+| --- | --- | --- |
+| `disk` | The disk of a task's desktop, while the task has a machine (`Tasks.Host`), running or not. | The disk's full size for the desktop's size (`Workstream:Desktops:Azure:DiskSizesGb`). |
+| `archive` | What is kept of an archived task (`Tasks.Archive`). | What is on it (`Tasks.ArchiveBytes`). |
+| `setup` | An environment's saved setup (`EnvironmentSetups.Save`). | What is on it (`SaveBytes`). |
+
+A GB-month is one gigabyte kept for a month of 730 hours: the sum, over the rows, of gigabytes times the hours kept inside the month, divided by 730.
+
+Storage is not written when something happens. Every fifteen minutes a job (`StorageJobs`, as `agent::desktop-operator`) reads what every team keeps now, from the operator's page of tasks and from the saved setups, and makes the open `StorageRuns` rows agree: it begins a row for anything kept that has none, ends the row of anything that is gone, and when a size changed ends the row and begins another at the same moment. Run twice, it does nothing the second time, and a run that was missed is put right by the next, so a row is exact to fifteen minutes.
+
+The team's page shows amounts and no prices, except the model allowance. A system administrator sees every running desktop, can change a team's limits, and sees what each line costs Workstream: machine hours by purpose and size, and storage by kind, each at its rate in `DesktopOptions.Prices` (architecture.md, "What the desktops cost"). Payments are not built, and no customer price exists; the numbers that a bill would be made from are.
 
 ## Decisions
 
@@ -287,10 +316,11 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 - **The API is the only way into a desktop.** Desktops have no inbound access from the internet or from each other. The relay authorizes every stream.
 - **A GitHub connection is a row, and its tokens are minted, not kept.** Which installation a team uses is configuration, not access: nobody is granted on it. A desktop's token is made for one repository, for an hour, at the moment it is asked for, so nothing in the database or on a desktop's disk is worth stealing, and a stolen token is worth one repository for less than an hour.
 - **An installation is the person's to name only if GitHub says their account reaches it.** The installation id GitHub puts in the address can be changed by anyone, so the connection is made only after the person's own GitHub account is asked which installations it can reach, and only by the signed-in person the state was signed for.
+- **Sign in with GitHub is SqlOS's connection and says only who a person is.** The whole of it is one seeded connection and a button over SqlOS's headless flow. It asks GitHub for the profile and the verified address, not for repositories, because nothing could use more: SqlOS reads the profile with GitHub's token and drops it. Giving a desktop the token of the person who started its task needs SqlOS to keep that token, or to hand it to the app at sign-in. Until it does, the team's GitHub App connection is how a desktop reaches a repository, and the app does not run an OAuth flow of its own beside SqlOS's to get one.
 - **All inference goes through the gateway.** The Foundry key never leaves the API. Usage is recorded where it is spent.
 - **The command line signs in through the browser with SqlOS's device flow, not with an API key and not with a loopback redirect.** SqlOS has a client for exactly this (`SeedCliClient`: public, no secret, the device and refresh grants, an allow-list of scopes and one audience), and its headless flow has the device steps (`/headless/device/resolve`, `approve`, `deny`), so the approval is one more page of the web app over the sign-in it already has. The token is the person's own session, so the command line has the person's grants as they are now, and loses them when the person does. An API key in SqlOS is a machine client bound to a service account, a principal of its own: to act as the person it would need grants copied from theirs on every team and kept in step with their memberships, a stored copy of access that the rules forbid. Authorization code with PKCE on a loopback address would also work in SqlOS, but it needs a free local port and a browser on the same machine, and the web app's sign-in would have to finish another client's request; the device flow needs neither, so it also works over SSH, in a container or on a dev VM. A scope of its own (`workstream.start`) keeps the command line to reading and starting tasks: a token taken from a laptop cannot stop, delete, rename or write to a task, change a team, or open a desktop.
 - **The agent is Workstream's own, on the Claude Agent SDK.** Anthropic's terms for hosting Claude Code itself require each end user to bring their own credential; products built on the Agent SDK use the developer's API key or cloud provider. Claude Code is not wired to Workstream's inference.
 
 ## Not built yet
 
-Payments, API keys for integrations, single sign-on, a private task inside a shared team, Windows desktops, a list in the web app of the command lines a person has signed in, to sign one out from there, a saved setup for a spare.
+Payments, API keys for integrations, single sign-on, a desktop that pushes and opens pull requests as the person who started its task (from their sign-in with GitHub, once SqlOS keeps or hands over the person's GitHub token), connecting GitHub to an account that signed in by emailed code at another address, signing in with GitHub for a person on several teams, a private task inside a shared team, Windows desktops, a list in the web app of the command lines a person has signed in, to sign one out from there, a saved setup for a spare.
