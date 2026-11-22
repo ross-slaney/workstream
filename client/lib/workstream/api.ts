@@ -152,7 +152,21 @@ export type Message = { id: number; author: "person" | "agent"; authorName: stri
 /** What the reader may do with a task: write to its agent, use its desktop's mouse and keyboard, and rename, stop, delete and share it. */
 export type TaskAccess = { prompt: boolean; drive: boolean; manage: boolean };
 
-export type Conversation = { messages: Message[]; task: Task; access: TaskAccess };
+/**
+ * The environment's setup script on the task's own desktop: `running` with the last lines it wrote, `done`,
+ * `failed` with its `exit` code, or `timed_out` when it ran for `limitMinutes` and the desktop stopped it.
+ */
+export type TaskSetup = {
+  state: "running" | "done" | "failed" | "timed_out";
+  exit: number | null;
+  output: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  limitMinutes: number;
+};
+
+/** `setup` is null when the task's desktop never ran a setup script: its environment has none, or it started from a saved setup. */
+export type Conversation = { messages: Message[]; task: Task; access: TaskAccess; setup: TaskSetup | null };
 
 /** What a task is shared to do: watch it, watch it and write to its agent, or use its desktop too. */
 export type ShareRole = "watcher" | "prompter" | "driver";

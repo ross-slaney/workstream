@@ -134,6 +134,13 @@ public sealed class DesktopOptions
     public int ArchiveDays { get; set; } = Team.DefaultArchiveAfterDays;
     /// <summary>A desktop that has not exchanged with the API this long after being asked to start has failed.</summary>
     public int StartTimeoutMinutes { get; set; } = 15;
+    /// <summary>
+    /// How long an environment's setup script may run, on a task's desktop and on a machine preparing a saved
+    /// setup alike. A real project's install and first build take a while, so it is generous; past it the
+    /// desktop stops the script and says so. The desktop is told this with its setup (<see cref="DesktopSetup"/>).
+    /// A task is never failed for it: its desktop is ready from its agent's first exchange, which comes before the script starts.
+    /// </summary>
+    public int SetupMinutes { get; set; } = 45;
     /// <summary>The port a desktop's display listens on.</summary>
     public int DisplayPort { get; set; } = 5900;
     public AzureOptions Azure { get; set; } = new();
@@ -204,8 +211,12 @@ public sealed class DesktopOptions
         public bool Enabled { get; set; } = true;
         /// <summary>Machines preparing at once, over every team.</summary>
         public int AtOnce { get; set; } = 1;
-        /// <summary>A setup that has not ended this long after its machine was asked for has failed.</summary>
-        public int MaxMinutes { get; set; } = 45;
+        /// <summary>
+        /// A preparing machine that has not ended this long after it was asked for has failed. It covers the
+        /// machine's start, the clone, the setup script and saving the disk, so it is never less than the
+        /// script's own limit and half an hour more (<see cref="DesktopOptions.PrepareMinutes"/>).
+        /// </summary>
+        public int MaxMinutes { get; set; } = 75;
         /// <summary>A save older than this is made again when a task next starts from it. The task itself uses the old one.</summary>
         public int RefreshDays { get; set; } = 7;
         /// <summary>A save nothing has started from for this long is removed, and made again on next use.</summary>
@@ -213,6 +224,9 @@ public sealed class DesktopOptions
         /// <summary>Hours of preparing in any 24 hours, over every team. Past it, what is wanted waits.</summary>
         public double HoursPerDay { get; set; } = 4;
     }
+
+    /// <summary>How long a preparing machine may take in all: <see cref="SaveOptions.MaxMinutes"/>, and never less than the setup script's limit and half an hour for the machine, the clone and the save.</summary>
+    public int PrepareMinutes => Math.Max(Saves.MaxMinutes, SetupMinutes + 30);
 
     /// <summary>
     /// What a saved setup is only good for: desktops of this version of the image. On Azure it is the version
@@ -773,6 +787,9 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
             "run", "-d", "--name", spec.Name, "--hostname", "desktop", "--shm-size", "1g",
             "--label", "workstream.desktop=" + spec.DesktopId, "--label", "workstream.purpose=" + spec.Purpose,
             "-p", $"127.0.0.1::{options.DisplayPort}",
+            // The desktop reaches the API on this computer by this name (apphost/AppHost.cs). Docker Desktop
+            // gives it to every container; Docker Engine on Linux gives it only when asked, like this.
+            "--add-host", "host.docker.internal:host-gateway",
             "-e", "WORKSTREAM_API=" + spec.ApiUrl, "-e", "WORKSTREAM_KEY=" + spec.Key,
             spec.Archive is not null ? ArchiveImage(spec.Archive) : spec.Save is null ? options.Docker.Image : SaveImage(spec.Save),
         ], ct);

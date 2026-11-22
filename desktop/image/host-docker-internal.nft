@@ -1,0 +1,31 @@
+# host.docker.internal on a desktop (configure.sh, "host.docker.internal"). The name is one address,
+# 172.16.255.254, for a container and for the desktop itself, and anything sent to it is delivered to the
+# desktop's own loopback address. So a container reaches a server on the desktop whether it listens on every
+# address or only on localhost, as it does through Docker Desktop on a Mac.
+#
+# Loaded at boot (workstream-host-name.service), in a table of its own that Docker never touches. Loading it
+# again replaces it.
+table ip workstream_host
+delete table ip workstream_host
+table ip workstream_host {
+  # Delivering to loopback from a bridge needs net.ipv4.conf.all.route_localnet (configure.sh). With that on,
+  # nothing arriving from outside may name the loopback network itself. This runs before the address below
+  # is rewritten, so what it drops was sent to 127.x as it arrived.
+  chain guard {
+    type filter hook prerouting priority raw; policy accept;
+    iifname != "lo" ip daddr 127.0.0.0/8 drop
+  }
+
+  # From a container, on Docker's bridge or on a network of a project's own (compose).
+  chain from_containers {
+    type nat hook prerouting priority dstnat - 10; policy accept;
+    iifname "docker0" ip daddr 172.16.255.254 dnat to 127.0.0.1
+    iifname "br-*" ip daddr 172.16.255.254 dnat to 127.0.0.1
+  }
+
+  # From the desktop itself, where the name is the same address (/etc/hosts).
+  chain from_here {
+    type nat hook output priority -110; policy accept;
+    ip daddr 172.16.255.254 dnat to 127.0.0.1
+  }
+}

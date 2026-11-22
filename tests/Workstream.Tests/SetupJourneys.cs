@@ -67,10 +67,11 @@ public sealed class SetupJourneys
     }
 
     /// <summary>A sweep whose settings for saves are these.</summary>
-    static DesktopJobs SweepWith(Action<DesktopOptions.SaveOptions> saves)
+    static DesktopJobs SweepWith(Action<DesktopOptions.SaveOptions> saves, Action<DesktopOptions>? desktops = null)
     {
         var options = new DesktopOptions { Host = "none", ApiUrl = Options.ApiUrl, Saves = { AtOnce = 1000, HoursPerDay = 100000 } };
         saves(options.Saves);
+        desktops?.Invoke(options);
         return new DesktopJobs(Stack.Services.GetRequiredService<IServiceScopeFactory>(), Stack.Desktops, options, TimeProvider.System, Stack.Services.GetRequiredService<ILogger<DesktopJobs>>());
     }
 
@@ -209,6 +210,25 @@ public sealed class SetupJourneys
         Assert.IsTrue(Stack.Desktops.Saves.ContainsKey(second));
         Assert.AreEqual("prepared", (await EnvironmentAsync(ada, draft.Id)).Setup.State);
 
+        // A save is one size's disk. Another size is a changed setup too: a task of the new size starts from
+        // the image, on a disk of its own size, and the environment is prepared again at that size.
+        var larger = Body(draft) with { Size = "large", Variables = [new VariableChange("API_KEY", null)] };
+        await ada.PutAsync($"/api/environments/{draft.Id}", larger).IsAsync(HttpStatusCode.OK);
+        var resized = await SetupOfAsync(draft.Id);
+        Assert.IsNotNull(resized!.WantedAt);
+        Assert.AreEqual("setup", resized.OutOfDateBecause(await LoadEnvironmentAsync(draft.Id), Options.ImageVersion));
+        var large = await StartAsync(ada, team.Id, draft.Id);
+        using (await Desktop.StartAsync(large.Id))
+        {
+            Assert.AreEqual("large", Stack.Desktops.For(large.Id).Size);
+            Assert.IsNull(Stack.Desktops.For(large.Id).Save);
+        }
+        await DeleteTaskAsync(ada, large.Id);
+        var third = await PrepareAsync(draft.Id);
+        Assert.AreNotEqual(second, third);
+        Assert.IsFalse(Stack.Desktops.Saves.ContainsKey(second));
+        Assert.AreEqual("prepared", (await EnvironmentAsync(ada, draft.Id)).Setup.State);
+
         // Nothing left to prepare: the save goes.
         await ada.PutAsync($"/api/environments/{draft.Id}", Body(draft) with { RepositoryUrl = null, SetupScript = null }).IsAsync(HttpStatusCode.OK);
         Assert.AreEqual("nothing", (await EnvironmentAsync(ada, draft.Id)).Setup.State);
@@ -289,12 +309,17 @@ public sealed class SetupJourneys
         await preparing.PostAsync(path, new { }).IsAsync(HttpStatusCode.Unauthorized);
         await ada.PostAsync("/api/desktop/setup", new SetupReport("done", 0, null, null, null)).IsAsync(HttpStatusCode.Unauthorized);
         Assert.AreEqual(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/desktop/setup")).StatusCode);
-        // A task's desktop prepares nothing: it can neither read nor report an environment's preparing.
-        var task = await StartAsync(ada, team.Id, plain.Id);
+        // A task's desktop prepares nothing: it cannot read an environment's preparing, and what it says of a
+        // setup is about the script on its own desktop, kept with its task (TaskSetupJourneys). The attempt
+        // under way is untouched by it.
+        var task = await StartAsync(ada, team.Id, draft.Id);
         using (var desktop = await Desktop.StartAsync(task.Id))
         {
             Assert.IsFalse((await desktop.SetupAsync()).Prepare);
-            await desktop.ReportAsync("done", exit: 0).IsAsync(HttpStatusCode.NotFound);
+            await desktop.ReportAsync("done", exit: 0, commit: Commit, bytes: TenGigabytes).IsAsync(HttpStatusCode.NoContent);
+            var untouched = (await SetupOfAsync(draft.Id))!;
+            Assert.IsTrue(untouched.IsPreparing);
+            Assert.IsFalse(untouched.RunSaving);
         }
         await DeleteTaskAsync(ada, task.Id);
         // A state it does not know is refused in words.
@@ -346,9 +371,14 @@ public sealed class SetupJourneys
             await Stack.Jobs.SweepAsync(CancellationToken.None);
             Assert.IsNotNull(Stack.Desktops.Preparing(waiting.Id));
 
-            // An attempt that runs longer than the setting allows fails, and its machine goes.
+            // An attempt is given at least as long as the setup script may run and half an hour more, whatever
+            // the saves' own limit says: a sweep with that limit at nothing leaves it alone.
             var machine = Stack.Desktops.Preparing(waiting.Id)!.Name;
             await SweepWith(saves => saves.MaxMinutes = 0).SweepAsync(CancellationToken.None);
+            Assert.AreEqual("preparing", (await EnvironmentAsync(ada, waiting.Id)).Setup.State);
+            Assert.IsTrue(Stack.Desktops.Made.ContainsKey(machine));
+            // An attempt that runs longer than that fails, and its machine goes.
+            await SweepWith(saves => saves.MaxMinutes = 0, desktops => desktops.SetupMinutes = -30).SweepAsync(CancellationToken.None);
             var timedOut = (await EnvironmentAsync(ada, waiting.Id)).Setup;
             Assert.AreEqual("failed", timedOut.State);
             StringAssert.Contains(timedOut.Failure, "did not finish");

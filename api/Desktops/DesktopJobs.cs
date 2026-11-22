@@ -872,10 +872,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         {
             var machine = setup.RunHost ?? DesktopHosting.NameFor(setup.RunId!);
             owned.Add(machine);
-            if (now - setup.RunStartedAt > TimeSpan.FromMinutes(options.Saves.MaxMinutes))
+            if (now - setup.RunStartedAt > TimeSpan.FromMinutes(options.PrepareMinutes))
             {
                 log.LogWarning("Environment {EnvironmentId} took too long to prepare.", setup.EnvironmentId);
-                await EndPreparingAsync(setup.EnvironmentId, setup.RunId!, $"The setup did not finish in {options.Saves.MaxMinutes} minutes.", machine, ct);
+                await EndPreparingAsync(setup.EnvironmentId, setup.RunId!, $"Preparing did not finish in {options.PrepareMinutes} minutes.", machine, ct);
             }
         }
         foreach (var setup in setups.Where(x => x.Save is not null && now - (x.UsedAt ?? x.SavedAt ?? now) > TimeSpan.FromDays(options.Saves.UnusedDays)))

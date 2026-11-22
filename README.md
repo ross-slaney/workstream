@@ -2,7 +2,7 @@
 
 Workstream gives each task its own cloud desktop with an AI agent working on it. A person writes what they want done, a Linux desktop starts for that task, and the agent does the work there: it opens the browser, edits files in VS Code and runs commands in a terminal. The person watches the screen live in their browser, talks to the agent beside it, and takes the mouse whenever they want. Up to four tasks fit on one screen, side by side.
 
-A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. A team's administrator can connect the team to GitHub through Workstream's GitHub App; each desktop then gets a token for its own repository that lasts an hour, and its agent finishes the work as a branch and a pull request ([infra/README.md](infra/README.md), "GitHub").
+A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. A desktop has what a project's whole stack needs (Docker, .NET, Node, Java, the Android SDK and its emulator), and a container on it reaches the desktop as `host.docker.internal`, as on a Mac ([docs/architecture.md](docs/architecture.md), "A project's whole stack on a desktop"). A team's administrator can connect the team to GitHub through Workstream's GitHub App; each desktop then gets a token for its own repository that lasts an hour, and its agent finishes the work as a branch and a pull request ([infra/README.md](infra/README.md), "GitHub").
 
 A desktop runs while someone is using it or its agent is working. One that nobody has used for half an hour is paused: its machine is released and its files are kept, and it resumes in about half a minute when someone clicks it or writes to its agent. One that stays paused for a week is archived: its disk is saved and the machine deleted, and it comes back in about a minute. A team's administrator sets both times on the team's page. Having a task open in a browser tab is not using it, and only deleting a task deletes its files ([docs/core-model.md](docs/core-model.md#pause-archive-delete)).
 
@@ -59,6 +59,8 @@ az bicep build --file infra/main.bicep --stdout > /dev/null
 ```
 
 `.github/workflows/ci.yml` runs the same on every pull request and every push to `main`.
+
+One test talks to Azure itself and is skipped unless it is told where: `AzureSavedSetupLive` makes a machine from the desktops' image in a resource group of its own, saves its disk and makes a second machine from the save ([infra/README.md](infra/README.md), "What it costs when people use it").
 
 To try a running stack from outside, the way a browser would, including the desktop's display through the relay:
 

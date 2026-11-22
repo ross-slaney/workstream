@@ -7,10 +7,11 @@ import { ErrorNote, Spinner } from "@/components/kit/status";
 import { useTheme } from "@/components/theme/theme";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { DesktopState, StartStep, Task } from "@/lib/workstream/api";
+import type { DesktopState, StartStep, Task, TaskSetup } from "@/lib/workstream/api";
 import type { ChatEntry, TaskScreenProps } from "./props";
 import { chatNoteOf, restingOf, type Resting } from "./resting";
 import { RichText } from "./rich-text";
+import { lastLines } from "./setup-output";
 
 /** A dot and a word for where a desktop is: green when it is up, amber while it changes, grey when it is paused or archived. */
 export function StateBadge({ state, working }: { state: DesktopState; working: boolean }) {
@@ -176,7 +177,9 @@ export function Chat(p: TaskScreenProps) {
 
   const noteKey = task ? chatNoteOf(task.state, task.step) : null;
   const note = noteKey ? t(`chat.${noteKey}`) : null;
-  const working = task?.state === "ready" && task.agentWorking;
+  // The setup script runs before the agent starts on what was asked: while it does, it is what is said here.
+  const settingUp = task?.state === "ready" && p.setup?.state === "running";
+  const working = task?.state === "ready" && task.agentWorking && !settingUp;
   // Until the first read says otherwise, the box is there: the team, who write, is who opens most screens.
   const prompts = p.access?.prompt ?? true;
 
@@ -195,6 +198,7 @@ export function Chat(p: TaskScreenProps) {
           <Entry key={entry.id} entry={entry} onRetry={() => p.onRetry(entry.id)} />
         ))}
       </div>
+      {p.setup && task ? <SetupNote setup={p.setup} running={settingUp} /> : null}
       {working ? (
         <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">
           <Spinner label={t("chat.working")} className="size-3" />
@@ -246,6 +250,63 @@ export function Chat(p: TaskScreenProps) {
         <p className="border-t border-border px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground">{t("share.watchOnly")}</p>
       )}
     </section>
+  );
+}
+
+/**
+ * The environment's setup script on this task's desktop. While it runs: that it is running, how long it has
+ * been of how long it may take, and the last lines it wrote, which follow the script. After it failed or was
+ * stopped for running too long: that, said plainly, with its last lines, until the person puts it away. A
+ * setup that ended well says nothing here; the conversation has its line.
+ */
+function SetupNote({ setup, running }: { setup: TaskSetup; running: boolean }) {
+  const t = useT("workspace");
+  const [open, setOpen] = useState(true);
+  const [putAway, setPutAway] = useState<string | null>(null);
+  const box = useRef<HTMLPreElement>(null);
+  const seconds = useSecondsSince(setup.startedAt);
+  const output = lastLines(setup.output, 40);
+  useLayoutEffect(() => {
+    if (box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [output, open]);
+
+  const ended = setup.state === "failed" || setup.state === "timed_out";
+  if (!running && !ended) return null;
+  if (ended && putAway === setup.startedAt) return null;
+  return (
+    <div role={ended ? "alert" : "status"} className={cn("flex flex-col gap-1.5 border-t px-3 py-2 text-[12.5px]", ended ? "border-destructive/40 bg-destructive/10" : "border-border")}>
+      <div className="flex items-center gap-2">
+        {running ? <Spinner label={t("setup.running")} className="size-3" /> : null}
+        <span className={cn("min-w-0 flex-1 leading-snug", ended ? "font-medium text-destructive" : "text-muted-foreground")}>
+          {running
+            ? t("setup.running")
+            : setup.state === "timed_out"
+              ? t("setup.timedOut", { limit: setup.limitMinutes })
+              : t("setup.failed", { exit: setup.exit ?? 1 })}
+        </span>
+        {running ? <span className="shrink-0 tabular-nums text-muted-foreground">{t("setup.elapsed", { minutes: Math.floor(seconds / 60), limit: setup.limitMinutes })}</span> : null}
+      </div>
+      {ended ? <p className="leading-snug text-muted-foreground">{t("setup.after")}</p> : null}
+      {open ? (
+        output ? (
+          <pre ref={box} aria-label={t("setup.output")} tabIndex={0} className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 font-mono text-[11.5px] leading-snug text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+            {output}
+          </pre>
+        ) : (
+          <p className="text-muted-foreground">{t(running ? "setup.noOutputYet" : "setup.noOutput")}</p>
+        )
+      ) : null}
+      <div className="flex gap-3">
+        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="text-[12px] font-medium text-muted-foreground underline-offset-2 outline-none hover:underline focus-visible:underline">
+          {t(open ? "setup.hide" : "setup.show")}
+        </button>
+        {ended ? (
+          <button type="button" onClick={() => setPutAway(setup.startedAt)} className="text-[12px] font-medium text-muted-foreground underline-offset-2 outline-none hover:underline focus-visible:underline">
+            {t("setup.dismiss")}
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

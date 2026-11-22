@@ -6,7 +6,7 @@ import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { useOnlineRead } from "@/hooks/use-online-read";
-import { workstream, type Message, type Task, type TaskAccess, type TaskShared } from "@/lib/workstream/api";
+import { workstream, type Message, type Task, type TaskAccess, type TaskSetup, type TaskShared } from "@/lib/workstream/api";
 import { ShareDialog } from "@/src/workspace/share-dialog";
 import { TaskScreen, type ChatEntry } from "@/src/workspace/task-screen";
 
@@ -32,6 +32,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
   const session = useSession();
   const [task, setTask] = useState<Task | null>(null);
   const [access, setAccess] = useState<TaskAccess | null>(null);
+  const [setup, setSetup] = useState<TaskSetup | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shared, setShared] = useState<TaskShared | null>(null);
   const shareAction = useAction();
@@ -64,6 +65,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
     last.current = 0;
     setTask(null);
     setAccess(null);
+    setSetup(null);
     setMissing(false);
     setMessages([]);
     setUnsent([]);
@@ -77,6 +79,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         starting = conversation.task.state === "starting";
         setTask(conversation.task);
         setAccess(conversation.access);
+        setSetup(conversation.setup ?? null);
         take(conversation.messages);
       } catch (error) {
         // Gone: deleted here or by a teammate. Anything else is a read that will be tried again.
@@ -152,6 +155,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
       <TaskScreen
         task={task}
         access={access}
+        setup={setup}
         missing={missing}
         entries={entries}
         draft={draft}

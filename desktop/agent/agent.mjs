@@ -29,6 +29,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { panelFor } from "./panel.mjs";
 import { startedFromLine, tail, usedBytes } from "./prepared.mjs";
+import { failureMessage, followScript, runScript, setupMinutes } from "./setup.mjs";
 import { localPort, machineStarted, noteTabs, restartScript, restoredLine, restorePlan } from "./restore.mjs";
 import { told } from "./told.mjs";
 import { startWindow } from "./window.mjs";
@@ -195,24 +196,39 @@ async function writeVariables(variables) {
   }
 }
 
-/** Run the setup script in a terminal on the desktop, so whoever is watching sees it happen. Answers its exit code. */
-async function runSetupScript(script, folder, variables) {
+/** How the setup is going, said to the API: for a task's screen, or an environment's page (setup.mjs). */
+const reportSetup = (body) => call("POST", "/api/desktop/setup", body).catch((error) => log("Could not say how the setup is going:", error.message));
+
+/** How long a clone may take. A large repository takes minutes; one that takes this long is not coming. */
+const CLONE_LIMIT = 30 * 60_000;
+
+/**
+ * Run the setup script in a terminal on the desktop, so whoever is watching sees it happen, and say how it
+ * is going every few seconds, for the task's screen. It may run for as long as the API allows (setup.mjs);
+ * past that it is stopped, with everything it started. Answers its exit code and the last of what it wrote.
+ */
+async function runSetupScript(script, folder, variables, minutes) {
   const file = path.join(dir, "setup.sh");
   const exit = path.join(dir, "setup.exit");
+  const pid = path.join(dir, "setup.pid");
+  const logFile = path.join(dir, "setup.log");
   await writeFile(file, script, { mode: 0o700 });
-  await rm(exit, { force: true });
-  const command = `cd ${shellQuote(folder)} && bash ${shellQuote(file)} 2>&1 | tee ${shellQuote(path.join(dir, "setup.log"))}; echo \${PIPESTATUS[0]} > ${shellQuote(exit)}; sleep 3`;
+  await Promise.all([exit, pid, logFile].map((old) => rm(old, { force: true })));
+  // Its process id first: the shell the terminal starts leads a process group, which is what is stopped.
+  const command = `echo $$ > ${shellQuote(pid)}; cd ${shellQuote(folder)} && bash ${shellQuote(file)} 2>&1 | tee ${shellQuote(logFile)}; echo \${PIPESTATUS[0]} > ${shellQuote(exit)}; sleep 3`;
   const terminal = spawn("xfce4-terminal", ["--title", "Setup", "--geometry", "110x30", "-x", "bash", "-lc", command], {
     detached: true, stdio: "ignore", env: { ...process.env, ...variables },
   });
   // Without a terminal (no display yet), the script still runs.
   terminal.on("error", () => spawn("bash", ["-lc", command], { detached: true, stdio: "ignore", env: { ...process.env, ...variables } }).unref());
   terminal.unref();
-  for (let waited = 0; waited < 60 * 60; waited++) {
-    if (existsSync(exit)) return Number((await readFile(exit, "utf8")).trim() || "1");
-    await sleep(1000);
-  }
-  return 124;
+  await reportSetup({ state: "running", output: "" });
+  const result = await followScript({
+    exitFile: exit, logFile, pidFile: pid, limitMs: minutes * 60_000,
+    onOutput: (output) => reportSetup({ state: "running", output }),
+  });
+  await reportSetup(result.code === 0 ? { state: "done", exit: 0, output: result.output } : { state: "failed", exit: result.code, output: result.output });
+  return result;
 }
 
 const start = (command, args, variables) =>
@@ -285,7 +301,7 @@ async function prepareFiles(setup, saved) {
       const args = ["clone", ...(setup.repository.branch ? ["--branch", setup.repository.branch] : []), setup.repository.url, target];
       // With the environment's variables, where a pasted GITHUB_TOKEN is, and never waiting on a prompt nobody sees.
       const env = { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" };
-      await run("git", args, { timeout: 15 * 60_000, env }).catch((error) =>
+      await run("git", args, { timeout: CLONE_LIMIT, env }).catch((error) =>
         say("text", `I could not clone the repository: ${String(error.stderr || error.message).trim().split("\n").slice(-3).join(" ")}`));
     }
     if (existsSync(target)) workspace = target;
@@ -302,8 +318,12 @@ async function prepareWindows(setup, workspace) {
   await showApps(setup.apps);
   if (setup.setupScript && !state.prepared) {
     say("activity", "Running the setup script");
-    const code = await runSetupScript(setup.setupScript, workspace, setup.variables);
-    if (code !== 0) say("text", `The setup script stopped with an error (exit ${code}). Its output is in ~/.workstream/setup.log.`);
+    const minutes = setupMinutes(setup);
+    const { code, output } = await runSetupScript(setup.setupScript, workspace, setup.variables, minutes);
+    if (code === 0) say("activity", "The setup script finished");
+    else say("text", failureMessage(code, minutes, output));
+    // Kept, so the agent is told how the setup ended however often it starts again.
+    state.setupResult = { code, minutes };
   }
   state.prepared = true;
   await saveState();
@@ -324,6 +344,7 @@ async function prepareWindows(setup, workspace) {
  */
 async function restore(plan, setup, workspace) {
   log(`Started again after a stop: ${plan.commands.length} commands, ${plan.tabs.length} pages, ${plan.files.length} files.`);
+  wakeDocker();
   if (plan.commands.length > 0) {
     const script = path.join(dir, "restore.sh");
     await writeFile(script, restartScript(plan.commands, path.join(dir, "env.sh")), { mode: 0o700 });
@@ -345,6 +366,16 @@ async function restore(plan, setup, workspace) {
     await browserUp();
     start("chromium", [url], setup.variables);
   })).finally(() => setTimeout(watchTabs, 5000));
+}
+
+/**
+ * Docker starts with the first docker command (image/configure.sh), so after a stop it is not running, and
+ * neither are the containers a project told it to bring back (a database with a restart policy). When this
+ * desktop has containers, Docker is started here, out of sight, and it starts those.
+ */
+function wakeDocker() {
+  const containers = 'command -v docker > /dev/null && [ -n "$(sudo -n ls /var/lib/docker/containers 2> /dev/null | head -1)" ] && docker info > /dev/null 2>&1';
+  spawn("sh", ["-c", containers], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
 }
 
 /** Whether a page answers at all, which is what a server that is up does. */
@@ -404,30 +435,6 @@ function warmUp() {
   sessionReady().then(() => start("chromium", ["about:blank"], {})).catch(() => {});
 }
 
-/** Run a script as the desktop's person, out of sight, keeping what it writes. Answers its exit code and its output. */
-function runScript(script, folder, variables, onOutput) {
-  return new Promise((resolve) => {
-    let output = "";
-    const child = spawn("bash", ["-lc", script], { cwd: folder, env: { ...process.env, ...variables }, stdio: ["ignore", "pipe", "pipe"] });
-    const keep = (chunk) => {
-      output = tail(output + chunk.toString());
-      onOutput(output);
-    };
-    child.stdout.on("data", keep);
-    child.stderr.on("data", keep);
-    // An hour at most, as on a task's desktop.
-    const timer = setTimeout(() => child.kill("SIGKILL"), 60 * 60_000);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: 127, output: tail(`${output}\n${error.message}`) });
-    });
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      resolve({ code: signal === "SIGKILL" ? 124 : code ?? 1, output });
-    });
-  });
-}
-
 /**
  * This machine prepares an environment: the repository cloned and the setup script run once, for a save
  * that tasks start from. Nothing of a task is ever here, and nothing of the preparing is left behind: before
@@ -437,7 +444,7 @@ function runScript(script, folder, variables, onOutput) {
 async function prepareForSave(setup) {
   exchanging = false;
   log(`This desktop prepares the environment ${setup.title}, to be saved.`);
-  const report = (body) => call("POST", "/api/desktop/setup", body).catch((error) => log("Could not say how the setup is going:", error.message));
+  const report = reportSetup;
   await writeVariables(setup.variables);
   let workspace = path.join(home, "work");
   await mkdir(workspace, { recursive: true });
@@ -450,7 +457,7 @@ async function prepareForSave(setup) {
     await report({ state: "running", output: `git clone ${setup.repository.url}` });
     try {
       // As on a task's desktop: the token comes from github.mjs, or a pasted GITHUB_TOKEN; nothing waits on a prompt.
-      await run("git", args, { timeout: 15 * 60_000, env: { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" } });
+      await run("git", args, { timeout: CLONE_LIMIT, env: { ...process.env, ...setup.variables, GIT_TERMINAL_PROMPT: "0" } });
     } catch (error) {
       await report({ state: "failed", exit: null, output: tail(String(error.stderr || error.message).trim()) });
       return;
@@ -462,13 +469,17 @@ async function prepareForSave(setup) {
   let output = "";
   if (setup.setupScript) {
     let sent = 0;
-    const result = await runScript(setup.setupScript, workspace, setup.variables, (written) => {
-      output = written;
-      // What it writes reaches the environment's page every few seconds.
-      if (Date.now() - sent > 5000) {
-        sent = Date.now();
-        report({ state: "running", output: written });
-      }
+    // As the desktop's person, out of sight, for as long as a setup may run (setup.mjs).
+    const result = await runScript(setup.setupScript, {
+      cwd: workspace, env: { ...process.env, ...setup.variables }, limitMs: setupMinutes(setup) * 60_000,
+      onOutput: (written) => {
+        output = written;
+        // What it writes reaches the environment's page every few seconds.
+        if (Date.now() - sent > 5000) {
+          sent = Date.now();
+          report({ state: "running", output: written });
+        }
+      },
     });
     output = result.output;
     if (result.code !== 0) {
@@ -559,6 +570,7 @@ const { startHarness } = await harnessLoading;
 harness = startHarness({
   setup, key, workspace, state, saveState, say, prompts, log,
   restored: restoredLine(restoring, workspace),
+  setupResult: state.setupResult ?? null,
   setWorking: (value) => {
     working = value;
   },

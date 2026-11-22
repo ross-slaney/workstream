@@ -35,7 +35,7 @@ A desktop holds one credential, its own key.
 - The key is given to the machine when it is made and is never written to its disk. A copy of a desktop's disk carries nobody's key.
 - The key stops working when the task is deleted.
 - A desktop never holds a model key. Its model calls go through Workstream, which adds the key on its side. A leaked desktop key is worth at most what is left of one team's monthly allowance.
-- Through a team's GitHub connection a desktop can ask for a GitHub token for its own environment's repository. The token is for that one repository, lasts an hour, and is stored nowhere. See [GitHub](/docs/github).
+- A desktop has a GitHub token only when its environment's variables hold one. See [GitHub](/docs/github).
 
 ## Secrets you put on a desktop
 
@@ -45,14 +45,13 @@ The same is true of anything you type or sign in to on a desktop. It stays on th
 
 ## Signing in
 
-{/* PENDING GitHub sign-in: add signing in with GitHub here when it ships. */}
-People sign in with a code sent to their email address. The [command line](/docs/command-line) signs in through the browser and gets access that can read and start tasks and nothing else, so what a laptop keeps cannot stop or delete a task or open a desktop.
+People sign in with a code sent to their email address, or with their GitHub account. The [command line](/docs/command-line) signs in through the browser and gets access that can read and start tasks and nothing else, so what a laptop keeps cannot stop or delete a task or open a desktop.
 
 ## Where things are kept
 
 | Kept in | What |
 | --- | --- |
-| Workstream's database | People, teams, invitations and sessions; environments, tasks and conversations; usage. No GitHub token is kept. |
+| Workstream's database | People, teams, invitations and sessions; environments, tasks and conversations; usage. A GitHub token is kept only where someone put one in an environment's variables. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile and the agent's session. It goes when the task is deleted. |
 | A saved setup | An environment's repository and whatever its setup script installed, and nothing of any task. It goes when the environment is deleted. |
 | Your browser | Your sign-in, and which team you had open last. |

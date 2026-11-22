@@ -48,7 +48,7 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     public DateTimeOffset UpdatedAt { get; private set; }
     /// <summary>
     /// A fingerprint of everything a prepared setup depends on: the repository, the branch, the setup script,
-    /// the variables with their values, and the apps. A saved setup is used only while this is what it was
+    /// the variables with their values, the apps, and the size, whose disk the save is. A saved setup is used only while this is what it was
     /// made from (<see cref="EnvironmentSetup"/>). Written by whoever changes the environment, who can read
     /// the variables; null on an environment not changed since this existed, until it is first needed.
     /// </summary>

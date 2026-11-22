@@ -52,7 +52,8 @@ apt-get update
 apt-get install -y --no-install-recommends code gh
 apt-get clean
 if [ -z "$SLIM" ]; then
-  apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  # nftables and the system's resolver are what make host.docker.internal this desktop, from its containers (image/configure.sh).
+  apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin nftables systemd-resolved
   # The .NET SDK, from Microsoft's installer, which serves both processor types. Aspire (9 and later) is a
   # NuGet package of the project that uses it, so there is no workload to install.
   curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /usr/share/dotnet
@@ -65,9 +66,8 @@ if [ -z "$SLIM" ]; then
   # browsers themselves are the project's own version (`npx playwright install`), downloaded by the project.
   npx -y playwright@1.65.1 install-deps
 
-  # Android: the SDK, for a project with an Android app, and its emulator. The emulator runs on an Intel
-  # machine; on AMD's (every Dasv7 size) /dev/kvm opens but its virtual machine stops as it starts
-  # (docs/architecture.md, "A project's whole stack on a desktop").
+  # Android: the SDK, for a project with an Android app, and its emulator, which runs on the processor's
+  # virtualization on every size (docs/architecture.md, "A project's whole stack on a desktop").
   # Java 17, which React Native and the Android Gradle plugin build with, is Adoptium's: Debian 13 has none.
   # The SDK belongs to the desktop's person (image/configure.sh), so Gradle adds the platforms a project asks for.
   if [ "$ARCH" = amd64 ]; then
