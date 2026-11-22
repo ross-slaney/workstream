@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import type { DocsHeading, DocsNavItem, DocsNavSection } from "@agenetix/docs/source";
+import type { DocsNavItem, DocsNavSection } from "@agenetix/docs/source";
 import { slugifyHeading } from "@agenetix/docs/source";
 import type { CompiledMDX } from "@bacons/mdx";
 import { compileMDX } from "@bacons/mdx/server";
@@ -12,8 +12,7 @@ import { docsSource } from "./source";
 
 /*
  * What a docs page's loader hands the view: the page compiled to a JSON tree (no code, so it can be embedded
- * in the HTML response and hydrated), the list of pages, the table of contents and the previous and next
- * pages. Compiling happens here on the server; the browser only renders the tree.
+ * in the HTML response and hydrated), the list of pages and the previous and next pages. Compiling happens here on the server; the browser only renders the tree.
  */
 
 export type DocsPageMeta = {
@@ -30,7 +29,6 @@ export type DocsPageMeta = {
 export type DocsPageData = {
   entry: DocsPageMeta;
   compiled: CompiledMDX;
-  headings: DocsHeading[];
   navigation: DocsNavSection[];
   previous: DocsNavItem | null;
   next: DocsNavItem | null;
@@ -66,7 +64,6 @@ export async function resolveDocsPage(slugs: string[]): Promise<DocsPageResoluti
         updated: formatUpdated(frontmatterOf(entry.filePath).updated),
       },
       compiled,
-      headings: entry.headings.filter((heading) => heading.level === 2),
       navigation: docsSource.getNavigation(),
       previous: route.previousEntry ?? null,
       next: route.nextEntry ?? null,
@@ -87,9 +84,10 @@ function metaTitleOf(entry: { title: string; isHome: boolean }): string {
   return entry.isHome ? entry.title : translator("docs")("metaTitle", { title: entry.title });
 }
 
-/** Every docs page's path, the front page first, for the sitemap. */
+/** Every docs page's path, the front page first and the rest in reading order, for the sitemap. */
 export function docsPaths(): string[] {
-  return docsSource.getAllEntries().map((entry) => entry.href);
+  const home = docsSource.getHref([]);
+  return [home, ...docsSource.getNavigation().flatMap((section) => section.items.map((item) => item.href))];
 }
 
 function frontmatterOf(filePath: string): Record<string, unknown> {
@@ -110,8 +108,8 @@ function formatUpdated(value: unknown): string | null {
 type HastNode = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HastNode[] };
 
 /*
- * Gives each heading the id the table of contents links to: the same slugifyHeading the resolver used for
- * entry.headings, so the two agree.
+ * Gives each heading an id, so a link can point at a section (/docs/desktops#sizes): the same slugifyHeading
+ * the resolver used for entry.headings, so the two agree.
  */
 function rehypeHeadingIds() {
   return (tree: HastNode) => {

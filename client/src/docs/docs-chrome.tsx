@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 import { Mark, SiteFooter, primaryLink, quietLink } from "@/src/landing/landing-page";
 
 /*
- * The frame every docs page shares: the website's header with "Docs" beside the name, the list of pages, the
- * article, the page's own headings on the right, and the website's footer. Server-rendered with plain
+ * The frame every docs page shares: the website's header with "Docs" beside the name, the list of pages
+ * beside one column of text, and the website's footer. Server-rendered with plain
  * anchors, so a search engine reads it and every link works before any script runs. On a phone the list of
  * pages folds into a <details> under the header, which needs no script either.
  */
@@ -20,11 +20,10 @@ export type DocsShellProps = {
   currentHref: string;
   /** The page's name, shown on a phone beside the control that opens the list of pages. */
   currentTitle: string;
-  rail?: ReactNode;
   children: ReactNode;
 };
 
-export function DocsShell({ links, navigation, currentHref, currentTitle, rail, children }: DocsShellProps) {
+export function DocsShell({ links, navigation, currentHref, currentTitle, children }: DocsShellProps) {
   return (
     <div className="h-full overflow-y-auto scroll-smooth bg-background text-foreground">
       <DocsHeader links={links} />
@@ -34,7 +33,6 @@ export function DocsShell({ links, navigation, currentHref, currentTitle, rail, 
           <PagesNav links={links} navigation={navigation} currentHref={currentHref} />
         </aside>
         <div className="min-w-0 flex-1 pb-16 pt-8 lg:pt-10">{children}</div>
-        {rail ? <aside className="sticky top-0 hidden w-[200px] shrink-0 py-10 xl:block">{rail}</aside> : null}
       </main>
       <SiteFooter signInHref={links.signIn} docsHref={links.docs} />
     </div>

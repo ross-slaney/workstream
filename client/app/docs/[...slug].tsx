@@ -3,6 +3,7 @@ import Head from "expo-router/head";
 import type { Metadata } from "expo-router/server";
 import { StatusError } from "expo-server";
 
+import { translator } from "@/lib/i18n";
 import { DocsPage } from "@/src/docs/docs-page";
 import { docsLinks } from "@/src/docs/docs-links";
 
@@ -25,7 +26,7 @@ export async function generateMetadata(_request: unknown, params: Params): Promi
 export async function loader(_request: unknown, params: Params) {
   const { resolveDocsPage, slugsOf } = await import("@/lib/docs/page");
   const resolved = await resolveDocsPage(slugsOf(params));
-  if (resolved.type === "notFound") throw new StatusError(404, "No docs page at this address.");
+  if (resolved.type === "notFound") throw new StatusError(404, translator("docs")("notFound"));
   if (resolved.type === "redirect") return { page: null, redirect: resolved.href };
   return { page: resolved.data, redirect: null };
 }

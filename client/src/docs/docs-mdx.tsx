@@ -70,11 +70,12 @@ export const docsComponents: Record<string, ComponentType<AnyProps>> = {
   ol: styled("ol", "mb-4 flex list-decimal flex-col gap-1.5 pl-6 text-base leading-7 text-foreground/80"),
   li: styled("li", "pl-1 [&>p]:m-0"),
   hr: styled("hr", "my-8 border-0 border-t border-border"),
-  code: styled("code", "rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground"),
+  code: styled("code", "rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground [box-decoration-break:clone]"),
   pre: styled("pre", "mb-4 overflow-x-auto rounded-lg border border-border bg-canvas p-4 font-mono text-[13px] leading-5 text-foreground [&>code]:bg-transparent [&>code]:p-0"),
   table: Table,
-  th: styled("th", "border-b border-input py-2 pr-4 align-top text-[13px] font-semibold text-foreground"),
-  td: styled("td", "border-b border-border py-2.5 pr-4 align-top text-foreground/80"),
+  // The first column names the row, so on a wide window it stays on one line.
+  th: styled("th", "border-b border-input py-2 pr-4 align-top text-[13px] font-semibold text-foreground md:whitespace-nowrap"),
+  td: styled("td", "border-b border-border py-2.5 pr-4 align-top text-foreground/80 md:first:whitespace-nowrap"),
   Flow,
   Stage,
 };

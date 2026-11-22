@@ -52,7 +52,7 @@ describe("the docs pages", () => {
   it("are the folders under content/docs, every one with a title and a description", () => {
     const entries = docsSource.getAllEntries();
     expect(entries.map((entry) => entry.href).sort()).toEqual([...pages].sort());
-    expect(docsPaths().sort()).toEqual([...pages].sort());
+    expect(docsPaths()).toEqual(pages);
     for (const entry of entries) {
       expect(entry.title, entry.href).not.toBe("");
       expect(entry.description, entry.href).not.toBe("");
@@ -82,15 +82,16 @@ describe("the docs pages", () => {
     }
   });
 
-  it("compiles every page to markup with its headings, each carrying the id the contents list links to", async () => {
+  it("compiles every page to markup with its headings, each carrying the id a link can point at", async () => {
     for (const href of pages) {
       const data = await page(href);
       expect(data.entry.href).toBe(href);
       expect(data.entry.title, href).not.toBe("");
       expect(data.entry.updated, href).toMatch(/^Updated [A-Z][a-z]+ \d{1,2}, \d{4}$/);
-      expect(data.headings.length, href).toBeGreaterThan(1);
+      const headings = docsSource.getEntry(slugsOfHref(href))!.headings.filter((heading) => heading.level === 2);
+      expect(headings.length, href).toBeGreaterThan(1);
       const headingIds = elements(data.compiled.tree as Node, "html.h2").map((heading) => heading.props?.id);
-      for (const heading of data.headings) expect(headingIds, `${href} ${heading.text}`).toContain(heading.id);
+      for (const heading of headings) expect(headingIds, `${href} ${heading.text}`).toContain(heading.id);
       // Nothing in the tree is code: it is data the browser renders with the website's components.
       expect(JSON.stringify(data.compiled), href).not.toContain("function");
     }

@@ -8,7 +8,7 @@ import { docsComponents } from "./docs-mdx";
 
 /*
  * A docs page on the website: the docs frame, then the article (title, description, the page's text compiled
- * on the server and rendered here as real HTML, previous and next), with the page's headings on the right.
+ * on the server and rendered here as real HTML, previous and next).
  * Props in, links out; the route reads the page (app/docs).
  */
 
@@ -18,27 +18,11 @@ export type DocsPageProps = {
 };
 
 export function DocsPage({ links, page }: DocsPageProps) {
-  const { entry, compiled, headings, navigation, previous, next } = page;
+  const { entry, compiled, navigation, previous, next } = page;
   const t = useT("docs");
 
-  const rail =
-    headings.length > 1 ? (
-      <nav aria-label={t("contentsLabel")} className="flex flex-col gap-3">
-        <p className="m-0 text-[13px] font-semibold text-foreground">{t("contentsLabel")}</p>
-        <ol className="m-0 flex list-none flex-col gap-2 border-l border-border p-0">
-          {headings.map((heading) => (
-            <li key={heading.id}>
-              <a href={`#${heading.id}`} className="-ml-px block border-l border-transparent pl-3 text-[13px] leading-5 text-muted-foreground hover:border-foreground hover:text-foreground">
-                {heading.text}
-              </a>
-            </li>
-          ))}
-        </ol>
-      </nav>
-    ) : null;
-
   return (
-    <DocsShell links={links} navigation={navigation} currentHref={entry.href} currentTitle={entry.isHome ? t("overview") : entry.title} rail={rail}>
+    <DocsShell links={links} navigation={navigation} currentHref={entry.href} currentTitle={entry.isHome ? t("overview") : entry.title}>
       <article className="min-w-0 max-w-[720px]">
         <header className="flex flex-col gap-3 pb-8">
           <h1 className="m-0 text-balance text-[32px] font-semibold leading-[1.12] tracking-tight text-foreground md:text-[40px]">{entry.title}</h1>

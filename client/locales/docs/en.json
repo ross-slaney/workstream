@@ -10,10 +10,10 @@
   "pagesToggle": "Pages",
   "pagesNav": "Previous and next page",
   "breadcrumb": "Breadcrumb",
-  "contentsLabel": "On this page",
   "previous": "Previous",
   "next": "Next",
   "updated": "Updated {date}",
+  "notFound": "There is no docs page at this address.",
   "header": {
     "home": "Workstream home",
     "site": "Site"

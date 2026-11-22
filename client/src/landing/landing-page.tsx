@@ -27,7 +27,8 @@ export function LandingPage({ signInHref, startHref, docsHref }: LandingPageProp
           {brand}
         </a>
         <nav aria-label={brand} className="flex items-center gap-1">
-          <a href={docsHref} className={quietLink}>
+          {/* A phone's header has room for two links, so there the docs are reached from the footer. */}
+          <a href={docsHref} className={`${quietLink} max-md:hidden`}>
             {t("nav.docs")}
           </a>
           <a href={signInHref} className={quietLink}>

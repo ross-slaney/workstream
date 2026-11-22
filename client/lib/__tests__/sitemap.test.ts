@@ -6,8 +6,7 @@ import { publicPaths, robotsTxt, sitemapXml } from "../sitemap";
 describe("the sitemap", () => {
   it("lists the landing page and every docs page, once each, as full addresses", () => {
     const paths = publicPaths();
-    expect(paths[0]).toBe("/");
-    expect(paths).toContain("/docs");
+    expect(paths.slice(0, 3)).toEqual(["/", "/docs", "/docs/how-it-works"]);
     expect(paths).toContain("/docs/security");
     expect(paths).toHaveLength(11);
     expect(new Set(paths).size).toBe(paths.length);
