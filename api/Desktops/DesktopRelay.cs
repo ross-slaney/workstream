@@ -102,6 +102,8 @@ public static class DesktopRelay
             WatchAsync(scopes, token.UserId, token.SessionId, id, filter, open.Token),
             UseAsync(scopes, id, filter, open.Token));
         open.Cancel();
+        // Input that came through just before the stream closed still counts.
+        if (filter.TakeInput()) await UsedAsync(scopes, id, CancellationToken.None);
         if (browser.State is WebSocketState.Open or WebSocketState.CloseReceived)
         {
             try
@@ -178,17 +180,19 @@ public static class DesktopRelay
         {
             await Task.Delay(AskForInputEvery, ct);
             if (!filter.TakeInput()) continue;
-            await using (var scope = scopes.CreateAsyncScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
-                if (await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct) is { CanBeWatched: true } task)
-                {
-                    task.Active(DateTimeOffset.UtcNow);
-                    await db.SaveChangesAsync(ct);
-                }
-            }
+            await UsedAsync(scopes, taskId, ct);
             await Task.Delay(WriteUseEvery - AskForInputEvery, ct);
         }
+    }
+
+    /// <summary>A person's mouse or keyboard reached the desktop: the task is in use now.</summary>
+    static async Task UsedAsync(IServiceScopeFactory scopes, string taskId, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+        if (await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct) is not { CanBeWatched: true } task) return;
+        task.Active(DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>What the browser sends, read by the filter: only what this viewer may send reaches the display.</summary>
