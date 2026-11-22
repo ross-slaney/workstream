@@ -22,9 +22,19 @@ public sealed class FakeGitHubSignIn : HttpMessageHandler
     /// <summary>Someone's GitHub account: its number, its name there, and its primary address, verified or not.</summary>
     public sealed record Account(long Id, string Login, string? Name, string Email, bool Verified);
 
-    readonly ConcurrentDictionary<string, (Account Account, string Callback)> codes = new();
+    readonly ConcurrentDictionary<string, (Account Account, string Callback, string Scope)> codes = new();
+    readonly ConcurrentDictionary<long, string> issuedTo = new();
     readonly ConcurrentDictionary<string, Account> tokens = new();
     long lastId = 9_000_000;
+
+    /// <summary>The token GitHub last gave an account, or null.</summary>
+    public string? TokenOf(Account account) => issuedTo.TryGetValue(account.Id, out var token) ? token : null;
+
+    /// <summary>The token no longer works: the person revoked Workstream on GitHub.</summary>
+    public void Revoke(Account account)
+    {
+        if (TokenOf(account) is { } token) tokens.TryRemove(token, out _);
+    }
 
     /// <summary>The scopes of every token handed out, in order: what SqlOS asked GitHub for.</summary>
     public ConcurrentQueue<string> Redeemed { get; } = new();
@@ -41,7 +51,7 @@ public sealed class FakeGitHubSignIn : HttpMessageHandler
         var asked = QueryHelpers.ParseQuery(authorize.Query);
         Assert.AreEqual(ClientId, asked["client_id"].ToString());
         var code = "code-" + Guid.NewGuid().ToString("N");
-        codes[code] = (account, asked["redirect_uri"].ToString());
+        codes[code] = (account, asked["redirect_uri"].ToString(), asked["scope"].ToString());
         return code;
     }
 
@@ -62,8 +72,10 @@ public sealed class FakeGitHubSignIn : HttpMessageHandler
             }
             var token = "gho_" + Guid.NewGuid().ToString("N");
             tokens[token] = issued.Account;
-            Redeemed.Enqueue("read:user,user:email");
-            return Json(new { access_token = token, token_type = "bearer", scope = "read:user,user:email" });
+            issuedTo[issued.Account.Id] = token;
+            Redeemed.Enqueue(issued.Scope);
+            // GitHub writes the granted scopes with commas.
+            return Json(new { access_token = token, token_type = "bearer", scope = issued.Scope.Replace(' ', ',') });
         }
 
         if (site == Api && request.Method == HttpMethod.Get && bearer is not null && tokens.TryGetValue(bearer, out var account))

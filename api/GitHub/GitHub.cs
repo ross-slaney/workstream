@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Serialization;
+using SqlOS.AuthServer.Services;
 using Workstream.Api.Domain;
 
 namespace Workstream.Api.GitHub;
@@ -26,12 +27,15 @@ public interface IGitHubTokens
 }
 
 /// <summary>
-/// No tokens: SqlOS 11.4.1 does not keep the provider's token, so nobody has one yet. Replaced by the SqlOS
-/// implementation once SqlOS keeps them (docs/core-model.md, "Sign up and sign in").
+/// The tokens SqlOS keeps from people's sign-in with GitHub (<see cref="WorkstreamApp.SeedGitHubSignIn"/> seeds
+/// the connection with keeping tokens on). SqlOS answers with the person's current token, or none: they never
+/// signed in with GitHub, GitHub refused it, the connection is off, or GitHub could not be reached. It never
+/// throws for GitHub's failures.
 /// </summary>
-public sealed class NoGitHubTokens : IGitHubTokens
+public sealed class SqlOSGitHubTokens(SqlOSOidcAuthService oidc) : IGitHubTokens
 {
-    public Task<string?> ForUserAsync(string userId, CancellationToken ct) => Task.FromResult<string?>(null);
+    public async Task<string?> ForUserAsync(string userId, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(userId) ? null : (await oidc.GetProviderAccessTokenAsync(userId, WorkstreamApp.GitHubConnectionKey, ct))?.AccessToken;
 }
 
 /// <summary>A repository the person can reach on GitHub. <see cref="Url"/> is what an environment clones.</summary>
@@ -270,8 +274,8 @@ public static class GitHubHosting
             client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Workstream", "1"));
         });
         builder.Services.AddTransient<GitHubClient>();
-        // Until SqlOS keeps the provider's token, nobody has one.
-        builder.Services.AddSingleton<IGitHubTokens, NoGitHubTokens>();
+        // The person's token is the one SqlOS kept from their sign-in with GitHub.
+        builder.Services.AddScoped<IGitHubTokens, SqlOSGitHubTokens>();
         return builder;
     }
 }

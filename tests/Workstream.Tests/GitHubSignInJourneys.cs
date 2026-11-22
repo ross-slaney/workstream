@@ -5,9 +5,11 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using Workstream.Api;
+using Workstream.Api.GitHub;
 
 namespace Workstream.Tests;
 
@@ -145,7 +147,7 @@ public sealed class GitHubSignInJourneys
     }
 
     [TestMethod]
-    public async Task The_sign_in_page_offers_GitHub_and_sends_the_browser_there_for_the_profile_and_the_email_only()
+    public async Task The_sign_in_page_offers_GitHub_and_sends_the_browser_there_for_the_profile_the_email_and_the_repositories()
     {
         using var page = await SignInPage.OpenAsync();
 
@@ -159,9 +161,34 @@ public sealed class GitHubSignInJourneys
         Assert.AreEqual(FakeGitHubSignIn.ClientId, asked["client_id"].ToString());
         // The one address the GitHub OAuth client is registered with.
         Assert.AreEqual($"{Origin}/sqlos/auth/oidc/callback", asked["redirect_uri"].ToString());
-        // Who they are and their verified address; nothing of their repositories.
-        Assert.AreEqual("read:user user:email", asked["scope"].ToString());
+        // Who they are and their verified address, and their repositories, which desktops push to as them.
+        CollectionAssert.AreEquivalent(new[] { "read:user", "user:email", "repo" }, asked["scope"].ToString().Split(' '));
         Assert.IsFalse(github.Query.Contains(FakeGitHubSignIn.ClientSecret));
+    }
+
+    [TestMethod]
+    public async Task SqlOS_keeps_the_token_GitHub_gave_and_Workstream_reads_it_for_that_person_alone()
+    {
+        var account = Stack.GitHubSignIn.NewAccount(Person.NewEmail(), "Grace Hopper");
+        using var grace = await SignInWithGitHubAsync(account);
+        using var lin = await Person.SignUpAsync("Lin Clark");
+
+        // The reader production uses, over SqlOS, not the journeys' own tokens (Stack.GitHubTokens).
+        using var scope = Stack.Services.CreateScope();
+        var tokens = new SqlOSGitHubTokens(scope.ServiceProvider.GetRequiredService<SqlOS.AuthServer.Services.SqlOSOidcAuthService>());
+        var token = Stack.GitHubSignIn.TokenOf(account);
+        Assert.IsNotNull(token);
+        Assert.AreEqual(token, await tokens.ForUserAsync(grace.UserId, CancellationToken.None));
+        // Someone who signed in with a password has none, and nobody is nobody's.
+        Assert.IsNull(await tokens.ForUserAsync(lin.UserId, CancellationToken.None));
+        Assert.IsNull(await tokens.ForUserAsync("", CancellationToken.None));
+
+        // Signing in with GitHub again keeps the newest token. (A request is a scope of its own, as here.)
+        using var again = await SignInWithGitHubAsync(account);
+        Assert.AreNotEqual(token, Stack.GitHubSignIn.TokenOf(account));
+        using var later = Stack.Services.CreateScope();
+        var now = new SqlOSGitHubTokens(later.ServiceProvider.GetRequiredService<SqlOS.AuthServer.Services.SqlOSOidcAuthService>());
+        Assert.AreEqual(Stack.GitHubSignIn.TokenOf(account), await now.ForUserAsync(grace.UserId, CancellationToken.None));
     }
 
     [TestMethod]
@@ -281,12 +308,12 @@ public sealed class GitHubSignInJourneys
         var github = await page.ContinueWithGitHubAsync();
         var landing = await page.ReturnFromGitHubAsync(github, Stack.GitHubSignIn.Approve(Stack.GitHubSignIn.NewAccount(lin.Email), github));
 
-        // SqlOS asks which team the session is for and hands the browser to the sign-in page. The page cannot
-        // answer: SqlOS 11.4.1 reads a request back without the teams to choose from
-        // (SqlOSHeadlessAuthService.GetRequestAsync), so it says GitHub sign-in did not work and shows the form
+        // SqlOS asks which team the session is for and hands the browser to the sign-in page. Since SqlOS 11.5.0
+        // reading the request back lists the teams to choose from (SqlOSHeadlessAuthService.GetRequestAsync),
+        // but the page does not finish that request yet: it says GitHub sign-in did not work and shows the form
         // again (client/app/sign-in.tsx). Nobody is signed in.
         page.AssertCameBackSignedOut(landing, "organization");
-        Assert.AreEqual(0, (await page.ReadAgainAsync("organization"))["organizationSelection"]!.AsArray().Count);
+        Assert.AreEqual(2, (await page.ReadAgainAsync("organization"))["organizationSelection"]!.AsArray().Count);
     }
 
     /// <summary>On the command line's page, signed out: the person presses "Continue with GitHub". Where SqlOS sends the browser.</summary>
@@ -365,7 +392,7 @@ public sealed class GitHubSignInJourneys
     }
 
     [TestMethod]
-    public void With_both_settings_GitHub_is_seeded_with_SqlOS_callback_under_the_API_and_its_default_scopes()
+    public void With_both_settings_GitHub_is_seeded_with_SqlOS_callback_under_the_API_the_repo_scope_and_its_tokens_kept()
     {
         var configuration = Settings(("PUBLIC_ORIGIN", "https://api.workstream.example/"), ("SqlOS:Oidc:GitHub:ClientId", "client"), ("SqlOS:Oidc:GitHub:ClientSecret", "secret"));
         var app = WorkstreamApp.From(configuration);
@@ -379,8 +406,10 @@ public sealed class GitHubSignInJourneys
         Assert.AreEqual("secret", seed.ClientSecret);
         Assert.IsTrue(seed.IsEnabled);
         CollectionAssert.AreEqual(new[] { "https://api.workstream.example/sqlos/auth/oidc/callback" }, seed.AllowedCallbackUris);
-        // No scopes of its own: SqlOS asks for read:user and user:email.
-        Assert.IsNull(seed.Scopes);
+        // Who the person is, and their repositories; SqlOS keeps GitHub's token for the desktops.
+        CollectionAssert.AreEqual(new[] { "read:user", "user:email", "repo" }, seed.Scopes);
+        Assert.IsTrue(seed.StoreProviderTokens);
+        Assert.AreEqual(WorkstreamApp.GitHubConnectionKey, seed.Key);
     }
 
     [TestMethod]

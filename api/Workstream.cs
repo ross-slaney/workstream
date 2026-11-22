@@ -28,6 +28,13 @@ public sealed class WorkstreamApp
     /// <summary>The GitHub OAuth client people sign in with: its id and secret, set together or not at all.</summary>
     public const string GitHubSignInClientId = "SqlOS:Oidc:GitHub:ClientId";
     public const string GitHubSignInClientSecret = "SqlOS:Oidc:GitHub:ClientSecret";
+    /// <summary>The key SqlOS seeds the GitHub connection under, which a person's GitHub token is read by.</summary>
+    public const string GitHubConnectionKey = "github";
+    /// <summary>
+    /// What GitHub is asked for: the person's profile and verified address, to know who they are, and their
+    /// repositories, so the environment form lists them and the desktops of their tasks push as them.
+    /// </summary>
+    public static readonly IReadOnlyList<string> GitHubScopes = ["read:user", "user:email", "repo"];
     /// <summary>The web app's sign-in (client/app/sign-in.tsx), under <see cref="WebOrigin"/>.</summary>
     public const string SignInPath = "/sign-in";
     /// <summary>Where an invitation is accepted (client/app/invite.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
@@ -151,9 +158,10 @@ public sealed class WorkstreamApp
     /// <summary>
     /// Sign in with GitHub beside the emailed code, where a GitHub OAuth client is configured
     /// (<see cref="GitHubSignInClientId"/> and <see cref="GitHubSignInClientSecret"/>). SqlOS owns the whole
-    /// of it: the connection, the round trip to GitHub, and who the person is. It reads their GitHub profile
-    /// and their verified primary email (the scopes <c>read:user</c> and <c>user:email</c>); someone whose
-    /// address already has an account is that person, and someone new gets what a new person gets
+    /// of it: the connection, the round trip to GitHub, and who the person is. It asks for
+    /// <see cref="GitHubScopes"/>: their GitHub profile and verified primary email, and their repositories. It
+    /// keeps the token GitHub gives it, which <see cref="SqlOSGitHubTokens"/> reads. Someone whose address
+    /// already has an account is that person, and someone new gets what a new person gets
     /// (IdentityProvisioning.cs). Without the two settings nothing is seeded, the sign-in page lists no
     /// provider and shows no button. Answers whether it is on.
     /// </summary>
@@ -166,7 +174,7 @@ public sealed class WorkstreamApp
         {
             throw new InvalidOperationException($"Set both {GitHubSignInClientId} and {GitHubSignInClientSecret}, or leave both unset.");
         }
-        auth.SeedGitHubConnection(clientId, clientSecret, ProviderCallback);
+        auth.SeedGitHubConnection(clientId, clientSecret, [ProviderCallback], GitHubScopes, storeProviderTokens: true);
         return true;
     }
 
