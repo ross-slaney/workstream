@@ -37,6 +37,13 @@ public sealed class NoGitHubTokens : IGitHubTokens
 /// <summary>A repository the person can reach on GitHub. <see cref="Url"/> is what an environment clones.</summary>
 public sealed record GitHubRepository(string FullName, string Url, string DefaultBranch, bool Private, DateTimeOffset? PushedAt);
 
+/// <summary>A GitHub account: its number, its login and the name it shows, when it has one.</summary>
+public sealed record GitHubUser(long Id, string Login, string? Name)
+{
+    /// <summary>The address GitHub gives every account for commits, which links them to it without showing a real address.</summary>
+    public string NoReplyEmail => $"{Id}+{Login}@users.noreply.github.com";
+}
+
 /// <summary>A file in a repository: its text and the blob's id, which GitHub needs to replace it.</summary>
 public sealed record GitHubFile(string Path, string Text, string Sha);
 
@@ -66,6 +73,14 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
     /// <summary>At most this many pages of a hundred are read of a list GitHub pages.</summary>
     const int MaxPages = 3;
     const int PerPage = 100;
+
+    /// <summary>The account the token belongs to.</summary>
+    public async Task<GitHubUser> UserAsync(string token, CancellationToken ct)
+    {
+        using var request = Request(HttpMethod.Get, "/user", token);
+        var answer = await SendAsync<Account>(request, ct);
+        return new GitHubUser(answer.Id, answer.Login, string.IsNullOrWhiteSpace(answer.Name) ? null : answer.Name.Trim());
+    }
 
     /// <summary>The repositories the person can reach, most recently pushed first, and whether there are more than were read.</summary>
     public async Task<(IReadOnlyList<GitHubRepository> Repositories, bool More)> RepositoriesAsync(string token, CancellationToken ct)
@@ -223,6 +238,7 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
         public GitHubRepository ToRepository() => new(FullName, HtmlUrl, DefaultBranch ?? "main", Private, PushedAt);
     }
 
+    sealed record Account([property: JsonPropertyName("id")] long Id, [property: JsonPropertyName("login")] string Login, [property: JsonPropertyName("name")] string? Name);
     sealed record Branch([property: JsonPropertyName("name")] string Name);
     sealed record ReferenceObject([property: JsonPropertyName("sha")] string Sha);
     sealed record Reference([property: JsonPropertyName("ref")] string Ref, [property: JsonPropertyName("object")] ReferenceObject Object);

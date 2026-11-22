@@ -48,6 +48,12 @@ public sealed record DesktopGitHubToken(string Token, string? Repository);
 /// </summary>
 public sealed record TaskGitHub(bool SignInNeeded, bool StartedByYou, string? StartedByName);
 
+/// <summary>
+/// Who the desktop's commits are by: the person who started the task, by the name on their GitHub account
+/// (its login when it has none) and the address GitHub gives the account for commits.
+/// </summary>
+public sealed record DesktopGitAuthor(string Name, string Email);
+
 public static partial class Operations
 {
     const string GitHubDidNotAnswer = "GitHub did not answer. Try again in a moment.";
@@ -279,29 +285,69 @@ public static partial class Operations
     /// </summary>
     public static async Task<Outcome<DesktopGitHubToken>> DesktopGitHubTokenAsync(Caller desktop, WorkstreamDbContext db, WorkstreamApp app, IGitHubTokens tokens, CancellationToken ct)
     {
+        var found = await DesktopPersonTokenAsync(desktop, db, app, tokens, ct);
+        if (!found.IsOk) return found.As<DesktopGitHubToken>();
+        var (token, repositoryUrl) = found.Value;
+        return Outcome<DesktopGitHubToken>.Ok(new DesktopGitHubToken(token, GitHubRepositoryName.Of(repositoryUrl)?.FullName));
+    }
+
+    /// <summary>
+    /// Who the desktop's commits are by: the person who started its task, as their GitHub account says, so a
+    /// commit is theirs on GitHub as the push is. Read from GitHub with their token each time it is asked; the
+    /// agent asks when the desktop starts and sets it as git's author and committer. Not there (404) when they
+    /// have no GitHub token, and the desktop's commits keep the agent's own name.
+    /// </summary>
+    public static async Task<Outcome<DesktopGitAuthor>> DesktopGitAuthorAsync(Caller desktop, WorkstreamDbContext db, WorkstreamApp app, IGitHubTokens tokens, GitHubClient github, CancellationToken ct)
+    {
+        var found = await DesktopPersonTokenAsync(desktop, db, app, tokens, ct);
+        if (!found.IsOk) return found.As<DesktopGitAuthor>();
+        try
+        {
+            var user = await github.UserAsync(found.Value.Token, ct);
+            return Outcome<DesktopGitAuthor>.Ok(new DesktopGitAuthor(user.Name ?? user.Login, user.NoReplyEmail));
+        }
+        catch (GitHubRefused refused) when (refused.Status == HttpStatusCode.Unauthorized)
+        {
+            return Outcome<DesktopGitAuthor>.NotFound("GitHub no longer accepts the sign-in of the person who started this task.");
+        }
+        catch (Exception error) when (GitHubFailed(error, ct))
+        {
+            return Outcome<DesktopGitAuthor>.Unavailable(GitHubDidNotAnswer);
+        }
+    }
+
+    /// <summary>
+    /// The GitHub token a desktop works with, and its environment's repository: the task's starter's for a
+    /// task's desktop, the last person to save the environment for a machine preparing it.
+    /// </summary>
+    static async Task<Outcome<(string Token, string? RepositoryUrl)>> DesktopPersonTokenAsync(Caller desktop, WorkstreamDbContext db, WorkstreamApp app, IGitHubTokens tokens, CancellationToken ct)
+    {
         string person;
         string? repositoryUrl;
+        string who;
         if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is { } task)
         {
             person = task.CreatedBy;
+            who = "The person who started this task";
             repositoryUrl = await db.Environments.AsNoTracking().Where(x => x.Id == task.EnvironmentId).Select(x => x.RepositoryUrl).SingleOrDefaultAsync(ct);
         }
         else if (await PreparingAsync(desktop, db, ct) is { } preparing)
         {
             person = preparing.Environment.ChangedBy;
+            who = "The person who last saved this environment";
             repositoryUrl = preparing.Environment.RepositoryUrl;
         }
         else
         {
-            return Outcome<DesktopGitHubToken>.NotFound();
+            return Outcome<(string, string?)>.NotFound();
         }
-        if (!app.GitHubSignIn) return Outcome<DesktopGitHubToken>.NotFound("Sign in with GitHub is not set up on this Workstream, so this desktop has no GitHub token. Put one in the environment's variables as GITHUB_TOKEN.");
-        if (await tokens.ForUserAsync(person, ct) is not { } token)
+        if (!app.GitHubSignIn) return Outcome<(string, string?)>.NotFound("Sign in with GitHub is not set up on this Workstream, so this desktop has no GitHub token. Put one in the environment's variables as GITHUB_TOKEN.");
+        if (person.Length == 0 || await tokens.ForUserAsync(person, ct) is not { } token)
         {
-            var name = (await NamesAsync(db, [person], ct)).GetValueOrDefault(person) ?? "The person who started this task";
-            return Outcome<DesktopGitHubToken>.NotFound($"{name} has not signed in to Workstream with GitHub, so this desktop cannot reach GitHub as them. Once they sign out and sign in with GitHub, ask again.");
+            var name = person.Length == 0 ? who : (await NamesAsync(db, [person], ct)).GetValueOrDefault(person) ?? who;
+            return Outcome<(string, string?)>.NotFound($"{name} has not signed in to Workstream with GitHub, so this desktop cannot reach GitHub as them. Once they sign out and sign in with GitHub, ask again.");
         }
-        return Outcome<DesktopGitHubToken>.Ok(new DesktopGitHubToken(token, GitHubRepositoryName.Of(repositoryUrl)?.FullName));
+        return Outcome<(string, string?)>.Ok((token, repositoryUrl));
     }
 
     /// <summary>Whether the task's desktop reaches GitHub as the person who started it, for the task's page.</summary>

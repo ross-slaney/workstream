@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { askToken, credentialAnswer, isGitHub, parseCredentialRequest, tokenFor } from "./github.mjs";
+import { askToken, authorFor, credentialAnswer, isGitHub, parseCredentialRequest, tokenFor } from "./github.mjs";
 import { projectWork } from "./instructions.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -126,4 +126,20 @@ test("a desktop with a repository is told to finish on a branch and a pull reque
   assert.match(told, /gh pr create/);
   assert.match(told, /Never push to the default branch/);
   assert.equal(projectWork(null), "");
+});
+
+test("commits are by the person who started the task, as the API says, and by nobody when it says nothing", async () => {
+  const author = { name: "Ada Lovelace", email: "583231+octocat@users.noreply.github.com" };
+  const asked = [];
+  const answering = (status, body) => async (url, init) => {
+    asked.push({ url, authorization: init.headers.authorization });
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  };
+  const told = async () => ({ api: "http://api.test", key: "wsd_key" });
+  assert.deepEqual(await authorFor({ env: {}, told, fetch: answering(200, author) }), author);
+  assert.deepEqual(asked, [{ url: "http://api.test/api/desktop/github/author", authorization: "Bearer wsd_key" }]);
+  assert.equal(await authorFor({ env: {}, told, fetch: answering(404, { title: "Grace Hopper has not signed in to Workstream with GitHub." }) }), null);
+  assert.equal(await authorFor({ env: {}, told, fetch: answering(200, { name: "", email: "x" }) }), null);
+  assert.equal(await authorFor({ env: {}, told, fetch: async () => { throw new TypeError("fetch failed"); } }), null);
+  assert.equal(await authorFor({ env: {}, told: async () => ({ api: "", key: "" }) }), null);
 });

@@ -41,6 +41,7 @@ public sealed class FakeGitHub : HttpMessageHandler
     }
 
     readonly ConcurrentDictionary<string, List<Repository>> accounts = new();
+    readonly ConcurrentDictionary<string, (long Id, string Login, string? Name)> users = new();
     readonly ConcurrentDictionary<string, Repository> repositories = new(StringComparer.OrdinalIgnoreCase);
     long last;
 
@@ -48,12 +49,17 @@ public sealed class FakeGitHub : HttpMessageHandler
     public ConcurrentQueue<string> Asked { get; } = new();
 
     /// <summary>A new GitHub account, and the token GitHub gave it.</summary>
-    public string NewAccount()
+    public string NewAccount(string? name = "Ada Lovelace")
     {
         var token = "gho_" + Guid.NewGuid().ToString("N");
         accounts[token] = [];
+        var id = Interlocked.Increment(ref last) + 50_000_000;
+        users[token] = (id, $"octo-{id}", name);
         return token;
     }
+
+    /// <summary>Who a token's account is, as GitHub's <c>/user</c> says.</summary>
+    public (long Id, string Login, string? Name) UserOf(string token) => users[token];
 
     /// <summary>A new repository of its own that the token's account reaches.</summary>
     public Repository Give(string token, string? name = null, bool canPush = true)
@@ -79,6 +85,11 @@ public sealed class FakeGitHub : HttpMessageHandler
         var bearer = request.Headers.Authorization?.Scheme == "Bearer" ? request.Headers.Authorization.Parameter : null;
         if (bearer is null || !accounts.TryGetValue(bearer, out var reachable)) return Status(HttpStatusCode.Unauthorized, "Bad credentials");
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+
+        if (request.Method == HttpMethod.Get && path == "/user" && users.TryGetValue(bearer, out var user))
+        {
+            return Json(new { id = user.Id, login = user.Login, name = user.Name });
+        }
 
         if (request.Method == HttpMethod.Get && path == "/user/repos")
         {

@@ -81,6 +81,8 @@ public static partial class WorkstreamApi
         desktop.MapPost("/exchange", Exchange).ExcludeFromDescription();
         // The GitHub token of the person who started the desktop's task (WorkstreamApi.GitHub.cs).
         desktop.MapGet("/github/token", GetDesktopGitHubToken).ExcludeFromDescription();
+        // Who its commits are by: the same person, as their GitHub account says.
+        desktop.MapGet("/github/author", GetDesktopGitAuthor).ExcludeFromDescription();
     }
 
     static TaskDto ToDto(WorkTask x, IReadOnlyDictionary<string, string> names) => new(

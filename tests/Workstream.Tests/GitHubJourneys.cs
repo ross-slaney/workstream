@@ -91,6 +91,39 @@ public sealed class GitHubJourneys
     }
 
     [TestMethod]
+    public async Task A_desktops_commits_are_by_the_person_who_started_its_task_at_their_GitHub_noreply_address()
+    {
+        var (ada, team) = await Person.WithTeamAsync("Ada Lovelace");
+        await RoomAsync(team.Id);
+        var adaToken = SignedInWithGitHub(ada);
+        var environment = await EnvironmentAsync(ada, team.Id, Stack.GitHub.Give(adaToken).Url);
+        using var desktop = await Desktop.StartAsync((await StartAsync(ada, team.Id, environment)).Id);
+        var account = Stack.GitHub.UserOf(adaToken);
+        var author = await Person.ReadAsync<DesktopGitAuthor>(await desktop.GetAsync("/api/desktop/github/author"));
+        Assert.AreEqual("Ada Lovelace", author.Name);
+        Assert.AreEqual($"{account.Id}+{account.Login}@users.noreply.github.com", author.Email);
+
+        // An account with no name shown is its login.
+        var lin = await MemberAsync(ada, team.Id);
+        var linToken = Stack.GitHub.NewAccount(name: null);
+        Stack.GitHubTokens.Give(lin.UserId, linToken);
+        using var linDesktop = await Desktop.StartAsync((await StartAsync(lin, team.Id, environment)).Id);
+        Assert.AreEqual(Stack.GitHub.UserOf(linToken).Login, (await Person.ReadAsync<DesktopGitAuthor>(await linDesktop.GetAsync("/api/desktop/github/author"))).Name);
+
+        // Without GitHub, the desktop is told who has not signed in, and keeps the agent's own name.
+        var (grace, graceTeam) = await Person.WithTeamAsync("Grace Hopper");
+        var graceEnvironment = await EnvironmentAsync(grace, graceTeam.Id, "https://github.com/acme/app");
+        using var graceDesktop = await Desktop.StartAsync((await StartAsync(grace, graceTeam.Id, graceEnvironment)).Id);
+        await graceDesktop.GetAsync("/api/desktop/github/author").IsAsync(HttpStatusCode.NotFound, "Grace Hopper has not signed in to Workstream with GitHub");
+
+        // A token GitHub no longer takes gives no author either; nobody without a key gets one.
+        Stack.GitHub.Revoke(adaToken);
+        await desktop.GetAsync("/api/desktop/github/author").IsAsync(HttpStatusCode.NotFound, "no longer accepts");
+        using var nobody = new HttpClient { BaseAddress = Stack.Origin };
+        await nobody.GetAsync("/api/desktop/github/author").IsAsync(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
     public async Task A_desktop_whose_starter_did_not_sign_in_with_GitHub_is_told_so_in_words_the_agent_passes_on()
     {
         var (grace, team) = await Person.WithTeamAsync("Grace Hopper");

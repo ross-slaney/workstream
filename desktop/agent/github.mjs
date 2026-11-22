@@ -52,6 +52,24 @@ export async function askToken({ env = process.env, told = toldNow, fetch: get =
   }
 }
 
+/**
+ * Who the desktop's commits are by: the person who started the task, by their GitHub name and the address
+ * GitHub gives their account for commits (GET /api/desktop/github/author). Null when the API has none for them
+ * (they did not sign in with GitHub) or cannot be reached: the commits then keep the agent's own name.
+ */
+export async function authorFor({ env = process.env, told = toldNow, fetch: get = fetch } = {}) {
+  const { api, key } = await told(env);
+  if (!api || !key) return null;
+  try {
+    const response = await get(`${api}/api/desktop/github/author`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) return null;
+    const answer = await response.json();
+    return typeof answer?.name === "string" && answer.name && typeof answer?.email === "string" && answer.email ? { name: answer.name, email: answer.email } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A token for git and gh, or null when there is none. */
 export const tokenFor = async (options) => (await askToken(options)).token;
 

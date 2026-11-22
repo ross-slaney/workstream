@@ -47,5 +47,8 @@ public static partial class WorkstreamApi
     static async Task<IResult> GetDesktopGitHubToken(HttpContext http, WorkstreamDbContext db, WorkstreamApp app, IGitHubTokens tokens, CancellationToken ct) =>
         Answer(await Operations.DesktopGitHubTokenAsync(Caller.Desktop(http), db, app, tokens, ct));
 
+    static async Task<IResult> GetDesktopGitAuthor(HttpContext http, WorkstreamDbContext db, WorkstreamApp app, IGitHubTokens tokens, GitHubClient github, CancellationToken ct) =>
+        Answer(await Operations.DesktopGitAuthorAsync(Caller.Desktop(http), db, app, tokens, github, ct));
+
     static IResult Answer<T>(Outcome<T> outcome) => outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
 }

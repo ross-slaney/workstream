@@ -27,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { authorFor } from "./github.mjs";
 import { panelFor } from "./panel.mjs";
 import { startedFromLine, tail, usedBytes } from "./prepared.mjs";
 import { failureMessage, followScript, runScript, setupMinutes } from "./setup.mjs";
@@ -184,13 +185,19 @@ const shims = path.join(root, "agent", "shims");
  * github.mjs for a token whenever it needs one, and gh asks it through its wrapper. The token is the GitHub
  * token of the person who started the task, or the GITHUB_TOKEN the environment was given.
  */
-async function writeVariables(variables) {
+async function writeVariables(variables, { asTheStarter = false } = {}) {
   const lines = [`export PATH=${shellQuote(shims)}:"$PATH"`, ...Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`)];
   await writeFile(path.join(dir, "env.sh"), lines.join("\n") + "\n", { mode: 0o600 });
   const config = (...args) => run("git", ["config", "--global", ...args]).catch((error) => log("git config failed:", error.message));
   await config("--replace-all", "credential.https://github.com.helper", `!node ${path.join(root, "agent", "github.mjs")} credential`);
-  // Commits need an author. The person can set their own, and a repository's own setting wins.
-  if (!(await run("git", ["config", "--global", "user.name"]).then(() => true, () => false))) {
+  // Commits are by the person who started the task, as their GitHub account says, as the pushes are. Without
+  // one (they did not sign in with GitHub), commits need an author all the same: the agent's own name, unless
+  // the person set theirs. A repository's own setting wins either way.
+  const author = asTheStarter ? await authorFor() : null;
+  if (author) {
+    await config("user.name", author.name);
+    await config("user.email", author.email);
+  } else if (!(await run("git", ["config", "--global", "user.name"]).then(() => true, () => false))) {
     await config("user.name", "Workstream agent");
     await config("user.email", "agent@workstream.invalid");
   }
@@ -290,7 +297,7 @@ async function startFromSave(saved, setup, target) {
 
 /** The part of preparing that needs no window: the variables and the repository. Answers the folder the agent works in. */
 async function prepareFiles(setup, saved) {
-  await writeVariables(setup.variables);
+  await writeVariables(setup.variables, { asTheStarter: true });
   let workspace = path.join(home, "work");
   await mkdir(workspace, { recursive: true });
   if (saved) await startFromSave(saved, setup, setup.repository ? repositoryFolder(setup.repository) : workspace);
