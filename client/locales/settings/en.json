@@ -53,6 +53,7 @@
       "repositoryHint": "Cloned when the desktop is made, from any https address. Desktops reach GitHub as the person who started the task.",
       "branch": "Branch",
       "branchPlaceholder": "main",
+      "moreBranches": "This repository has more branches than Workstream lists. Type the branch's name.",
       "reading": "Looking for workstream.yml in {repository}",
       "fromFile": "Filled from workstream.yml on {branch}. Each task reads the file again when it starts, so change the file to change these settings.",
       "followsFile": "Its settings are workstream.yml in the repository. Each task reads the file again when it starts, so change the file to change these settings.",

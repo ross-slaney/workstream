@@ -221,6 +221,14 @@ public sealed class GitHubJourneys
         var branches = await ada.GetAsync<GitHubBranches>($"/api/github/repositories/{newer.Owner}/{newer.Name}/branches");
         Assert.AreEqual("main", branches.DefaultBranch);
         CollectionAssert.AreEqual(new[] { "main", "develop", "feature/login" }, branches.Branches.ToArray());
+        Assert.IsFalse(branches.More);
+
+        // A repository with more branches than are read says so, so the form takes a branch's name typed.
+        foreach (var i in Enumerable.Range(0, 300)) newer.Branches[$"codex/{i:D3}"] = new();
+        var many = await ada.GetAsync<GitHubBranches>($"/api/github/repositories/{newer.Owner}/{newer.Name}/branches");
+        Assert.IsTrue(many.More);
+        Assert.AreEqual(301, many.Branches.Count); // The default branch first, though it was not on the pages read.
+        Assert.IsFalse(many.Branches.Contains("feature/login"));
 
         // Someone else's repository is not theirs to list.
         using var lin = await Person.SignUpAsync("Lin Clark");

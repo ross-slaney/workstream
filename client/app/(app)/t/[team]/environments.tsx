@@ -64,6 +64,7 @@ export default function EnvironmentsRoute() {
   const signedIn = valueOf(repositories)?.signedIn ?? false;
   const [editing, setEditing] = useState<Editing | null>(null);
   const [branches, setBranches] = useState<string[] | null>(null);
+  const [moreBranches, setMoreBranches] = useState(false);
   const [reading, setReading] = useState<RepositoryReading>({ kind: "none" });
   const [savedFile, setSavedFile] = useState<SavedRepositoryFile | null>(null);
   // Each look at a repository has a number: an answer for a repository or branch no longer picked is dropped.
@@ -89,8 +90,12 @@ export default function EnvironmentsRoute() {
 
   const readBranches = (fullName: string) => {
     setBranches(null);
+    setMoreBranches(false);
     workstream.branches(fullName).then(
-      (answer) => setBranches(answer.branches),
+      (answer) => {
+        setBranches(answer.branches);
+        setMoreBranches(answer.more);
+      },
       () => setBranches([]),
     );
   };
@@ -147,6 +152,7 @@ export default function EnvironmentsRoute() {
         picker={{
           repositories,
           branches,
+          moreBranches,
           reading,
           onRetry: repositories.reload,
           onPick: (repository: GitHubRepository | null) => {

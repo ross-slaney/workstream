@@ -29,14 +29,14 @@ const github = (changes: Partial<GitHubRepositories> = {}): GitHubRepositories =
 
 const page = (options: {
   draft?: EnvironmentDraft; repositories?: EnvironmentsScreenProps["picker"]["repositories"]; reading?: RepositoryReading; branches?: string[] | null;
-  file?: RepositoryFileOffer | null; id?: string | null;
+  moreBranches?: boolean; file?: RepositoryFileOffer | null; id?: string | null;
 }) =>
   renderToStaticMarkup(
     <EnvironmentsPage
       environments={{ kind: "ready", value: [] }}
       apps={[{ id: "chrome", name: "Chrome", description: "The web browser.", launcher: "chromium.desktop", default: true }]}
       picker={{
-        repositories: options.repositories ?? { kind: "ready", value: github() }, branches: options.branches ?? null, reading: options.reading ?? { kind: "none" },
+        repositories: options.repositories ?? { kind: "ready", value: github() }, branches: options.branches ?? null, moreBranches: options.moreBranches ?? false, reading: options.reading ?? { kind: "none" },
         onPick: nothing, onBranch: nothing, onReadAgain: nothing, onSignInWithGitHub: nothing, onRetry: nothing,
       }}
       onRetry={nothing} onAdd={nothing} onEdit={nothing}
@@ -81,6 +81,13 @@ describe("picking the repository", () => {
     expect(drawn).toContain("Change");
     expect(drawn).toMatch(/<option value="develop"/);
     expect(drawn).not.toContain("Find a repository");
+  });
+
+  it("takes a typed branch, offering the ones it read, when the repository has more than it lists", () => {
+    const drawn = page({ draft: { ...picked, repositoryBranch: "workstream-yml" }, branches: ["main", "develop"], moreBranches: true });
+    expect(drawn).toContain("This repository has more branches than Workstream lists.");
+    expect(drawn).toMatch(/<input[^>]*value="workstream-yml"/);
+    expect(drawn).toMatch(/<datalist[^>]*><option value="workstream-yml"><\/option><option value="main">/);
   });
 });
 

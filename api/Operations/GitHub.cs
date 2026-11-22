@@ -19,8 +19,11 @@ namespace Workstream.Api;
 /// </summary>
 public sealed record GitHubRepositories(bool Available, bool SignedIn, IReadOnlyList<GitHubRepository> Repositories, bool More);
 
-/// <summary>A repository's branches, its default one first.</summary>
-public sealed record GitHubBranches(string DefaultBranch, IReadOnlyList<string> Branches);
+/// <summary>
+/// A repository's branches, its default one first. <see cref="More"/> says the repository has more than were
+/// read, so the form takes a branch's name typed as well.
+/// </summary>
+public sealed record GitHubBranches(string DefaultBranch, IReadOnlyList<string> Branches, bool More);
 
 /// <summary>
 /// A repository's <c>workstream.yml</c> on a branch: whether it is there, and its settings, or what is wrong
@@ -90,8 +93,8 @@ public static partial class Operations
         try
         {
             if (await github.RepositoryAsync(token, repository, ct) is not { } found) return Outcome<GitHubBranches>.NotFound();
-            var branches = await github.BranchesAsync(token, repository, ct);
-            return Outcome<GitHubBranches>.Ok(new(found.DefaultBranch, [found.DefaultBranch, .. branches.Where(x => x != found.DefaultBranch).Order(StringComparer.OrdinalIgnoreCase)]));
+            var (branches, more) = await github.BranchesAsync(token, repository, ct);
+            return Outcome<GitHubBranches>.Ok(new(found.DefaultBranch, [found.DefaultBranch, .. branches.Where(x => x != found.DefaultBranch).Order(StringComparer.OrdinalIgnoreCase)], more));
         }
         catch (GitHubRefused refused) when (refused.Status == HttpStatusCode.Unauthorized)
         {

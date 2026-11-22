@@ -40,6 +40,8 @@ export type RepositoryPicker = {
   repositories: Online<GitHubRepositories>;
   /** The picked repository's branches, its default one first. Null while they are read, or when there is no GitHub repository. */
   branches: string[] | null;
+  /** The repository has more branches than were read, so the branch is typed, with the ones read offered. */
+  moreBranches: boolean;
   reading: RepositoryReading;
   /** Pick a repository (null: none). Its default branch comes with it, and its workstream.yml is read. */
   onPick: (repository: GitHubRepository | null) => void;

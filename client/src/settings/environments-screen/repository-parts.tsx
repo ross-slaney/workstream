@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/kit/button";
 import { SelectField, TextField } from "@/components/kit/field";
 import { ErrorNote, Spinner } from "@/components/kit/status";
@@ -66,6 +66,7 @@ export function RepositorySection({ picker, draft, onChange }: { picker: Reposit
           url={draft.repositoryUrl}
           branch={draft.repositoryBranch}
           branches={picker.branches}
+          more={picker.moreBranches}
           onBranch={picker.onBranch}
           onChange={() => picker.onPick(null)}
         />
@@ -128,31 +129,63 @@ function Finder({ repositories, more, onPick, onType }: { repositories: GitHubRe
 }
 
 /** The picked repository, its branch, and changing it. */
-function Picked({ name, url, branch, branches, onBranch, onChange }: {
-  name: string; url: string; branch: string; branches: string[] | null; onBranch: (branch: string) => void; onChange: () => void;
+function Picked({ name, url, branch, branches, more, onBranch, onChange }: {
+  name: string; url: string; branch: string; branches: string[] | null; more: boolean; onBranch: (branch: string) => void; onChange: () => void;
 }) {
   const t = useT("settings");
+  const [typed, setTyped] = useState<string | null>(null);
+  const listId = useId();
+  // A branch typed is read when the person leaves the field or presses Enter, not on every key.
+  const commit = () => {
+    const next = typed?.trim();
+    if (next && next !== branch) onBranch(next);
+    setTyped(null);
+  };
   // The branch on the draft is offered even when GitHub did not list it (more branches than were read, or a typo kept from before).
   const options = branches ? (branch && !branches.includes(branch) ? [branch, ...branches] : branches) : branch ? [branch] : [];
   return (
-    <div className="grid items-end gap-3 md:grid-cols-[1fr_220px]">
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium text-foreground">{t("environments.editor.repositorySection")}</span>
-        <div className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-card px-3 py-1">
-          <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground underline-offset-2 hover:underline">
-            {name}
-          </a>
-          <Button size="small" tone="quiet" label={t("environments.editor.changeRepository")} onClick={onChange} />
+    <div className="flex flex-col gap-1.5">
+      <div className="grid items-end gap-3 md:grid-cols-[1fr_220px]">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[13px] font-medium text-foreground">{t("environments.editor.repositorySection")}</span>
+          <div className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-card px-3 py-1">
+            <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground underline-offset-2 hover:underline">
+              {name}
+            </a>
+            <Button size="small" tone="quiet" label={t("environments.editor.changeRepository")} onClick={onChange} />
+          </div>
         </div>
+        {more ? (
+          <div>
+            <TextField
+              label={t("environments.editor.branch")}
+              value={typed ?? branch}
+              onChangeText={setTyped}
+              onBlur={commit}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commit();
+              }}
+              list={listId}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <datalist id={listId}>
+              {options.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </div>
+        ) : options.length > 0 ? (
+          <SelectField label={t("environments.editor.branch")} value={branch} onChangeValue={onBranch} options={options.map((value) => ({ value, label: value }))} />
+        ) : (
+          <p className="flex h-10 items-center gap-2 text-[13px] text-muted-foreground">
+            <Spinner label={t("environments.editor.branch")} className="size-3" />
+            {t("environments.editor.branch")}
+          </p>
+        )}
       </div>
-      {options.length > 0 ? (
-        <SelectField label={t("environments.editor.branch")} value={branch} onChangeValue={onBranch} options={options.map((value) => ({ value, label: value }))} />
-      ) : (
-        <p className="flex h-10 items-center gap-2 text-[13px] text-muted-foreground">
-          <Spinner label={t("environments.editor.branch")} className="size-3" />
-          {t("environments.editor.branch")}
-        </p>
-      )}
+      {/* Under the whole row, so the branch field stays level with the repository. */}
+      {more ? <p className="text-[13px] text-muted-foreground">{t("environments.editor.moreBranches")}</p> : null}
     </div>
   );
 }

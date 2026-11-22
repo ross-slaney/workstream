@@ -55,7 +55,7 @@ export type GitHubRepository = { fullName: string; url: string; defaultBranch: s
 export type GitHubRepositories = { available: boolean; signedIn: boolean; repositories: GitHubRepository[]; more: boolean };
 
 /** A repository's branches, its default one first. */
-export type GitHubBranches = { defaultBranch: string; branches: string[] };
+export type GitHubBranches = { defaultBranch: string; branches: string[]; more: boolean };
 
 /** What a repository's workstream.yml says. Variables are names only. */
 export type WorkstreamFileSettings = { size: DesktopSize; apps: string[]; setup: string | null; variables: string[]; instructions: string | null };

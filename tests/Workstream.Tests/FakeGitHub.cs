@@ -109,7 +109,8 @@ public sealed class FakeGitHub : HttpMessageHandler
         if (request.Method == HttpMethod.Get && rest == "branches")
         {
             var page = int.Parse(Query("page") ?? "1");
-            return Json(page == 1 ? repository.Branches.Keys.Order().Select(name => new { name }) : []);
+            var size = int.Parse(Query("per_page") ?? "30");
+            return Json(repository.Branches.Keys.Order(StringComparer.Ordinal).Skip((page - 1) * size).Take(size).Select(name => new { name }));
         }
         if (request.Method == HttpMethod.Get && rest.StartsWith("git/ref/heads/", StringComparison.Ordinal))
         {

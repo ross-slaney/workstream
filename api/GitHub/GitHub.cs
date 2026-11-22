@@ -106,8 +106,11 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
         }
     }
 
-    /// <summary>The repository's branches, by name.</summary>
-    public async Task<IReadOnlyList<string>> BranchesAsync(string token, GitHubRepositoryName repository, CancellationToken ct)
+    /// <summary>
+    /// The repository's branches, by name, as many as a few pages hold. <c>More</c> says the repository has more
+    /// than were read: GitHub lists them by name, so a branch late in the alphabet may be missing.
+    /// </summary>
+    public async Task<(IReadOnlyList<string> Names, bool More)> BranchesAsync(string token, GitHubRepositoryName repository, CancellationToken ct)
     {
         var branches = new List<string>();
         for (var page = 1; page <= MaxPages; page++)
@@ -115,9 +118,9 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
             using var request = Request(HttpMethod.Get, $"/repos/{Path(repository)}/branches?per_page={PerPage}&page={page}", token);
             var answer = await SendAsync<List<Branch>>(request, ct);
             branches.AddRange(answer.Select(x => x.Name));
-            if (answer.Count < PerPage) break;
+            if (answer.Count < PerPage) return (branches, false);
         }
-        return branches;
+        return (branches, true);
     }
 
     /// <summary>The commit a branch is at, or null when there is no such branch.</summary>
