@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Task, TaskAccess, TaskSetup } from "@/lib/workstream/api";
+import type { Task, TaskAccess, TaskGitHub, TaskSetup } from "@/lib/workstream/api";
 
 /** One entry in the conversation as the screen draws it. */
 export type ChatEntry = {
@@ -33,6 +33,14 @@ export type TaskScreenProps = {
    * ended. Null, or left out, when the desktop ran none.
    */
   setup?: TaskSetup | null;
+  /**
+   * Whether the desktop reaches GitHub as the person who started the task. When they have not signed in
+   * with GitHub, the screen says so: to them, with a way to sign in with GitHub; to anyone else, who it is.
+   * Null, or left out, until it is read.
+   */
+  github?: TaskGitHub | null;
+  /** Sign out and sign in again with GitHub. */
+  onSignInWithGitHub?: () => void;
   /** The task is not there any more: deleted here or by a teammate. */
   missing: boolean;
   entries: ChatEntry[];

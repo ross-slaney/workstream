@@ -7,7 +7,7 @@ import { ErrorNote, Spinner } from "@/components/kit/status";
 import { useTheme } from "@/components/theme/theme";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { DesktopState, StartStep, Task, TaskSetup } from "@/lib/workstream/api";
+import type { DesktopState, StartStep, Task, TaskGitHub, TaskSetup } from "@/lib/workstream/api";
 import type { ChatEntry, TaskScreenProps } from "./props";
 import { chatNoteOf, restingOf, type Resting } from "./resting";
 import { RichText } from "./rich-text";
@@ -198,6 +198,7 @@ export function Chat(p: TaskScreenProps) {
           <Entry key={entry.id} entry={entry} onRetry={() => p.onRetry(entry.id)} />
         ))}
       </div>
+      {p.github?.signInNeeded && task ? <GitHubNote github={p.github} onSignIn={p.onSignInWithGitHub} /> : null}
       {p.setup && task ? <SetupNote setup={p.setup} running={settingUp} /> : null}
       {working ? (
         <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">
@@ -250,6 +251,22 @@ export function Chat(p: TaskScreenProps) {
         <p className="border-t border-border px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground">{t("share.watchOnly")}</p>
       )}
     </section>
+  );
+}
+
+/**
+ * The desktop cannot reach GitHub as the person who started the task, because they have not signed in to
+ * Workstream with GitHub. To them it says so with a way to sign in with GitHub; to anyone else it says who.
+ */
+function GitHubNote({ github, onSignIn }: { github: TaskGitHub; onSignIn?: () => void }) {
+  const t = useT("workspace");
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-[12.5px]">
+      <p className="min-w-0 flex-1 leading-snug text-muted-foreground">
+        {github.startedByYou ? t("github.signInYou") : t("github.signInThem", { name: github.startedByName ?? t("github.someone") })}
+      </p>
+      {github.startedByYou && onSignIn ? <Button size="small" label={t("github.signIn")} onClick={onSignIn} /> : null}
+    </div>
   );
 }
 

@@ -200,5 +200,11 @@
     "unusableTitle": "This link can't be used",
     "unusable": "It may have expired, been withdrawn, or been used already. Ask whoever shared the task to share it again.",
     "home": "Go to my tasks"
+  },
+  "github": {
+    "signInYou": "This desktop can't reach GitHub as you, because you haven't signed in to Workstream with GitHub. Sign in with GitHub and the agent can push and open pull requests.",
+    "signInThem": "{name} started this task and hasn't signed in to Workstream with GitHub, so its desktop can't push to GitHub as them.",
+    "someone": "The person who started it",
+    "signIn": "Sign out and sign in with GitHub"
   }
 }

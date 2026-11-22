@@ -19,8 +19,7 @@ const page = (admin: boolean) =>
   renderToStaticMarkup(
     <TeamPage
       {...({
-        team: team(admin), people: { kind: "ready", value: [] }, github: { kind: "loading" }, githubRepositories: null, onRetryGitHub: nothing, onConnectGitHub: nothing,
-        onDisconnectGitHub: nothing, invitations: [], meId: "me", invited: null, taskEmails: true, busy: false, error: null, onRetry: nothing, onRename: nothing,
+        team: team(admin), people: { kind: "ready", value: [] }, invitations: [], meId: "me", invited: null, taskEmails: true, busy: false, error: null, onRetry: nothing, onRename: nothing,
         onDesktopTimes: nothing, onInvite: nothing, onDismissInvited: nothing, onWithdraw: nothing, onSetAdmin: nothing, onRemove: nothing, onTaskEmails: nothing,
       } as unknown as TeamScreenProps)}
     />,

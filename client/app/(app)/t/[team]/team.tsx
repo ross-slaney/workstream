@@ -3,7 +3,6 @@ import Head from "expo-router/head";
 import { useState } from "react";
 import { useTeamShell } from "@/components/app/team-shell";
 import { useAction } from "@/hooks/use-action";
-import { goToGitHub } from "@/lib/github-connect";
 import { useOnlineRead } from "@/hooks/use-online-read";
 import { useT } from "@/lib/i18n";
 import { valueOf } from "@/lib/online";
@@ -11,7 +10,7 @@ import { useSession } from "@/lib/session";
 import { workstream, type PendingInvitation } from "@/lib/workstream/api";
 import { TeamScreen } from "@/src/settings/team-screen";
 
-/** /t/{team}/team: who is on the team, inviting someone, when its desktops are paused and archived, and the team's GitHub connection. */
+/** /t/{team}/team: who is on the team, inviting someone, and when its desktops are paused and archived. */
 export default function TeamRoute() {
   const t = useT("settings");
   const router = useRouter();
@@ -24,10 +23,6 @@ export default function TeamRoute() {
   const invitations = useOnlineRead(() => (admin ? workstream.invitations(teamId) : Promise.resolve([])), `invitations:${teamId}:${admin}`);
   // The person's own, the same on every team.
   const settings = useOnlineRead(() => workstream.mySettings(), "my-settings");
-  const github = useOnlineRead(() => workstream.github(teamId), `github:${teamId}`);
-  const connected = valueOf(github)?.connected ?? false;
-  // What the connection reaches is read from GitHub, so only once there is one.
-  const repositories = useOnlineRead(() => (connected ? workstream.githubRepositories(teamId) : Promise.resolve([])), `github-repositories:${teamId}:${connected}`);
   const [invited, setInvited] = useState<PendingInvitation | null>(null);
   const action = useAction();
   const then = (refresh: () => void) => (run: () => Promise<unknown>) => void action.run(run).then(refresh);
@@ -40,19 +35,6 @@ export default function TeamRoute() {
       <TeamScreen
         team={valueOf(team)}
         people={people}
-        github={github}
-        githubRepositories={connected ? repositories : null}
-        onRetryGitHub={() => {
-          github.reload();
-          repositories.reload();
-        }}
-        onConnectGitHub={() =>
-          void action.run(async () => {
-            const { url } = await workstream.startGitHubInstall(teamId);
-            goToGitHub(teamId, url);
-          })
-        }
-        onDisconnectGitHub={() => then(github.refresh)(() => workstream.disconnectGitHub(teamId))}
         invitations={valueOf(invitations) ?? []}
         meId={session?.userId ?? ""}
         invited={invited}

@@ -43,25 +43,41 @@ export type TeamUsage = {
 };
 
 /**
- * A team's GitHub connection. `available` says whether Workstream's GitHub App is set up at all; `manageUrl`
- * is where on GitHub the installation is changed (which repositories it reaches) or removed.
+ * A repository the person can reach on GitHub, with the token GitHub gave them at sign-in. `url` is what an
+ * environment clones.
  */
-export type GitHub = {
-  available: boolean;
-  connected: boolean;
-  account: string | null;
-  /** `Organization` or `User`, as GitHub says. */
-  accountType: string | null;
-  connectedAt: string | null;
-  connectedByName: string | null;
-  manageUrl: string | null;
+export type GitHubRepository = { fullName: string; url: string; defaultBranch: string; private: boolean; pushedAt: string | null };
+
+/**
+ * The person's repositories, most recently pushed first. `available`: this Workstream signs people in with
+ * GitHub. `signedIn`: Workstream has their GitHub token. `more`: there are more than were read.
+ */
+export type GitHubRepositories = { available: boolean; signedIn: boolean; repositories: GitHubRepository[]; more: boolean };
+
+/** A repository's branches, its default one first. */
+export type GitHubBranches = { defaultBranch: string; branches: string[] };
+
+/** What a repository's workstream.yml says. Variables are names only. */
+export type WorkstreamFileSettings = { size: DesktopSize; apps: string[]; setup: string | null; variables: string[]; instructions: string | null };
+
+/** A repository's workstream.yml on a branch: whether it is there, its settings, or what is wrong with it, a line each. */
+export type RepositoryFile = { found: boolean; settings: WorkstreamFileSettings | null; errors: string[] };
+
+/** What Workstream suggests for a repository's environment, and one line on what it was based on. */
+export type EnvironmentSuggestion = {
+  size: DesktopSize;
+  apps: string[];
+  setupScript: string | null;
+  variables: string[];
+  instructions: string | null;
+  why: string;
 };
 
-/** A repository the team's GitHub connection reaches. `url` is what an environment clones. */
-export type GitHubRepository = { fullName: string; url: string; defaultBranch: string; private: boolean };
+/** workstream.yml saved in the repository: a `commit` to the environment's branch, or a `pull_request` from a new `branch`. */
+export type SavedRepositoryFile = { kind: "commit" | "pull_request"; url: string; branch: string };
 
-/** What GitHub hands back after an installation, which the web app passes on as the person signed in here. */
-export type ConnectGitHub = { state: string; code: string | null; installationId: number | null };
+/** Whether a task's desktop reaches GitHub as the person who started it. */
+export type TaskGitHub = { signInNeeded: boolean; startedByYou: boolean; startedByName: string | null };
 
 export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean };
 
@@ -100,6 +116,8 @@ export type Environment = {
   variableNames: string[];
   updatedAt: string;
   setup: EnvironmentSetup;
+  /** Its settings are its repository's workstream.yml, which each task's start reads again. */
+  fromFile: boolean;
 };
 
 /** A variable as it is sent: a null value keeps the value the environment already has for that name. */
@@ -114,6 +132,8 @@ export type WriteEnvironment = {
   setupScript: string | null;
   instructions: string | null;
   variables: VariableChange[];
+  /** The settings were filled from the repository's workstream.yml. */
+  fromFile: boolean;
 };
 
 /**
@@ -230,6 +250,8 @@ export type AdminOverview = {
 };
 
 const id = encodeURIComponent;
+/** `owner/name` in an address: each part escaped. */
+const repositoryPath = (fullName: string) => fullName.split("/").map(id).join("/");
 
 export const workstream = {
   me: () => apiJson<Me>("/api/me"),
@@ -252,12 +274,11 @@ export const workstream = {
   invite: (teamId: string, email: string, admin: boolean) => apiSend<PendingInvitation>("POST", `/api/teams/${id(teamId)}/invitations`, { email, admin }),
   revokeInvitation: (teamId: string, invitationId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/invitations/${id(invitationId)}`),
 
-  github: (teamId: string) => apiJson<GitHub>(`/api/teams/${id(teamId)}/github`),
-  githubRepositories: (teamId: string) => apiJson<GitHubRepository[]>(`/api/teams/${id(teamId)}/github/repositories`),
-  /** Where on GitHub an administrator installs the app, with a state the API signed for them. */
-  startGitHubInstall: (teamId: string) => apiSend<{ url: string }>("POST", `/api/teams/${id(teamId)}/github/install`),
-  connectGitHub: (body: ConnectGitHub) => apiSend<{ teamId: string; gitHub: GitHub }>("POST", "/api/github/connect", body),
-  disconnectGitHub: (teamId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/github`),
+  /** The signed-in person's GitHub: their repositories, a repository's branches and its workstream.yml. */
+  myRepositories: () => apiJson<GitHubRepositories>("/api/github/repositories"),
+  branches: (fullName: string) => apiJson<GitHubBranches>(`/api/github/repositories/${repositoryPath(fullName)}/branches`),
+  repositoryFile: (fullName: string, branch: string | null) =>
+    apiJson<RepositoryFile>(`/api/github/repositories/${repositoryPath(fullName)}/workstream-file${branch ? `?branch=${id(branch)}` : ""}`),
 
   environments: (teamId: string) => apiJson<ListPage<Environment>>(`/api/teams/${id(teamId)}/environments`),
   addEnvironment: (teamId: string, environmentId: string, body: WriteEnvironment) =>
@@ -266,6 +287,11 @@ export const workstream = {
   deleteEnvironment: (environmentId: string) => apiSend<void>("DELETE", `/api/environments/${id(environmentId)}`),
   /** "Prepare again": the environment's setup is done again on a machine of its own, and saved for its tasks. */
   prepareEnvironment: (environmentId: string) => apiSend<Environment>("POST", `/api/environments/${id(environmentId)}/setup`),
+  /** Read the repository through GitHub and ask the model for its setup. It takes a while: ten to thirty seconds. */
+  suggestEnvironment: (teamId: string, repositoryUrl: string, branch: string | null) =>
+    apiSend<EnvironmentSuggestion>("POST", `/api/teams/${id(teamId)}/environment-suggestions`, { repositoryUrl, branch }),
+  /** Save the environment as workstream.yml in its repository, as the person: a commit, or a pull request where the branch is protected. */
+  saveRepositoryFile: (environmentId: string) => apiSend<SavedRepositoryFile>("POST", `/api/environments/${id(environmentId)}/workstream-file`),
 
   tasks: (teamId: string) => apiJson<ListPage<Task>>(`/api/teams/${id(teamId)}/tasks`),
   /**
@@ -281,6 +307,7 @@ export const workstream = {
   startDesktop: (taskId: string) => apiSend<Task>("POST", `/api/tasks/${id(taskId)}/start`),
   interrupt: (taskId: string) => apiSend<void>("POST", `/api/tasks/${id(taskId)}/interrupt`),
   conversation: (taskId: string, after: number) => apiJson<Conversation>(`/api/tasks/${id(taskId)}/messages?after=${after}`),
+  taskGitHub: (taskId: string) => apiJson<TaskGitHub>(`/api/tasks/${id(taskId)}/github`),
   say: (taskId: string, text: string, key: string) => apiSend<Message>("POST", `/api/tasks/${id(taskId)}/messages`, { text, key }),
 
   /** Tasks of other teams shared with the person. */

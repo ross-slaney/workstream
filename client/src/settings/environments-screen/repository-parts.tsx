@@ -1,0 +1,244 @@
+import { useState } from "react";
+import { Button } from "@/components/kit/button";
+import { SelectField, TextField } from "@/components/kit/field";
+import { ErrorNote, Spinner } from "@/components/kit/status";
+import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import type { GitHubRepository } from "@/lib/workstream/api";
+import type { EnvironmentDraft, RepositoryFileOffer, RepositoryPicker, RepositoryReading } from "./props";
+import { gitHubName, matchingRepositories } from "./repository";
+
+const day = (at: string) => new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+/**
+ * The environment's repository. Signed in with GitHub, the person finds one of their repositories by name and
+ * picks it, then its branch; otherwise, or for an address that is not on GitHub, they type it. Under it, what
+ * Workstream is doing with the picked repository: reading its workstream.yml, or suggesting a setup.
+ */
+export function RepositorySection({ picker, draft, onChange }: { picker: RepositoryPicker; draft: EnvironmentDraft; onChange: (change: Partial<EnvironmentDraft>) => void }) {
+  const t = useT("settings");
+  const [typing, setTyping] = useState(false);
+  const github = picker.repositories.kind === "ready" ? picker.repositories.value : null;
+  const signedIn = github?.signedIn ?? false;
+  const name = gitHubName(draft.repositoryUrl);
+  // A repository already on the draft that is not on GitHub is typed, as it was written.
+  const typed = typing || !signedIn || (draft.repositoryUrl.trim() !== "" && !name);
+
+  return (
+    <fieldset className="flex flex-col gap-3">
+      <legend className="text-[13px] font-medium text-foreground">{t("environments.editor.repositorySection")}</legend>
+      {picker.repositories.kind === "loading" ? (
+        <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <Spinner label={t("environments.editor.readingRepositories")} className="size-3" />
+          {t("environments.editor.readingRepositories")}
+        </p>
+      ) : picker.repositories.kind === "failed" ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[13px] text-muted-foreground">{t("environments.editor.repositoriesFailed", { message: picker.repositories.message })}</p>
+          <RetryButton onRetry={picker.onRetry} />
+        </div>
+      ) : github && github.available && !signedIn ? (
+        <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-3">
+          <p className="text-[13px] text-muted-foreground">{t("environments.editor.signInForRepositories")}</p>
+          <Button size="small" label={t("environments.editor.signInWithGitHub")} onClick={picker.onSignInWithGitHub} />
+        </div>
+      ) : null}
+
+      {typed ? (
+        <>
+          <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+            <TextField
+              label={t("environments.editor.repository")}
+              placeholder={t("environments.editor.repositoryPlaceholder")}
+              hint={t("environments.editor.repositoryHint")}
+              value={draft.repositoryUrl}
+              onChangeText={(repositoryUrl) => onChange({ repositoryUrl, fromFile: false })}
+              inputMode="url"
+              spellCheck={false}
+            />
+            <TextField label={t("environments.editor.branch")} placeholder={t("environments.editor.branchPlaceholder")} value={draft.repositoryBranch} onChangeText={(repositoryBranch) => onChange({ repositoryBranch })} spellCheck={false} />
+          </div>
+          {signedIn ? <Button size="small" tone="quiet" className="self-start" label={t("environments.editor.pickFromGitHub")} onClick={() => setTyping(false)} /> : null}
+        </>
+      ) : name ? (
+        <Picked
+          name={name}
+          url={draft.repositoryUrl}
+          branch={draft.repositoryBranch}
+          branches={picker.branches}
+          onBranch={picker.onBranch}
+          onChange={() => picker.onPick(null)}
+        />
+      ) : (
+        <Finder repositories={github?.repositories ?? []} more={github?.more ?? false} onPick={picker.onPick} onType={() => setTyping(true)} />
+      )}
+
+      {name && signedIn ? <Reading reading={picker.reading} repository={name} fromFile={draft.fromFile} onSuggest={picker.onSuggest} /> : null}
+    </fieldset>
+  );
+}
+
+function RetryButton({ onRetry }: { onRetry: () => void }) {
+  const common = useT("common");
+  return <Button size="small" tone="quiet" label={common("actions.retry")} onClick={onRetry} />;
+}
+
+/** Finding one of the person's repositories by name: a search over what GitHub listed, and the matches to pick. */
+function Finder({ repositories, more, onPick, onType }: { repositories: GitHubRepository[]; more: boolean; onPick: (repository: GitHubRepository) => void; onType: () => void }) {
+  const t = useT("settings");
+  const [query, setQuery] = useState("");
+  const matches = matchingRepositories(repositories, query);
+  return (
+    <div className="flex flex-col gap-2">
+      <TextField
+        label={t("environments.editor.findRepository")}
+        placeholder={t("environments.editor.findRepositoryPlaceholder")}
+        value={query}
+        onChangeText={setQuery}
+        spellCheck={false}
+        autoComplete="off"
+        hint={t("environments.editor.repositorySectionHint")}
+      />
+      {repositories.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">{t("environments.editor.noRepositories")}</p>
+      ) : matches.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">{t("environments.editor.noRepositoryMatches")}</p>
+      ) : (
+        <ul aria-label={t("environments.editor.findRepository")} className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border">
+          {matches.map((repository) => (
+            <li key={repository.fullName}>
+              <button
+                type="button"
+                onClick={() => onPick(repository)}
+                className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 bg-card px-3 py-2 text-left outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <span className="min-w-0 truncate font-mono text-[13px] text-foreground">{repository.fullName}</span>
+                {repository.private ? <span className="text-[12px] text-muted-foreground">{t("environments.editor.privateRepository")}</span> : null}
+                {repository.pushedAt ? <span className="ml-auto text-[12px] text-muted-foreground">{t("environments.editor.pushed", { date: day(repository.pushedAt) })}</span> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {more ? <p className="text-[12.5px] text-muted-foreground">{t("environments.editor.moreRepositories", { count: repositories.length })}</p> : null}
+      <Button size="small" tone="quiet" className="self-start" label={t("environments.editor.typeAddress")} onClick={onType} />
+    </div>
+  );
+}
+
+/** The picked repository, its branch, and changing it. */
+function Picked({ name, url, branch, branches, onBranch, onChange }: {
+  name: string; url: string; branch: string; branches: string[] | null; onBranch: (branch: string) => void; onChange: () => void;
+}) {
+  const t = useT("settings");
+  // The branch on the draft is offered even when GitHub did not list it (more branches than were read, or a typo kept from before).
+  const options = branches ? (branch && !branches.includes(branch) ? [branch, ...branches] : branches) : branch ? [branch] : [];
+  return (
+    <div className="grid items-end gap-3 md:grid-cols-[1fr_220px]">
+      <div className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
+        <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground underline-offset-2 hover:underline">
+          {name}
+        </a>
+        <Button size="small" tone="quiet" label={t("environments.editor.changeRepository")} onClick={onChange} />
+      </div>
+      {options.length > 0 ? (
+        <SelectField label={t("environments.editor.branch")} value={branch} onChangeValue={onBranch} options={options.map((value) => ({ value, label: value }))} />
+      ) : (
+        <p className="flex h-10 items-center gap-2 text-[13px] text-muted-foreground">
+          <Spinner label={t("environments.editor.branch")} className="size-3" />
+          {t("environments.editor.branch")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** What Workstream is doing with the picked repository, said plainly, with what can be done next. */
+export function Reading({ reading, repository, fromFile, onSuggest }: { reading: RepositoryReading; repository: string; fromFile: boolean; onSuggest: () => void }) {
+  const t = useT("settings");
+  const box = "flex flex-col items-start gap-2 rounded-lg border px-3 py-2.5 text-[13px]";
+  switch (reading.kind) {
+    case "reading":
+      return (
+        <p role="status" className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <Spinner label={t("environments.editor.reading", { repository: reading.repository })} className="size-3" />
+          {t("environments.editor.reading", { repository: reading.repository })}
+        </p>
+      );
+    case "suggesting":
+      return (
+        <p role="status" className={cn(box, "flex-row items-center border-border text-muted-foreground")}>
+          <Spinner label={t("environments.editor.suggesting")} className="size-3 shrink-0" />
+          {t("environments.editor.suggesting")}
+        </p>
+      );
+    case "file":
+      return (
+        <p role="status" className={cn(box, "border-primary/40 bg-primary-soft text-foreground")}>
+          {t("environments.editor.fromFile", { branch: reading.branch })}
+        </p>
+      );
+    case "fileChanged":
+      return <p role="status" className={cn(box, "border-border text-muted-foreground")}>{t("environments.editor.fileChanged")}</p>;
+    case "badFile":
+      return (
+        <div role="alert" className={cn(box, "border-destructive/40 bg-destructive/10")}>
+          <p className="font-medium text-destructive">{t("environments.editor.badFile")}</p>
+          <ul className="flex list-disc flex-col gap-0.5 pl-5 font-mono text-[12px] text-foreground">
+            {reading.errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+          <Button size="small" label={t("environments.editor.suggestInstead")} onClick={onSuggest} />
+        </div>
+      );
+    case "suggested":
+      return (
+        <div role="status" className={cn(box, "border-primary/40 bg-primary-soft")}>
+          <p className="text-foreground">{reading.why ? t("environments.editor.suggested", { why: reading.why }) : t("environments.editor.suggestedNoReason")}</p>
+          <Button size="small" tone="quiet" label={t("environments.editor.suggestAgain")} onClick={onSuggest} />
+        </div>
+      );
+    case "failed":
+      return (
+        <div className="flex flex-col items-start gap-2">
+          <ErrorNote message={t("environments.editor.suggestFailed", { message: reading.message })} />
+          <Button size="small" label={t("environments.editor.suggestAgain")} onClick={onSuggest} />
+        </div>
+      );
+    case "none":
+      return fromFile ? (
+        <p role="status" className={cn(box, "border-primary/40 bg-primary-soft text-foreground")}>{t("environments.editor.followsFile")}</p>
+      ) : (
+        <Button size="small" className="self-start" label={t("environments.editor.suggest")} onClick={onSuggest} />
+      );
+  }
+}
+
+/** Saving the saved environment to its repository as workstream.yml, and what that made on GitHub. */
+export function FileOffer({ offer, repository, onSave }: { offer: RepositoryFileOffer; repository: string; onSave: () => void }) {
+  const t = useT("settings");
+  const link = "text-[13px] font-medium text-primary underline-offset-2 hover:underline";
+  return (
+    <section aria-labelledby="environment-file" className="flex flex-col items-start gap-2 rounded-lg border border-primary/40 bg-primary-soft px-4 py-3">
+      <h3 id="environment-file" className="text-sm font-semibold text-foreground">
+        {offer.justSaved ? t("environments.editor.saved") : t("environments.editor.fileTitle")}
+      </h3>
+      {offer.saved ? (
+        <p role="status" className="text-[13px] text-foreground">
+          {offer.saved.kind === "commit" ? t("environments.editor.fileCommitted", { branch: offer.saved.branch }) : t("environments.editor.filePullRequest", { branch: offer.saved.branch })}{" "}
+          <a href={offer.saved.url} target="_blank" rel="noreferrer" className={link}>
+            {offer.saved.kind === "commit" ? t("environments.editor.seeCommit") : t("environments.editor.seePullRequest")}
+          </a>
+        </p>
+      ) : (
+        <>
+          <p className="text-[13px] text-foreground">{t("environments.editor.fileOffer", { repository })}</p>
+          <p className="text-[12.5px] text-muted-foreground">{t("environments.editor.fileOfferKept")}</p>
+          <Button size="small" tone="primary" label={t("environments.editor.saveFile")} busy={offer.busy} onClick={onSave} />
+        </>
+      )}
+      <ErrorNote message={offer.error} />
+    </section>
+  );
+}

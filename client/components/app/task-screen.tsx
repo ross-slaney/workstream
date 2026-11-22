@@ -1,6 +1,8 @@
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DesktopStream } from "@/components/app/desktop-stream";
 import { useAction } from "@/hooks/use-action";
+import { signOut } from "@/lib/auth";
 import { ApiError } from "@/lib/api/errors";
 import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
@@ -37,6 +39,9 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
   const [shared, setShared] = useState<TaskShared | null>(null);
   const shareAction = useAction();
   const people = useOnlineRead(() => (sharing ? workstream.taskAccess(taskId) : Promise.resolve(null)), `access:${taskId}:${sharing}`);
+  // Read once a screen: whether the desktop reaches GitHub as the person who started the task.
+  const github = useOnlineRead(() => workstream.taskGitHub(taskId), `task-github:${taskId}`);
+  const router = useRouter();
   const [missing, setMissing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [unsent, setUnsent] = useState<Unsent[]>([]);
@@ -156,6 +161,11 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         task={task}
         access={access}
         setup={setup}
+        github={github.kind === "ready" ? github.value : null}
+        onSignInWithGitHub={() => {
+          // A new sign-in, with GitHub: SqlOS keeps GitHub's token from it, and the person comes back to the workspace.
+          void signOut().then(() => router.replace(`/sign-in?returnTo=${encodeURIComponent(`/t/${task?.teamId ?? ""}`)}`));
+        }}
         missing={missing}
         entries={entries}
         draft={draft}
