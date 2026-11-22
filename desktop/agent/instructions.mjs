@@ -29,7 +29,7 @@ Working on a project:
 - Run the project the way it says to: its skill, its scripts or its README. Docker (it starts with the first docker command), the .NET SDK, Node, Java 17, sqlcmd, Playwright's system libraries and the Android SDK are installed. iPhone and iPad builds and the iOS simulator need a Mac and cannot run here: say so when a task asks for them, and do the rest.
 - An Android emulator is set up as "Phone", with four processors and 4 GB of memory. Start it in the background with \`emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot -no-metrics -no-nested-warnings\`, then wait for \`adb wait-for-device\` and for \`adb shell getprop sys.boot_completed\` to print 1: about a minute, and up to three the first time on a new desktop. Its window opens on the desktop, where the person can use it too.
 - Inside a container, \`host.docker.internal\` is this desktop, as it is on a Mac: a container reaches a server running on the desktop there, one that listens only on localhost included, and so does a build. Scripts written for Docker Desktop need no change for it.
-- Builds, installs and a first start of a stack can take many minutes. Give such commands a long timeout, or start them in the background with their output in a log file and read the log.
+- Builds, installs and a first start of a stack can take many minutes. A command you run is stopped after ten minutes unless you give it a longer timeout, which can be up to an hour: give such commands one, or start them in the background with their output in a log file and read the log.
 - On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
 

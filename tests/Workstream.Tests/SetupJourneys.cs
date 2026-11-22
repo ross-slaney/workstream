@@ -210,6 +210,25 @@ public sealed class SetupJourneys
         Assert.IsTrue(Stack.Desktops.Saves.ContainsKey(second));
         Assert.AreEqual("prepared", (await EnvironmentAsync(ada, draft.Id)).Setup.State);
 
+        // A save is one size's disk. Another size is a changed setup too: a task of the new size starts from
+        // the image, on a disk of its own size, and the environment is prepared again at that size.
+        var larger = Body(draft) with { Size = "large", Variables = [new VariableChange("API_KEY", null)] };
+        await ada.PutAsync($"/api/environments/{draft.Id}", larger).IsAsync(HttpStatusCode.OK);
+        var resized = await SetupOfAsync(draft.Id);
+        Assert.IsNotNull(resized!.WantedAt);
+        Assert.AreEqual("setup", resized.OutOfDateBecause(await LoadEnvironmentAsync(draft.Id), Options.ImageVersion));
+        var large = await StartAsync(ada, team.Id, draft.Id);
+        using (await Desktop.StartAsync(large.Id))
+        {
+            Assert.AreEqual("large", Stack.Desktops.For(large.Id).Size);
+            Assert.IsNull(Stack.Desktops.For(large.Id).Save);
+        }
+        await DeleteTaskAsync(ada, large.Id);
+        var third = await PrepareAsync(draft.Id);
+        Assert.AreNotEqual(second, third);
+        Assert.IsFalse(Stack.Desktops.Saves.ContainsKey(second));
+        Assert.AreEqual("prepared", (await EnvironmentAsync(ada, draft.Id)).Setup.State);
+
         // Nothing left to prepare: the save goes.
         await ada.PutAsync($"/api/environments/{draft.Id}", Body(draft) with { RepositoryUrl = null, SetupScript = null }).IsAsync(HttpStatusCode.OK);
         Assert.AreEqual("nothing", (await EnvironmentAsync(ada, draft.Id)).Setup.State);

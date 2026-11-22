@@ -335,6 +335,7 @@ async function prepareWindows(setup, workspace) {
  */
 async function restore(plan, setup, workspace) {
   log(`Started again after a stop: ${plan.commands.length} commands, ${plan.tabs.length} pages, ${plan.files.length} files.`);
+  wakeDocker();
   if (plan.commands.length > 0) {
     const script = path.join(dir, "restore.sh");
     await writeFile(script, restartScript(plan.commands, path.join(dir, "env.sh")), { mode: 0o700 });
@@ -356,6 +357,16 @@ async function restore(plan, setup, workspace) {
     await browserUp();
     start("chromium", [url], setup.variables);
   })).finally(() => setTimeout(watchTabs, 5000));
+}
+
+/**
+ * Docker starts with the first docker command (image/configure.sh), so after a stop it is not running, and
+ * neither are the containers a project told it to bring back (a database with a restart policy). When this
+ * desktop has containers, Docker is started here, out of sight, and it starts those.
+ */
+function wakeDocker() {
+  const containers = 'command -v docker > /dev/null && [ -n "$(sudo -n ls /var/lib/docker/containers 2> /dev/null | head -1)" ] && docker info > /dev/null 2>&1';
+  spawn("sh", ["-c", containers], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
 }
 
 /** Whether a page answers at all, which is what a server that is up does. */

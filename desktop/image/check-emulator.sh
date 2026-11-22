@@ -13,13 +13,13 @@ set -euo pipefail
 # An image for a processor Android's emulator has no system image for comes without one.
 [ -d /opt/android-sdk/system-images ] || { echo "No Android system image here: nothing to check."; exit 0; }
 test -d /home/work/.android/avd/Phone.avd
-sudo -u work -H bash -l <<'WORK'
-set -euo pipefail
+# The rest runs as the desktop's person, in a login shell, which is where the Android tools are on the PATH.
+if [ "$(id -un)" != work ]; then exec sudo -u work -H bash -l "$0" "$@"; fi
 cd ~
 emulator -accel-check > /dev/null
 /opt/workstream/image/phone.sh Check
 log=/tmp/emulator-check.log
-emulator -avd Check -no-window -gpu swiftshader_indirect -no-audio -no-snapshot -no-metrics -no-nested-warnings -no-boot-anim > "$log" 2>&1 &
+emulator -avd Check -no-window -gpu swiftshader_indirect -no-audio -no-snapshot -no-metrics -no-nested-warnings -no-boot-anim > "$log" 2>&1 < /dev/null &
 failed() { echo "The Android emulator did not $1. Its last lines:"; tail -20 "$log"; pkill -u work "^qemu-system" || true; exit 1; }
 started=$(date +%s)
 held=no
@@ -46,4 +46,3 @@ avdmanager delete avd -n Check > /dev/null
 rm -f "$log"
 rm -rf ~/.android/avd/running
 find ~/.android -mindepth 1 -maxdepth 1 ! -name avd -exec rm -rf {} +
-WORK

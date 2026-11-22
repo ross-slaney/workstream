@@ -52,6 +52,8 @@ public static partial class Operations
             script = environment.SetupScript,
             variables = variables.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => new[] { x.Key, x.Value }),
             apps = environment.Apps.Order(StringComparer.Ordinal),
+            // A save is one size's disk: a task of another size would start on a disk of the wrong size.
+            size = environment.Size,
         };
         return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(inputs))).ToLowerInvariant();
     }
