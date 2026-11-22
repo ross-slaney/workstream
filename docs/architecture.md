@@ -74,14 +74,16 @@ The Azure host's part of this is checked against Azure itself by `tests/Workstre
 
 | Step | Standard (4 cores, 64 GB disk, 12 GB on it) | Large (8 cores, 128 GB disk, 22 GB on it) |
 | --- | --- | --- |
-| Stop the preparing machine | 15 s | LARGE_STOP |
-| Save its disk (a full snapshot) | 3 s | LARGE_SAVE |
-| Make a machine from the save, until it has an address | 6 s | LARGE_CREATE |
-| That machine is on | 13 s | LARGE_ON |
-| Its guest answers a command | 30 s | LARGE_GUEST |
-| Read 10 GB the setup wrote, for the first time | not written | LARGE_READ |
+| Make a machine from the image, until it has an address | 5 s | 4 s |
+| That machine is on | 8 s | 8 s |
+| Stop it, once the setup is done | 15 s | 15 s |
+| Save its disk (a full snapshot) | 3 s | 3 s |
+| Make a machine from the save, until it has an address | 6 s | 6 s |
+| That machine is on | 13 s | 8 s |
+| Its desktop's service starts, counted from its kernel | not asked | 5 s, and 6 s on the machine from the image |
+| Read 10 GB the setup wrote, for the first time | not written | 142 s, the speed of the disk (writing them took 134 s) |
 
-A machine made from the image took 5, 8 and 15 seconds for the same three steps, so starting from a save costs nothing a person would notice, and the save is ready seconds after the setup ends.
+So a machine made from a save starts like one made from the image, what the setup left is all there and reads at the disk's own speed, and the save is ready seconds after the setup ends. Azure's own times vary from run to run: in another run of the same check a machine took 52 seconds to be on, and Azure's guest agent, which a desktop does not wait for, took four minutes to answer.
 
 Stopping a task deallocates its machine and keeps its disk. Starting it again brings the same desktop back, and the agent resumes the same conversation. Deleting a task deletes the machine, its disk and its network interface, and ends its key. A desktop nobody watches or writes to, whose agent is idle, is stopped after half an hour by a sweep that also fails a desktop that never arrived, and deletes a machine no task knows once it has been there half an hour (a newer one may belong to a task that has just started).
 
