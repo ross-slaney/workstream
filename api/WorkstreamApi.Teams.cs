@@ -27,17 +27,20 @@ public sealed record Invite(string Email, bool Admin = false);
 
 /// <summary>The team a person joined by taking an invitation.</summary>
 
-/// <summary>An environment as it is shown, with how its prepared setup stands. Variables are listed by name; their values are never sent.</summary>
+/// <summary>
+/// An environment as it is shown, with how its prepared setup stands. Variables are listed by name; their
+/// values are never sent. <see cref="FromFile"/>: its settings are its repository's workstream.yml.
+/// </summary>
 public sealed record EnvironmentDto(
     string Id, string TeamId, string Name, IReadOnlyList<string> Apps, string Size, string? RepositoryUrl, string? RepositoryBranch,
-    string? SetupScript, string? Instructions, IReadOnlyList<string> VariableNames, DateTimeOffset UpdatedAt, SetupDto Setup);
+    string? SetupScript, string? Instructions, IReadOnlyList<string> VariableNames, DateTimeOffset UpdatedAt, SetupDto Setup, bool FromFile);
 
 /// <summary>An environment as a person adds it: <see cref="WriteEnvironment"/> with the id the client made.</summary>
 public sealed record AddEnvironment(
     string Id, string Name, IReadOnlyList<string>? Apps, string? Size, string? RepositoryUrl, string? RepositoryBranch, string? SetupScript, string? Instructions,
-    IReadOnlyList<VariableChange>? Variables)
+    IReadOnlyList<VariableChange>? Variables, bool? FromFile = null)
 {
-    public WriteEnvironment Body => new(Name, Apps, Size, RepositoryUrl, RepositoryBranch, SetupScript, Instructions, Variables);
+    public WriteEnvironment Body => new(Name, Apps, Size, RepositoryUrl, RepositoryBranch, SetupScript, Instructions, Variables, FromFile);
 }
 
 public sealed record SetLimits(decimal ModelAllowanceUsd, int MaxRunningDesktops);
@@ -173,7 +176,7 @@ public static partial class WorkstreamApi
 
     static EnvironmentDto ToDto(WorkEnvironment x, EnvironmentSetup? setup, DesktopOptions desktops) => new(
         x.Id, x.TeamId, x.Name, x.Apps, x.Size, x.RepositoryUrl, x.RepositoryBranch, x.SetupScript, x.Instructions, x.VariableNames, x.UpdatedAt,
-        Operations.SetupOf(x, setup, desktops));
+        Operations.SetupOf(x, setup, desktops), x.FromFile);
 
     /// <summary>The environment as it is shown, with its setup read now.</summary>
     static async Task<EnvironmentDto> EnvironmentDtoAsync(WorkEnvironment environment, WorkstreamDbContext db, DesktopOptions desktops, CancellationToken ct) =>

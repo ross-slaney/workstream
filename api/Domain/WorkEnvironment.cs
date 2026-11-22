@@ -2,9 +2,14 @@ using SqlOS.Fga.Interfaces;
 
 namespace Workstream.Api.Domain;
 
-/// <summary>What an environment is set to. Variables are handled apart, because their values are protected.</summary>
+/// <summary>
+/// What an environment is set to. Variables are handled apart, because their values are protected.
+/// <see cref="FromFile"/> says the settings came from the repository's <c>workstream.yml</c>, which a task's
+/// start then reads again (<see cref="WorkEnvironment.FromFile"/>).
+/// </summary>
 public sealed record EnvironmentSettings(
-    string Name, IReadOnlyList<string> Apps, string Size, string? RepositoryUrl, string? RepositoryBranch, string? SetupScript, string? Instructions);
+    string Name, IReadOnlyList<string> Apps, string Size, string? RepositoryUrl, string? RepositoryBranch, string? SetupScript, string? Instructions,
+    bool FromFile = false);
 
 /// <summary>
 /// An environment: what a desktop comes with. The simple part is its apps; the rest is optional and is what
@@ -45,6 +50,17 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     public string? VariablesProtected { get; private set; }
     public string CreatedBy { get; private set; } = "";
     public DateTimeOffset CreatedAt { get; private set; }
+    /// <summary>
+    /// Who last saved its settings: a principal id, a fact. A machine preparing the environment reaches GitHub
+    /// with this person's token (Operations/GitHub.cs).
+    /// </summary>
+    public string ChangedBy { get; private set; } = "";
+    /// <summary>
+    /// The settings are the repository's <c>workstream.yml</c>: filled from it, or saved to it. Each task's
+    /// start reads the file again from GitHub and takes what it says (docs/core-model.md, "workstream.yml").
+    /// Only an environment whose repository is on GitHub is.
+    /// </summary>
+    public bool FromFile { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     /// <summary>
     /// A fingerprint of everything a prepared setup depends on: the repository, the branch, the setup script,
@@ -69,7 +85,7 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
             CreatedAt = now,
         };
         environment.ResourceId = ResourceIdFor(environment.Id);
-        environment.Change(settings, now);
+        environment.Change(settings, createdBy, now);
         return environment;
     }
 
@@ -77,8 +93,9 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     public static WorkEnvironment Standard(Team team, string createdBy, DateTimeOffset now) =>
         Add(Guid.NewGuid().ToString("D"), team, new EnvironmentSettings("Standard desktop", AppCatalog.Defaults, DesktopSizes.Default, null, null, null, null), createdBy, now);
 
-    public void Change(EnvironmentSettings settings, DateTimeOffset now)
+    public void Change(EnvironmentSettings settings, string changedBy, DateTimeOffset now)
     {
+        ChangedBy = Rules.Principal(changedBy, "Whoever changed it");
         Name = Rules.Text(settings.Name, "An environment's name", 100);
         var apps = settings.Apps.Distinct(StringComparer.Ordinal).ToList();
         if (apps.FirstOrDefault(app => !AppCatalog.Has(app)) is { } unknown) throw new DomainRuleException($"'{unknown}' is not an app a desktop can come with.");
@@ -88,6 +105,13 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
         RepositoryBranch = RepositoryUrl is null ? null : Rules.OptionalText(settings.RepositoryBranch, "A branch", 200);
         SetupScript = Rules.OptionalText(settings.SetupScript, "A setup script", MaxScriptLength);
         Instructions = Rules.OptionalText(settings.Instructions, "The agent's instructions", MaxInstructionsLength);
+        KeepFromFile(settings.FromFile, now);
+    }
+
+    /// <summary>Whether the settings are the repository's workstream.yml from now on. Only for a repository on GitHub.</summary>
+    public void KeepFromFile(bool fromFile, DateTimeOffset now)
+    {
+        FromFile = fromFile && GitHubRepositoryName.Of(RepositoryUrl) is not null;
         UpdatedAt = now;
     }
 

@@ -79,7 +79,7 @@ public static partial class WorkstreamApi
         desktop.MapGet("/setup", GetDesktopSetup).ExcludeFromDescription();
         desktop.MapPost("/setup", ReportSetup).ExcludeFromDescription();
         desktop.MapPost("/exchange", Exchange).ExcludeFromDescription();
-        // A token for the desktop's repository from the team's GitHub connection (WorkstreamApi.GitHub.cs).
+        // The GitHub token of the person who started the desktop's task (WorkstreamApi.GitHub.cs).
         desktop.MapGet("/github/token", GetDesktopGitHubToken).ExcludeFromDescription();
     }
 
@@ -103,8 +103,10 @@ public static partial class WorkstreamApi
         return Results.Ok(new ListPage<TaskDto>([.. page.Data.Select(x => ToDto(x, names))], page.NextCursor));
     }
 
-    static async Task<IResult> PostTask(string teamId, StartTask body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct) =>
-        await TaskResultAsync(await Operations.StartTaskAsync(CallerOf(http), teamId, body, db, fga, jobs, desktops, ct), db, ct, created: true);
+    static async Task<IResult> PostTask(string teamId, StartTask body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions desktops,
+        IDataProtectionProvider protection, Workstream.Api.GitHub.IGitHubTokens tokens, Workstream.Api.GitHub.GitHubClient github, ILoggerFactory logs, CancellationToken ct) =>
+        await TaskResultAsync(await Operations.StartTaskAsync(CallerOf(http), teamId, body, db, fga, jobs, desktops,
+            new StartFrom(protection, tokens, github, logs.CreateLogger("Workstream.Tasks")), ct), db, ct, created: true);
 
     /// <summary>
     /// Someone is in the team's workspace: have a desktop running for their next task. 204 whether or not one

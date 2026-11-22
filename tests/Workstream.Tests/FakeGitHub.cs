@@ -1,153 +1,187 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.WebUtilities;
+using Workstream.Api.GitHub;
 
 namespace Workstream.Tests;
 
 /// <summary>
-/// GitHub, played under the API's own GitHub client: the app's installations and their repositories, the codes
-/// GitHub hands back after an installation and the people's tokens they become, and the installation tokens
-/// the app mints. It checks what real GitHub checks: the app's JWT is RS256 with the app's key, a code is used
-/// once, and a token reaches only the repositories of its installation.
+/// GitHub's API as a person's token reaches it, played under the API's own GitHub client: accounts, the
+/// repositories each can reach, their branches and files, and what was written to them (commits, branches,
+/// pull requests). It checks what real GitHub checks: a token reads only its own account's repositories, a
+/// protected branch takes no commit straight onto it, and someone who may only read cannot write.
 /// </summary>
 public sealed class FakeGitHub : HttpMessageHandler
 {
-    public const string AppId = "424242";
-    public const string AppSlug = "workstream-journeys";
-    public const string ClientId = "Iv1.journeys";
-    public const string ClientSecret = "github-client-secret-for-journeys";
-    public const string WebhookSecret = "github-webhook-secret-for-journeys";
     public const string Api = "http://api.github.test";
-    public const string Web = "http://github.test";
 
-    public sealed record Repository(string Name, bool Private = true, string DefaultBranch = "main");
-
-    public sealed record Installation(long Id, string Account, string Type, IReadOnlyList<Repository> Repositories);
-
-    /// <summary>A token the app minted: for which installation, which repositories (all when null), with what permissions.</summary>
-    public sealed record Minted(string Token, long InstallationId, IReadOnlyList<string>? Repositories, IReadOnlyDictionary<string, string> Permissions, DateTimeOffset ExpiresAt);
-
-    readonly RSA key = RSA.Create(2048);
-    readonly ConcurrentDictionary<long, Installation> installations = new();
-    readonly ConcurrentDictionary<string, long[]> codes = new();
-    readonly ConcurrentDictionary<string, long[]> people = new();
-    long lastId = 7_000_000;
-
-    public ConcurrentDictionary<string, Minted> Tokens { get; } = new();
-
-    /// <summary>The app's private key, as GitHub hands it to whoever made the app.</summary>
-    public string PrivateKeyPem => key.ExportRSAPrivateKeyPem();
-
-    /// <summary>The app installed on a new account of its own, reaching these repositories.</summary>
-    public Installation Install(string type = "Organization", params string[] repositories)
+    /// <summary>A repository: its branches and, on each, its files by path. <see cref="Protected"/> branches take changes only through a pull request.</summary>
+    public sealed class Repository(string owner, string name, bool canPush)
     {
-        var id = Interlocked.Increment(ref lastId);
-        var installation = new Installation(id, $"acme-{id}", type, [.. repositories.Select(name => new Repository(name, Private: name != "site"))]);
-        installations[id] = installation;
-        return installation;
+        public string Owner { get; } = owner;
+        public string Name { get; } = name;
+        public string FullName => $"{Owner}/{Name}";
+        public string Url => $"https://github.com/{FullName}";
+        public string DefaultBranch { get; set; } = "main";
+        public bool CanPush { get; } = canPush;
+        public DateTimeOffset PushedAt { get; set; } = DateTimeOffset.UtcNow;
+        public ConcurrentDictionary<string, ConcurrentDictionary<string, string>> Branches { get; } = new() { ["main"] = new() };
+        public HashSet<string> Protected { get; } = [];
+        public ConcurrentQueue<(string Branch, string Path, string Message)> Commits { get; } = new();
+        public ConcurrentQueue<(string Head, string Base, string Title)> PullRequests { get; } = new();
+
+        public Repository With(string path, string text, string branch = "main")
+        {
+            Branches.GetOrAdd(branch, _ => new())[path] = text;
+            return this;
+        }
     }
 
-    /// <summary>The app removed from its account.</summary>
-    public void Uninstall(long id) => installations.TryRemove(id, out _);
+    readonly ConcurrentDictionary<string, List<Repository>> accounts = new();
+    readonly ConcurrentDictionary<string, Repository> repositories = new(StringComparer.OrdinalIgnoreCase);
+    long last;
 
-    /// <summary>The code GitHub hands back to someone whose account reaches these installations.</summary>
-    public string CodeFor(params long[] reachable)
+    /// <summary>Every request that reached GitHub, method and path: what the API asked.</summary>
+    public ConcurrentQueue<string> Asked { get; } = new();
+
+    /// <summary>A new GitHub account, and the token GitHub gave it.</summary>
+    public string NewAccount() => "gho_" + Guid.NewGuid().ToString("N");
+
+    /// <summary>A new repository of its own that the token's account reaches.</summary>
+    public Repository Give(string token, string? name = null, bool canPush = true)
     {
-        var code = "code-" + Guid.NewGuid().ToString("N");
-        codes[code] = reachable;
-        return code;
+        var id = Interlocked.Increment(ref last);
+        var repository = new Repository($"acme-{id}", name ?? "app", canPush);
+        repositories[repository.FullName] = repository;
+        accounts.GetOrAdd(token, _ => []).Add(repository);
+        return repository;
     }
 
-    /// <summary>The tokens minted for an installation, newest last.</summary>
-    public IReadOnlyList<Minted> MintedFor(long installationId) => [.. Tokens.Values.Where(x => x.InstallationId == installationId).OrderBy(x => x.ExpiresAt)];
+    /// <summary>The account's token no longer works: the person revoked it on GitHub.</summary>
+    public void Revoke(string token) => accounts.TryRemove(token, out _);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var uri = request.RequestUri!;
-        var path = uri.AbsolutePath;
+        if (uri.GetLeftPart(UriPartial.Authority) != Api) return Status(HttpStatusCode.NotFound);
+        var path = Uri.UnescapeDataString(uri.AbsolutePath);
+        Asked.Enqueue($"{request.Method} {path}");
         var query = QueryHelpers.ParseQuery(uri.Query);
         var bearer = request.Headers.Authorization?.Scheme == "Bearer" ? request.Headers.Authorization.Parameter : null;
+        if (bearer is null || !accounts.TryGetValue(bearer, out var reachable)) return Status(HttpStatusCode.Unauthorized, "Bad credentials");
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
-        var site = uri.GetLeftPart(UriPartial.Authority);
 
-        if (site == Web && request.Method == HttpMethod.Post && path == "/login/oauth/access_token")
+        if (request.Method == HttpMethod.Get && path == "/user/repos")
         {
-            var form = QueryHelpers.ParseQuery(body);
-            if (form["client_id"] != ClientId || form["client_secret"] != ClientSecret) return Json(new { error = "incorrect_client_credentials" });
-            // A code works once.
-            if (!codes.TryRemove(form["code"].ToString(), out var reachable)) return Json(new { error = "bad_verification_code" });
-            var token = "ghu_" + Guid.NewGuid().ToString("N");
-            people[token] = reachable;
-            return Json(new { access_token = token, token_type = "bearer", scope = "" });
-        }
-
-        if (site != Api) return new HttpResponseMessage(HttpStatusCode.NotFound);
-
-        if (request.Method == HttpMethod.Get && path == "/user/installations")
-        {
-            if (bearer is null || !people.TryGetValue(bearer, out var reachable)) return Status(HttpStatusCode.Unauthorized);
             var page = int.Parse(query["page"].FirstOrDefault() ?? "1");
-            var list = page == 1 ? reachable.Where(installations.ContainsKey).Select(id => installations[id]).ToList() : [];
-            return Json(new { total_count = list.Count, installations = list.Select(x => new { id = x.Id, account = new { login = x.Account, type = x.Type } }) });
+            var perPage = int.Parse(query["per_page"].FirstOrDefault() ?? "30");
+            var list = reachable.OrderByDescending(x => x.PushedAt).Skip((page - 1) * perPage).Take(perPage);
+            return Json(list.Select(Describe));
         }
 
-        if (request.Method == HttpMethod.Post && path.StartsWith("/app/installations/", StringComparison.Ordinal) && path.EndsWith("/access_tokens", StringComparison.Ordinal))
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || parts[0] != "repos") return Status(HttpStatusCode.NotFound);
+        var repository = reachable.FirstOrDefault(x => string.Equals(x.FullName, $"{parts[1]}/{parts[2]}", StringComparison.OrdinalIgnoreCase));
+        if (repository is null) return Status(HttpStatusCode.NotFound);
+        var rest = string.Join('/', parts.Skip(3));
+
+        if (request.Method == HttpMethod.Get && rest == "") return Json(Describe(repository));
+        if (request.Method == HttpMethod.Get && rest == "branches")
         {
-            if (!IsAppToken(bearer)) return Status(HttpStatusCode.Unauthorized);
-            var id = long.Parse(path["/app/installations/".Length..^"/access_tokens".Length]);
-            if (!installations.TryGetValue(id, out var installation)) return Status(HttpStatusCode.NotFound);
-            var asked = JsonNode.Parse(body)!.AsObject();
-            var repositories = asked["repositories"]?.AsArray().Select(x => x!.GetValue<string>()).ToList();
-            if (repositories is not null && repositories.Any(name => installation.Repositories.All(x => x.Name != name)))
+            var page = int.Parse(query["page"].FirstOrDefault() ?? "1");
+            return Json(page == 1 ? repository.Branches.Keys.Order().Select(name => new { name }) : []);
+        }
+        if (request.Method == HttpMethod.Get && rest.StartsWith("git/ref/heads/", StringComparison.Ordinal))
+        {
+            var branch = rest["git/ref/heads/".Length..];
+            return repository.Branches.ContainsKey(branch)
+                ? Json(new { @ref = $"refs/heads/{branch}", @object = new { sha = CommitOf(branch) } })
+                : Status(HttpStatusCode.NotFound);
+        }
+        if (request.Method == HttpMethod.Get && rest.StartsWith("git/trees/", StringComparison.Ordinal))
+        {
+            var branch = BranchOfCommit(rest["git/trees/".Length..]);
+            if (branch is null || !repository.Branches.TryGetValue(branch, out var tree)) return Status(HttpStatusCode.NotFound);
+            return Json(new { sha = rest["git/trees/".Length..], truncated = false, tree = tree.Select(x => new { path = x.Key, type = "blob", size = Encoding.UTF8.GetByteCount(x.Value) }) });
+        }
+        if (rest.StartsWith("contents/", StringComparison.Ordinal))
+        {
+            var file = rest["contents/".Length..];
+            if (request.Method == HttpMethod.Get)
             {
-                return Status(HttpStatusCode.UnprocessableEntity, "There is at least one repository that does not exist or is not accessible to the parent installation.");
+                var branch = query["ref"].FirstOrDefault() ?? repository.DefaultBranch;
+                if (!repository.Branches.TryGetValue(branch, out var files) || !files.TryGetValue(file, out var text)) return Status(HttpStatusCode.NotFound);
+                return Json(new { type = "file", encoding = "base64", content = Convert.ToBase64String(Encoding.UTF8.GetBytes(text)), sha = Sha(text), path = file });
             }
-            var permissions = asked["permissions"]!.AsObject().ToDictionary(x => x.Key, x => x.Value!.GetValue<string>());
-            var minted = new Minted("ghs_" + Guid.NewGuid().ToString("N"), id, repositories, permissions, DateTimeOffset.UtcNow.AddHours(1));
-            Tokens[minted.Token] = minted;
-            return Json(new { token = minted.Token, expires_at = minted.ExpiresAt, permissions }, HttpStatusCode.Created);
-        }
-
-        if (request.Method == HttpMethod.Get && path == "/installation/repositories")
-        {
-            if (bearer is null || !Tokens.TryGetValue(bearer, out var minted) || !installations.TryGetValue(minted.InstallationId, out var installation)) return Status(HttpStatusCode.Unauthorized);
-            var page = int.Parse(query["page"].FirstOrDefault() ?? "1");
-            var list = page == 1 ? installation.Repositories : [];
-            return Json(new
+            if (request.Method == HttpMethod.Put)
             {
-                total_count = list.Count,
-                repositories = list.Select(x => new { full_name = $"{installation.Account}/{x.Name}", html_url = $"https://github.com/{installation.Account}/{x.Name}", default_branch = x.DefaultBranch, @private = x.Private }),
-            });
+                var put = JsonNode.Parse(body)!;
+                var branch = put["branch"]?.GetValue<string>() ?? repository.DefaultBranch;
+                if (!repository.CanPush) return Status(HttpStatusCode.Forbidden, "Resource not accessible by integration");
+                if (repository.Protected.Contains(branch)) return Status(HttpStatusCode.Conflict, "Repository rule violations found. Changes must be made through a pull request.");
+                if (!repository.Branches.TryGetValue(branch, out var files)) return Status(HttpStatusCode.NotFound, "Branch not found");
+                // Replacing a file needs its blob, as GitHub asks.
+                if (files.TryGetValue(file, out var existing) && put["sha"]?.GetValue<string>() != Sha(existing)) return Status(HttpStatusCode.UnprocessableEntity, "\"sha\" wasn't supplied.");
+                var text = Encoding.UTF8.GetString(Convert.FromBase64String(put["content"]!.GetValue<string>()));
+                files[file] = text;
+                var message = put["message"]!.GetValue<string>();
+                repository.Commits.Enqueue((branch, file, message));
+                return Json(new { content = new { path = file, sha = Sha(text) }, commit = new { html_url = $"https://github.com/{repository.FullName}/commit/{Sha(text + branch)}" } }, HttpStatusCode.Created);
+            }
         }
-
+        if (request.Method == HttpMethod.Post && rest == "git/refs")
+        {
+            if (!repository.CanPush) return Status(HttpStatusCode.Forbidden, "Resource not accessible by integration");
+            var asked = JsonNode.Parse(body)!;
+            var name = asked["ref"]!.GetValue<string>()["refs/heads/".Length..];
+            var from = BranchOfCommit(asked["sha"]!.GetValue<string>());
+            if (from is null || !repository.Branches.TryGetValue(from, out var files)) return Status(HttpStatusCode.UnprocessableEntity, "Object does not exist");
+            repository.Branches[name] = new ConcurrentDictionary<string, string>(files);
+            return Json(new { @ref = $"refs/heads/{name}", @object = new { sha = CommitOf(name) } }, HttpStatusCode.Created);
+        }
+        if (request.Method == HttpMethod.Post && rest == "pulls")
+        {
+            var asked = JsonNode.Parse(body)!;
+            var head = asked["head"]!.GetValue<string>();
+            repository.PullRequests.Enqueue((head, asked["base"]!.GetValue<string>(), asked["title"]!.GetValue<string>()));
+            return Json(new { html_url = $"https://github.com/{repository.FullName}/pull/{repository.PullRequests.Count}" }, HttpStatusCode.Created);
+        }
         return Status(HttpStatusCode.NotFound);
     }
 
-    /// <summary>The app's JWT as GitHub reads it: RS256, signed with the app's key, issued for the app, good for ten minutes at most.</summary>
-    bool IsAppToken(string? jwt)
+    static object Describe(Repository x) => new
     {
-        var parts = jwt?.Split('.');
-        if (parts is not { Length: 3 }) return false;
-        var header = JsonNode.Parse(WebEncoders.Base64UrlDecode(parts[0]))!;
-        if (header["alg"]?.GetValue<string>() != "RS256") return false;
-        if (!key.VerifyData(Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}"), WebEncoders.Base64UrlDecode(parts[2]), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) return false;
-        var payload = JsonNode.Parse(WebEncoders.Base64UrlDecode(parts[1]))!;
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var issued = payload["iat"]!.GetValue<long>();
-        var expires = payload["exp"]!.GetValue<long>();
-        return payload["iss"]?.GetValue<string>() == AppId && issued <= now && expires > now && expires - issued <= 600;
-    }
+        full_name = x.FullName, html_url = x.Url, default_branch = x.DefaultBranch, @private = true, pushed_at = x.PushedAt,
+    };
 
-    /// <summary>A webhook delivery, signed as GitHub signs it.</summary>
-    public static string Signature(string body, string secret = WebhookSecret) =>
-        "sha256=" + Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(body))).ToLowerInvariant();
+    /// <summary>A branch's commit is its name, so a tree is found by it again.</summary>
+    static string CommitOf(string branch) => "c0" + Convert.ToHexString(Encoding.UTF8.GetBytes(branch)).ToLowerInvariant();
+
+    static string? BranchOfCommit(string commit) =>
+        commit.StartsWith("c0", StringComparison.Ordinal) ? Encoding.UTF8.GetString(Convert.FromHexString(commit[2..])) : null;
+
+    static string Sha(string text) => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     static HttpResponseMessage Json(object body, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
 
     static HttpResponseMessage Status(HttpStatusCode status, string message = "") => Json(new { message }, status);
+}
+
+/// <summary>
+/// The people's GitHub tokens, as SqlOS would keep them from their sign-in with GitHub: a journey gives a
+/// person one (<see cref="Give"/>) or takes it away. Everyone else has none.
+/// </summary>
+public sealed class FakeGitHubTokens : IGitHubTokens
+{
+    readonly ConcurrentDictionary<string, string> tokens = new();
+
+    public void Give(string userId, string token) => tokens[userId] = token;
+
+    public void Forget(string userId) => tokens.TryRemove(userId, out _);
+
+    public Task<string?> ForUserAsync(string userId, CancellationToken ct) => Task.FromResult(tokens.TryGetValue(userId, out var token) ? token : null);
 }

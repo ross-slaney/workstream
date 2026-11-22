@@ -36,8 +36,6 @@ public sealed class WorkstreamApp
     public const string DevicePath = "/device";
     /// <summary>Where an invitation to a shared task is taken (client/app/share.tsx), under <see cref="WebOrigin"/>, with <c>?token=</c>.</summary>
     public const string SharePath = "/share";
-    /// <summary>Where the browser lands back from installing the GitHub App (client/app/(app)/github.tsx), under <see cref="WebOrigin"/>.</summary>
-    public const string GitHubReturnPath = "/github";
     public const string ApiPath = "/api";
     /// <summary>Required by every /api route. Keep in sync with AUTH_SCOPE in client/lib/auth.ts.</summary>
     public const string ReadScope = "workstream.read";
@@ -82,9 +80,17 @@ public sealed class WorkstreamApp
     public string? AdministratorEmail { get; }
     /// <summary>The administrator's password, only where people sign in with one. Null in production.</summary>
     public string? AdministratorPassword { get; }
+    /// <summary>
+    /// Whether people can sign in with GitHub here: a GitHub OAuth client is configured
+    /// (<see cref="SeedGitHubSignIn"/>). Without it nobody has a GitHub token, and the app says so instead of
+    /// asking people to sign in with GitHub.
+    /// </summary>
+    public bool GitHubSignIn { get; }
 
-    WorkstreamApp(string origin, string webOrigin, string? sender, string? emailConnectionString, bool passwordSignIn, string? administratorEmail, string? administratorPassword)
+    WorkstreamApp(string origin, string webOrigin, string? sender, string? emailConnectionString, bool passwordSignIn, string? administratorEmail, string? administratorPassword,
+        bool gitHubSignIn)
     {
+        GitHubSignIn = gitHubSignIn;
         Origin = origin;
         WebOrigin = webOrigin;
         var email = !string.IsNullOrWhiteSpace(sender) && !string.IsNullOrWhiteSpace(emailConnectionString);
@@ -107,7 +113,8 @@ public sealed class WorkstreamApp
         var administrator = configuration["Workstream:Administrator:Email"] is { } email && email.Contains('@') ? email.Trim() : null;
         return new WorkstreamApp(origin, webOrigin,
             configuration["SqlOS:EmailOtp:FromAddress"], configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"],
-            configuration.GetValue<bool>("Workstream:Auth:PasswordSignIn"), administrator, configuration["Workstream:Administrator:Password"]);
+            configuration.GetValue<bool>("Workstream:Auth:PasswordSignIn"), administrator, configuration["Workstream:Administrator:Password"],
+            !string.IsNullOrWhiteSpace(configuration[GitHubSignInClientId]) && !string.IsNullOrWhiteSpace(configuration[GitHubSignInClientSecret]));
     }
 
     /// <summary>One public PKCE client. The web app starts the headless flow itself and exchanges the code itself.</summary>

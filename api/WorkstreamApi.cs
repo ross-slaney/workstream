@@ -67,7 +67,6 @@ public static partial class WorkstreamApi
         MapTasks(api);
         MapAdmin(api);
         MapGitHub(api);
-        MapGitHubCallbacks(app);
 
         // A person watching a desktop: a WebSocket, authorized inside (Desktops/DesktopRelay.cs).
         app.Map(DesktopRelay.Route, DesktopRelay.HandleAsync).ExcludeFromDescription();
@@ -129,7 +128,7 @@ public static partial class WorkstreamApi
     {
         OutcomeKind.Invalid => Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: outcome.Message),
         OutcomeKind.Forbidden => Forbidden(outcome.Message!),
-        OutcomeKind.NotFound => Results.NotFound(),
+        OutcomeKind.NotFound => outcome.Message is null ? Results.NotFound() : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: outcome.Message),
         // 409: the thing already exists, so a create that was tried again is done.
         OutcomeKind.Exists => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: outcome.Message),
         // The words say which limit; the code lets the app show them beside the limit.

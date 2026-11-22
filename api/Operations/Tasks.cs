@@ -15,6 +15,9 @@ namespace Workstream.Api;
 /// <summary>A task as a person starts it: the environment its desktop comes from, and what they want done.</summary>
 public sealed record StartTask(string Id, string EnvironmentId, string? Title, string? Prompt, string? PromptKey);
 
+/// <summary>What a task's start needs to read its environment's workstream.yml again (Operations/GitHub.cs).</summary>
+public sealed record StartFrom(IDataProtectionProvider Protection, Workstream.Api.GitHub.IGitHubTokens Tokens, Workstream.Api.GitHub.GitHubClient GitHub, ILogger Log);
+
 /// <summary>
 /// What the agent said or did since the desktop's last exchange, and where the desktop is in the conversation.
 /// <see cref="DiskBytes"/> is how much is on the desktop's disk, which it says every few minutes.
@@ -83,7 +86,7 @@ public static partial class Operations
     /// checks the parent) and on the environment the desktop comes from.
     /// </summary>
     public static async Task<Outcome<WorkTask>> StartTaskAsync(Caller caller, string teamId, StartTask body,
-        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions options, CancellationToken ct)
+        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions options, StartFrom from, CancellationToken ct)
     {
         var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamCreateTask, "You can't start tasks in this team.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<WorkTask>();
@@ -95,6 +98,9 @@ public static partial class Operations
             return Outcome<WorkTask>.Invalid("Choose one of the team's environments.");
         }
         if (await RunningDesktopsAsync(db, teamId, ct) >= team.MaxRunningDesktops) return Outcome<WorkTask>.LimitReached(DesktopLimitWords(team.MaxRunningDesktops));
+        // An environment that is its repository's workstream.yml takes what the file says now, before anything
+        // is decided from its settings.
+        await ReadFileAtStartAsync(environment, caller, db, from.Protection, jobs, options, from.Tokens, from.GitHub, from.Log, ct);
         try
         {
             var now = DateTimeOffset.UtcNow;
