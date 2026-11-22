@@ -18,6 +18,8 @@ COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY server.js ./
 COPY dist ./dist
+# The docs pages are read from disk per request (lib/docs/source.ts), relative to the working directory.
+COPY content ./content
 USER node
 EXPOSE 8080
 CMD ["node", "server.js"]

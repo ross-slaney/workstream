@@ -1,0 +1,21 @@
+{
+  "siteTitle": "Workstream Docs",
+  "metaTitle": "{title} · Workstream Docs",
+  "sections": {
+    "guide": "Docs"
+  },
+  "docs": "Docs",
+  "overview": "Overview",
+  "navLabel": "Docs pages",
+  "pagesToggle": "Pages",
+  "pagesNav": "Previous and next page",
+  "breadcrumb": "Breadcrumb",
+  "contentsLabel": "On this page",
+  "previous": "Previous",
+  "next": "Next",
+  "updated": "Updated {date}",
+  "header": {
+    "home": "Workstream home",
+    "site": "Site"
+  }
+}

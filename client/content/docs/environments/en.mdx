@@ -1,0 +1,72 @@
+---
+title: "Environments"
+description: "An environment is what a task's desktop starts with: a repository and branch, a setup script, variables, apps and a size. A saved setup does the setup once."
+order: 4
+updated: 2026-11-21
+---
+
+An environment is what a task's desktop starts with. A team sets its project up once as an environment, and every task started from it gets the same desktop. Everyone on the team can start tasks from the team's environments and edit them, on the Environments page.
+
+A new team has one environment, Standard desktop, with the default apps, the Standard size and nothing else. That is enough for a task that needs only a browser and a terminal.
+
+## What an environment holds
+
+| Setting | What it does |
+| --- | --- |
+| Name | How the environment appears when you start a task. |
+| Apps | Which apps get a button on the desktop's panel. See [Desktops](/docs/desktops#apps). |
+| Size | Small, Standard or Large. See [Desktops](/docs/desktops#sizes). |
+| Repository and branch | The repository cloned onto the desktop, and the branch it starts on. |
+| Setup script | Commands run once on a new desktop. |
+| Variables | Names and values set in every shell on the desktop. |
+| Instructions | Text added to what the agent is told on every desktop made from the environment. |
+
+The last four are under Advanced when you edit an environment. They are for a project that needs its code, tools and keys in place before the agent starts.
+
+## Repository and branch
+
+Give the repository's address and, if you want one other than the default, a branch. The repository is cloned when the desktop is made, and the agent starts in its folder. For a private repository on GitHub, see [GitHub](/docs/github).
+
+## Setup script
+
+The setup script is a shell script, for example:
+
+```bash
+npm ci
+docker pull postgres:17
+```
+
+It runs once on a new desktop, in a terminal window you can watch, in the repository's folder when there is one. Use it for what the project needs beyond the [tools every desktop has](/docs/desktops#developer-tools): installing packages, pulling images, building once.
+
+## Variables
+
+Variables are set in every shell on the desktop and given to the agent. Use them for the keys and settings the project needs to run.
+
+Values are stored protected and are never shown again in the web app; to change one you type a new value. They are sent only to desktops made from that environment. On the desktop they are in plain text, because the work needs them there, so anyone who can open the desktop can read them. That is everyone on the team, and anyone a task is shared with to use its desktop.
+
+## Instructions
+
+Instructions are added to what the agent is told on every desktop made from the environment. For example: "Run the tests before you say you are done. Leave the app running on port 3000." The repository's own `CLAUDE.md` and `AGENTS.md` apply as well.
+
+## Saved setup
+
+Cloning a repository and running a setup script can take minutes, and it is the same work for every task of an environment. So for an environment with a repository or a setup script, Workstream does it once: it clones the repository and runs the setup script on a desktop made only for that, and saves that desktop's disk. Every task then starts from the saved disk with the setup done. The task's agent pulls the branch's newest commits and does not run the setup script again.
+
+The environment's page shows where its saved setup stands:
+
+| It says | What it means |
+| --- | --- |
+| Not prepared | There is no saved setup. Each task clones the repository and runs the setup script itself. |
+| Preparing | The setup is running now. The page shows what the script writes. |
+| Prepared | Tasks start from the saved setup. The page shows when it was prepared and at which commit. |
+| Prepared, out of date | The setup changed, or desktops were updated, since it was prepared. Each task runs the setup itself until it is prepared again. |
+| Preparing failed | The setup script did not finish. Tasks still work: each one runs the setup itself. |
+
+Workstream prepares an environment when it is added with a setup, when its repository, branch, setup script, variables or apps change, and when a task starts and the saved setup is more than a week old. In that last case the task uses the old one and a new one is made behind it. You can also press Prepare again on the environment's page.
+
+What to know about a saved setup:
+
+- It is saved only when the setup script exits with 0. A preparation has 45 minutes at most.
+- Before the disk is saved, the variables, the logs and the browser's profile are removed from it. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
+- An environment keeps one saved setup. One that no task has started from for 30 days is deleted, and the next task prepares it again.
+- A saved setup counts as storage. See [Usage and limits](/docs/usage-and-limits).
