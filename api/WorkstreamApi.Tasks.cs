@@ -32,9 +32,10 @@ public sealed record MessageDto(long Id, string Author, string? AuthorName, bool
 
 /// <summary>
 /// The conversation after a message, with the task as it is now and what the reader may do with it: one read
-/// keeps a screen current, including a share that changed or ended.
+/// keeps a screen current, including a share that changed or ended. <see cref="Setup"/> is the environment's
+/// setup script as it runs, or ran, on this task's own desktop; null when its desktop never ran one.
 /// </summary>
-public sealed record ConversationDto(IReadOnlyList<MessageDto> Messages, TaskDto Task, TaskAccess Access);
+public sealed record ConversationDto(IReadOnlyList<MessageDto> Messages, TaskDto Task, TaskAccess Access, TaskSetupDto? Setup = null);
 
 /// <summary>Share a task: an email, a role (<c>watcher</c>, <c>prompter</c>, <c>driver</c>), and how long (<c>hour</c>, <c>day</c>, <c>week</c>, <c>never</c> to end).</summary>
 public sealed record ShareTask(string Email, string Role, string? ExpiresIn);
@@ -154,7 +155,7 @@ public static partial class WorkstreamApi
         if (error is not null) return error;
         var names = await NamesAsync(db, page!.Data.Select(x => x.AuthorId).Append(seen.Value!.CreatedBy), ct);
         return Results.Ok(new ConversationDto([.. page.Data.Select(x => ToDto(x, names, caller.PrincipalId))], ToDto(seen.Value!, names),
-            await Operations.AccessOfAsync(caller, seen.Value!, fga)));
+            await Operations.AccessOfAsync(caller, seen.Value!, fga), await Operations.TaskSetupOfAsync(db, id, ct)));
     }
 
     /// <summary>
@@ -215,10 +216,10 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
-    /// <summary>The preparing desktop says how the environment's setup is going.</summary>
-    static async Task<IResult> ReportSetup(SetupReport body, HttpContext http, WorkstreamDbContext db, IBackgroundJobClient jobs, CancellationToken ct)
+    /// <summary>A desktop says how the setup is going: a task's own, for the task's screen, or the machine preparing an environment's saved setup.</summary>
+    static async Task<IResult> ReportSetup(SetupReport body, HttpContext http, WorkstreamDbContext db, IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct)
     {
-        var outcome = await Operations.ReportSetupAsync(Caller.Desktop(http), body, db, jobs, ct);
+        var outcome = await Operations.ReportSetupAsync(Caller.Desktop(http), body, db, jobs, desktops, ct);
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 

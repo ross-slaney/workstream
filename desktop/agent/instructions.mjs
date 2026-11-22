@@ -35,3 +35,13 @@ Working on a project:
 - On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
 };
+
+/**
+ * What the agent is told when the environment's setup script did not end well on this desktop, so it does
+ * not take a half-installed project for a ready one. Nothing when it ended well, or none ran here.
+ */
+export const setupEnded = (result) => {
+  if (!result || result.code === 0) return "";
+  const how = result.code === 124 ? `did not finish in ${result.minutes} minutes and was stopped` : `stopped with an error (exit ${result.code})`;
+  return `The environment's setup script ${how} on this desktop, before you started. The script is ~/.workstream/setup.sh and what it wrote is ~/.workstream/setup.log. The project may be only partly installed: read the log before you rely on it, say what failed, and finish the setup yourself when the task needs it.`;
+};

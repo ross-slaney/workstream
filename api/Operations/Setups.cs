@@ -20,6 +20,13 @@ namespace Workstream.Api;
 public sealed record SetupReport(string State, int? Exit, string? Output, string? Commit, long? Bytes);
 
 /// <summary>
+/// The setup script on a task's own desktop, as the task's screen shows it: <see cref="State"/> is
+/// <c>running</c>, <c>done</c>, <c>failed</c> (with the script's <see cref="Exit"/> code) or <c>timed_out</c>
+/// (it ran for <see cref="LimitMinutes"/> and was stopped), with the last lines it wrote.
+/// </summary>
+public sealed record TaskSetupDto(string State, int? Exit, string? Output, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, int LimitMinutes);
+
+/// <summary>
 /// An environment's prepared setup as its page shows it. <see cref="State"/> is <c>nothing</c> (nothing to
 /// prepare), <c>not_prepared</c>, <c>preparing</c>, <c>prepared</c>, <c>out_of_date</c> or <c>failed</c>;
 /// <see cref="Because"/> says why a save is out of date: <c>setup</c> (the settings changed) or
@@ -160,10 +167,10 @@ public static partial class Operations
     }
 
     /// <summary>What the preparing desktop does: the environment's setup, with its variables, and no task and no model.</summary>
-    static DesktopSetup PrepareSetupOf(WorkEnvironment environment, IDataProtectionProvider protection) => new(
+    static DesktopSetup PrepareSetupOf(WorkEnvironment environment, IDataProtectionProvider protection, DesktopOptions options) => new(
         "", environment.Name, environment.Apps,
         environment.RepositoryUrl is { } url ? new DesktopRepository(url, environment.RepositoryBranch) : null,
-        environment.SetupScript, VariablesOf(environment, protection), null, null, Prepare: true);
+        environment.SetupScript, VariablesOf(environment, protection), null, null, Prepare: true, SetupMinutes: options.SetupMinutes);
 
     /// <summary>
     /// The preparing desktop says how the setup is going. Only the desktop doing the attempt that is under way
@@ -171,8 +178,10 @@ public static partial class Operations
     /// When it ended well, the operator stops the machine and saves its disk; when it failed, the machine goes
     /// and tasks go on doing the setup themselves.
     /// </summary>
-    public static async Task<Outcome<bool>> ReportSetupAsync(Caller desktop, SetupReport body, WorkstreamDbContext db, IBackgroundJobClient jobs, CancellationToken ct)
+    public static async Task<Outcome<bool>> ReportSetupAsync(Caller desktop, SetupReport body, WorkstreamDbContext db, IBackgroundJobClient jobs, DesktopOptions options, CancellationToken ct)
     {
+        // A task's own desktop doing the setup itself: what it says is kept with the task, for its screen.
+        if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is { } task) return await ReportTaskSetupAsync(task, body, db, options, ct);
         if (await PreparingAsync(desktop, db, ct) is not { } preparing) return Outcome<bool>.NotFound();
         var (environment, setup) = preparing;
         var runId = setup.RunId!;
@@ -196,7 +205,7 @@ public static partial class Operations
                     setup.Fail(body.Exit switch
                     {
                         null => "The repository could not be cloned.",
-                        124 => "The setup script did not finish within an hour.",
+                        TaskSetup.TimedOutExit => $"The setup script did not finish in {options.SetupMinutes} minutes and was stopped.",
                         var code => $"The setup script stopped with an error (exit {code}).",
                     }, body.Output);
                     foreach (var run in await db.DesktopRuns.Where(x => x.TaskId == runId && x.EndedAt == null).ToListAsync(ct)) run.End(now);
@@ -219,6 +228,59 @@ public static partial class Operations
         }
         return Outcome<bool>.Ok(true);
     }
+
+    /// <summary>
+    /// A task's desktop says how the setup script is going on it: <c>running</c> with what it has written,
+    /// then <c>done</c> or <c>failed</c> with its exit code (124 when the desktop stopped it for running
+    /// longer than <see cref="DesktopOptions.SetupMinutes"/>). The task itself is untouched: a setup that
+    /// fails leaves a desktop the agent and the person can still work on, and says so on the task's screen.
+    /// </summary>
+    static async Task<Outcome<bool>> ReportTaskSetupAsync(WorkTask task, SetupReport body, WorkstreamDbContext db, DesktopOptions options, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var setup = await db.TaskSetups.SingleOrDefaultAsync(x => x.TaskId == task.Id, ct);
+        if (setup is null)
+        {
+            setup = TaskSetup.Begin(task, options.SetupMinutes, now);
+            db.TaskSetups.Add(setup);
+        }
+        switch (body.State)
+        {
+            case "running":
+                setup.Wrote(body.Output, options.SetupMinutes, now);
+                break;
+            case "done":
+                setup.Ended(0, body.Output, now);
+                break;
+            case "failed":
+                // A script that failed without saying how failed with 1.
+                setup.Ended(body.Exit is null or 0 ? 1 : body.Exit.Value, body.Output, now);
+                break;
+            default:
+                return Outcome<bool>.Invalid("The state is running, done or failed.");
+        }
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Two reports made the row in the same moment, or the task was deleted: the next report is the news.
+        }
+        return Outcome<bool>.Ok(true);
+    }
+
+    /// <summary>The setup script on the task's own desktop, for its screen. Null when its desktop never ran one.</summary>
+    public static async Task<TaskSetupDto?> TaskSetupOfAsync(WorkstreamDbContext db, string taskId, CancellationToken ct) =>
+        await db.TaskSetups.AsNoTracking().SingleOrDefaultAsync(x => x.TaskId == taskId, ct) is { } setup
+            ? new TaskSetupDto(setup.State switch
+            {
+                TaskSetupState.Running => "running",
+                TaskSetupState.Done => "done",
+                TaskSetupState.TimedOut => "timed_out",
+                _ => "failed",
+            }, setup.Exit, setup.Output, setup.StartedAt, setup.EndedAt, setup.LimitMinutes)
+            : null;
 
     /// <summary>
     /// Whether another machine may begin preparing now: fewer are preparing than may at once, and the day's

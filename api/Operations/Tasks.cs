@@ -35,10 +35,11 @@ public sealed record DesktopModel(string BaseUrl, string Main, string Sonnet, st
 /// Everything a desktop needs to set itself up, read with its key each time it starts. A desktop that
 /// <see cref="Prepare"/>s is doing an environment's setup to be saved: it has no task (<see cref="TaskId"/> is
 /// empty), no instructions and no model, and <see cref="Title"/> is the environment's name.
+/// <see cref="SetupMinutes"/> is how long the setup script may run before the desktop stops it.
 /// </summary>
 public sealed record DesktopSetup(
     string TaskId, string Title, IReadOnlyList<string> Apps, DesktopRepository? Repository, string? SetupScript,
-    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false);
+    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false, int SetupMinutes = 45);
 
 public static partial class Operations
 {
@@ -268,7 +269,7 @@ public static partial class Operations
     {
         if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is not { } task)
         {
-            if (await PreparingAsync(desktop, db, ct) is { } preparing) return Outcome<DesktopSetup>.Ok(PrepareSetupOf(preparing.Environment, protection));
+            if (await PreparingAsync(desktop, db, ct) is { } preparing) return Outcome<DesktopSetup>.Ok(PrepareSetupOf(preparing.Environment, protection, desktops));
             await SpareAskedAsync(desktop, db, ct);
             return Outcome<DesktopSetup>.NotFound();
         }
@@ -277,7 +278,7 @@ public static partial class Operations
             task.Id, task.Title, environment.Apps,
             environment.RepositoryUrl is { } url ? new DesktopRepository(url, environment.RepositoryBranch) : null,
             environment.SetupScript, VariablesOf(environment, protection), environment.Instructions,
-            new DesktopModel($"{desktops.ApiUrl.TrimEnd('/')}{ModelGateway.Path}", model.Main, model.Sonnet, model.Small)));
+            new DesktopModel($"{desktops.ApiUrl.TrimEnd('/')}{ModelGateway.Path}", model.Main, model.Sonnet, model.Small), SetupMinutes: desktops.SetupMinutes));
     }
 
     /// <summary>

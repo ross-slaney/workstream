@@ -23,6 +23,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
     public DbSet<Spare> Spares => Set<Spare>();
     public DbSet<EnvironmentSetup> Setups => Set<EnvironmentSetup>();
+    public DbSet<TaskSetup> TaskSetups => Set<TaskSetup>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
     public DbSet<PersonSettings> PersonSettings => Set<PersonSettings>();
     public DbSet<TaskWatcher> TaskWatchers => Set<TaskWatcher>();
@@ -179,6 +180,17 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             setup.Ignore(x => x.IsPreparing);
             // It goes with its environment.
             setup.HasOne<WorkEnvironment>().WithOne().HasForeignKey<EnvironmentSetup>(x => x.EnvironmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // The setup script as it ran on a task's own desktop. It goes with its task.
+        model.Entity<TaskSetup>(setup =>
+        {
+            setup.ToTable("TaskSetups");
+            setup.HasKey(x => x.TaskId);
+            setup.Property(x => x.TaskId).HasMaxLength(36);
+            setup.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
+            setup.Property(x => x.Output).HasMaxLength(TaskSetup.MaxOutputLength);
+            setup.HasOne<WorkTask>().WithOne().HasForeignKey<TaskSetup>(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
         });
 
         model.Entity<ModelUsage>(usage =>
