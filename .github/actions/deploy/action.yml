@@ -33,23 +33,8 @@ inputs:
     default: ''
   model-key:
     default: ''
-  github-app-id:
-    description: Workstream's GitHub App (infra/README.md, "GitHub"). Without the id, the slug, the client's id and secret and the private key, GitHub shows as not set up.
-    default: ''
-  github-app-slug:
-    default: ''
-  github-client-id:
-    default: ''
-  github-client-secret:
-    default: ''
-  github-private-key:
-    description: The app's private key, the PEM file as GitHub gives it.
-    default: ''
-  github-webhook-secret:
-    description: Optional. The app's webhook secret; without it the webhook is not taken.
-    default: ''
   github-oauth-client-id:
-    description: Sign in with GitHub (infra/README.md, "Sign in with GitHub"). The Client ID of the GitHub OAuth client people sign in with; without it and its secret the sign-in page shows no GitHub button.
+    description: Sign in with GitHub (infra/README.md, "Sign in with GitHub"). The Client ID of the GitHub OAuth client people sign in with; without it and its secret the sign-in page shows no GitHub button and desktops get no GitHub token.
     default: ''
   github-oauth-client-secret:
     default: ''
@@ -68,7 +53,6 @@ runs:
       env:
         ADMINISTRATOR_EMAIL: ${{ inputs.administrator-email }}
         MODEL_ENDPOINT: ${{ inputs.model-endpoint }}
-        GH_APP_ID: ${{ inputs.github-app-id }}
         GH_OAUTH_CLIENT_ID: ${{ inputs.github-oauth-client-id }}
         GH_OAUTH_CLIENT_SECRET: ${{ inputs.github-oauth-client-secret }}
       run: |
@@ -80,9 +64,8 @@ runs:
         fi
         [[ "$ADMINISTRATOR_EMAIL" == *@* ]] || echo "::warning::No administrator address is set: nobody is the system administrator, so nobody reaches /admin."
         [ -n "$MODEL_ENDPOINT" ] || echo "::warning::No model endpoint is set: agents will say models are not set up (infra/README.md, \"Models\")."
-        [ -n "$GH_APP_ID" ] || echo "::notice::No GitHub App is set: teams cannot connect GitHub (infra/README.md, \"GitHub\")."
         if [ -z "$GH_OAUTH_CLIENT_ID" ] && [ -z "$GH_OAUTH_CLIENT_SECRET" ]; then
-          echo "::notice::No GitHub OAuth client is set: people sign in by emailed code only (infra/README.md, \"Sign in with GitHub\")."
+          echo "::notice::No GitHub OAuth client is set: people sign in by emailed code only, and desktops get no GitHub token (infra/README.md, \"Sign in with GitHub\")."
         elif [ -z "$GH_OAUTH_CLIENT_ID" ] || [ -z "$GH_OAUTH_CLIENT_SECRET" ]; then
           echo "::warning::Only one of GH_OAUTH_CLIENT_ID and GH_OAUTH_CLIENT_SECRET is set: sign in with GitHub stays off until both are (infra/README.md, \"Sign in with GitHub\")."
         fi
@@ -160,18 +143,9 @@ runs:
         MODEL_KEY: ${{ inputs.model-key }}
         DESKTOP_IMAGE_VERSION: ${{ inputs.desktop-image-version }}
         DESKTOPS_HIBERNATE: ${{ inputs.desktops-hibernate }}
-        GH_APP_ID: ${{ inputs.github-app-id }}
-        GH_APP_SLUG: ${{ inputs.github-app-slug }}
-        GH_APP_CLIENT_ID: ${{ inputs.github-client-id }}
-        GH_APP_CLIENT_SECRET: ${{ inputs.github-client-secret }}
-        GH_APP_PRIVATE_KEY: ${{ inputs.github-private-key }}
-        GH_APP_WEBHOOK_SECRET: ${{ inputs.github-webhook-secret }}
         GH_OAUTH_CLIENT_ID: ${{ inputs.github-oauth-client-id }}
         GH_OAUTH_CLIENT_SECRET: ${{ inputs.github-oauth-client-secret }}
       run: |
-        # The private key goes on as one line, its PEM in base64, which the API reads either way.
-        GH_APP_PRIVATE_KEY_B64=""
-        [ -z "$GH_APP_PRIVATE_KEY" ] || GH_APP_PRIVATE_KEY_B64=$(printf '%s' "$GH_APP_PRIVATE_KEY" | base64 | tr -d '\n')
         # Once more on failure: a fresh installation's SQL administrators group (data.bicep) cannot take its
         # members in the same second Entra makes it, and the deployment is idempotent.
         for attempt in 1 2; do
@@ -180,8 +154,6 @@ runs:
                administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
                modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" desktopImageVersion="$DESKTOP_IMAGE_VERSION" \
                desktopsHibernate="$DESKTOPS_HIBERNATE" \
-               githubAppId="$GH_APP_ID" githubAppSlug="$GH_APP_SLUG" githubClientId="$GH_APP_CLIENT_ID" githubClientSecret="$GH_APP_CLIENT_SECRET" \
-               githubPrivateKey="$GH_APP_PRIVATE_KEY_B64" githubWebhookSecret="$GH_APP_WEBHOOK_SECRET" \
                gitHubSignInClientId="$GH_OAUTH_CLIENT_ID" gitHubSignInClientSecret="$GH_OAUTH_CLIENT_SECRET" && break
           [ "$attempt" = 1 ] || exit 1
           echo "::warning::The deployment failed once; deploying again."

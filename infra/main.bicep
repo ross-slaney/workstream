@@ -37,18 +37,7 @@ param desktopsHibernate bool = false
 param modelEndpoint string = ''
 @secure()
 param modelKey string = ''
-@description('Workstream\'s GitHub App, which teams connect their GitHub accounts through (infra/README.md, "GitHub"): its id, the name in its address and its OAuth client\'s id, the GitHub variables GH_APP_ID, GH_APP_SLUG and GH_APP_CLIENT_ID. The app is made by hand, once; empty leaves GitHub "not set up".')
-param githubAppId string = ''
-param githubAppSlug string = ''
-param githubClientId string = ''
-@description('The secrets GH_APP_CLIENT_SECRET, GH_APP_PRIVATE_KEY (its PEM in base64, which the deploy action makes) and, optionally, GH_APP_WEBHOOK_SECRET.')
-@secure()
-param githubClientSecret string = ''
-@secure()
-param githubPrivateKey string = ''
-@secure()
-param githubWebhookSecret string = ''
-@description('Sign in with GitHub: the Client ID of the GitHub OAuth client people sign in with, the GitHub variable GH_OAUTH_CLIENT_ID, and its secret, the secret GH_OAUTH_CLIENT_SECRET (infra/README.md, "Sign in with GitHub"). The client is made by hand, once; without both the sign-in page shows no GitHub button.')
+@description('Sign in with GitHub: the Client ID of the GitHub OAuth client people sign in with, the GitHub variable GH_OAUTH_CLIENT_ID, and its secret, the secret GH_OAUTH_CLIENT_SECRET (infra/README.md, "Sign in with GitHub"). The client is made by hand, once; without both the sign-in page shows no GitHub button and desktops get no GitHub token.')
 param gitHubSignInClientId string = ''
 @secure()
 param gitHubSignInClientSecret string = ''
@@ -151,10 +140,6 @@ module api 'api.bicep' = {
     desktopsHibernate: desktopsHibernate
     modelEndpoint: modelEndpoint
     modelKey: modelKey
-    github: { appId: githubAppId, appSlug: githubAppSlug, clientId: githubClientId }
-    githubClientSecret: githubClientSecret
-    githubPrivateKey: githubPrivateKey
-    githubWebhookSecret: githubWebhookSecret
     gitHubSignInClientId: gitHubSignInClientId
     gitHubSignInClientSecret: gitHubSignInClientSecret
   }

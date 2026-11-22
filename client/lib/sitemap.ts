@@ -28,7 +28,6 @@ export function robotsTxt(origin: string): string {
     "Disallow: /invite",
     "Disallow: /share",
     "Disallow: /device",
-    "Disallow: /github",
     "Disallow: /home",
     "Disallow: /t/",
     "Disallow: /admin",
