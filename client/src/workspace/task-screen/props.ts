@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Task, TaskAccess } from "@/lib/workstream/api";
+import type { Task, TaskAccess, TaskSetup } from "@/lib/workstream/api";
 
 /** One entry in the conversation as the screen draws it. */
 export type ChatEntry = {
@@ -28,6 +28,11 @@ export type TaskScreenProps = {
    * writes nothing and sees no menu; the team may do everything, sharing included.
    */
   access: TaskAccess | null;
+  /**
+   * The environment's setup script on this task's desktop: running now, with what it wrote last, or how it
+   * ended. Null when the desktop ran none.
+   */
+  setup: TaskSetup | null;
   /** The task is not there any more: deleted here or by a teammate. */
   missing: boolean;
   entries: ChatEntry[];

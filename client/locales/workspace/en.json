@@ -96,6 +96,19 @@
     "notSent": "Not sent. Try again.",
     "agentStarting": "The agent is starting. It reads what you asked for in a moment."
   },
+  "setup": {
+    "running": "Running the setup script",
+    "elapsed": "{minutes} of {limit} min",
+    "failed": "The setup script stopped with an error (exit {exit}).",
+    "timedOut": "The setup script did not finish in {limit} minutes and was stopped.",
+    "after": "The desktop is still there to use, and the agent knows the setup did not finish. Everything the script wrote is in ~/.workstream/setup.log on the desktop.",
+    "output": "The last lines the setup script wrote",
+    "noOutputYet": "It has written nothing yet.",
+    "noOutput": "It wrote nothing.",
+    "show": "Show what it wrote",
+    "hide": "Hide what it wrote",
+    "dismiss": "Dismiss"
+  },
   "newTask": {
     "title": "New task",
     "promptLabel": "What should the agent do?",
