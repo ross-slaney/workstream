@@ -19,7 +19,7 @@ a person's browser
                                  └── calls the API at its public address, with its own key
 ```
 
-- **The web app** has no secrets and no database. Public pages (the landing page, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session.
+- **The web app** has no secrets and no database. Public pages (the landing page, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session.
 - **The API** is one process: the REST API with SqlOS for sign-in and authorization, the relay that carries a desktop's display to the people watching it, the gateway every agent's model calls go through, and the background jobs (Hangfire, in the app's own database) that make, stop and delete desktops.
 - **A desktop** is a Debian virtual machine with the XFCE desktop on a TigerVNC display, made from one image. A machine made from the image starts as it is: nothing provisions it, and it learns what it is for from its user data. In development it is a Docker container built from the same two scripts.
 
@@ -59,7 +59,7 @@ Cloning the repository and running the setup script is the slow part of a new de
 - A task's machine is made from the save while the save is for the environment's setup inputs (a fingerprint of the repository, branch, script, variables and apps) and for this release's image version. On Azure a disk is made from the snapshot with `createOption: Copy`, stating no security profile because it inherits Trusted Launch from the snapshot, and the machine attaches it (`createOption: Attach`). Making the snapshot took about 13 seconds when measured, and a machine made from one booted like one made from the image. The task's agent finds `prepared.json`, pulls the branch, skips the setup script, and says "Started from the setup prepared 2 days ago (main at a1b2c3d), 14 commits newer now."
 - Anything else starts from the image and does the setup itself, as before: an environment never prepared, a save out of date, a preparation that failed.
 
-What it can cost is limited by settings (`Workstream:Desktops:Saves`): one machine preparing at once over every team, four hours of preparing a day, 45 minutes at most each, one save an environment, deleted after 30 days nothing started from it. Its time is a line of its own on the system administrator's page, and so are the saves kept.
+What it can cost is limited by settings (`Workstream:Desktops:Saves`): one machine preparing at once over every team, four hours of preparing a day, 45 minutes at most each, one save an environment, deleted after 30 days nothing started from it. Its time is a line of its own on the system administrator's page, and so is the storage the saves take.
 
 ## Running, paused, archived
 
@@ -79,7 +79,7 @@ The same sweep fails a desktop that never arrived, and deletes a machine or an a
 
 A desktop's display is a VNC server with no password, on a network that admits one caller: the API. The browser never reaches a desktop. It opens `GET /api/tasks/{id}/desktop` as a WebSocket carrying the person's access token; the API validates the token (the web app's, with `workstream.write`), checks `TASK_VIEW` on the task, connects to the desktop's private address, and passes bytes both ways. What the browser sends is read message by message (`api/Desktops/RfbClientFilter.cs`): for someone a task is shared with only to watch or to write to the agent, without `TASK_DRIVE`, key and pointer events and the clipboard are dropped there, and the browser draws their screen view-only. It does this from the moment the display has answered, which is before the agent's first exchange, until the desktop is asked to stop. It checks again every minute and closes the stream when access is gone. The browser draws it with noVNC.
 
-The same filter notices use. A key event or a pointer event that passes it is a person at the desktop, and the relay writes that on the task at once and then at most once a minute while it goes on (`DesktopRelay.UseAsync`). Requests for the picture are not use, however long the stream stays open, and neither is the clipboard, which a browser can send by itself. The web app closes the stream when its tab is hidden and opens it again when the tab is shown (`client/components/app/desktop-stream.tsx`). A paused or archived desktop has no stream: its pane says so, and a click on it, or a message, starts it again.
+The same filter notices use. A key event that passes it, or a pointer event that moves the pointer or changes a button, is a person at the desktop, and the relay writes that on the task at once and then at most once a minute while it goes on (`DesktopRelay.UseAsync`). Requests for the picture are not use, however long the stream stays open, and neither is the clipboard or a pointer event that repeats where the pointer already is, which a browser can send by itself. The web app closes the stream when its tab is hidden and opens it again when the tab is shown (`client/components/app/desktop-stream.tsx`). A paused or archived desktop has no stream: its pane says so, and a click on it, or a message, starts it again.
 
 VNC rather than RDP for two reasons: the screen has to exist before anyone connects, because the agent works on it whether or not a person is watching, and several people can watch the same screen at once. There is no outside service and no VPN between the person and the desktop.
 
@@ -111,11 +111,30 @@ A team's real project usually runs as several programs at once: a database in a 
 | Standard | 4 cores, 16 GB (`Standard_D4as_v7`) | 64 GB |
 | Large | 8 cores, 32 GB (`Standard_D8as_v7`) | 128 GB |
 
-The disk of each size is a setting (`Workstream:Desktops:Azure:DiskSizesGb`) priced beside the machines (`DesktopOptions.Prices`). The image is 64 GB, so a machine with a larger disk grows its file system to it when it first boots (`image/grow-disk.sh`). A project with a database, an API and a web bundler wants Large.
+The disk of each size is a setting (`Workstream:Desktops:Azure:DiskSizesGb`), and is what the desktop's storage is counted at ("What the desktops cost" below). The image is 64 GB, so a machine with a larger disk grows its file system to it when it first boots (`image/grow-disk.sh`). A project with a database, an API and a web bundler wants Large.
 
 The Android emulator needs an Intel machine. Every Dasv7 size exposes AMD's virtualization (`/dev/kvm` opens and `emulator -accel-check` passes, which the bake checks), but the emulator's virtual machine stops as soon as it starts ("QEMU main loop exits abnormally with code 1"), on a desktop and on a plain Debian machine alike. On an Intel `Standard_D4s_v6` the same emulator and system image boot in about a minute. So Android builds work on every size, and the emulator would work if a size were an Intel one (`Workstream:Desktops:Azure:Sizes`). The agent is told which, from the processor it finds (`agent/instructions.mjs`). iPhone and iPad builds and the iOS simulator need macOS and Apple's tools, which no Linux desktop can run. The agent is told so and does the rest of a task.
 
 The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, and deliver changes on a branch of their own as a pull request opened with `gh`. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
+
+## What the desktops cost
+
+Two kinds of rows are what usage and cost are added up from, and neither holds a price:
+
+- `DesktopRun`: one stretch of a machine running, with its size and what it ran for (a task's desktop, a spare, a machine preparing an environment). Hours by size are a team's desktop time; hours by purpose and size are what the machines cost.
+- `StorageRun`: one stretch of a team keeping something at one size. A desktop's disk (`disk`) is counted at its full size, since that is what a provisioned disk is billed at; an archived task (`archive`) and a saved setup (`setup`) are snapshots, counted at what is on them. Gigabytes times hours kept, over 730, is GB-months.
+
+Storage rows are derived, not written by the jobs that make and remove disks. `StorageJobs.ReconcileAsync` runs every fifteen minutes on the same Hangfire server: it lists what every team keeps now (tasks with a machine or an archive, environments with a save) and makes the open rows agree, beginning, ending, or ending and beginning again when a size changed (`StorageRun.Reconcile`, [the core model](core-model.md#usage-and-limits)). A row is therefore exact to fifteen minutes, and the job can be run again, or miss a run, without counting anything twice.
+
+The rates are one table, `DesktopOptions.Prices` (`Workstream:Desktops:Prices`), and they are what Workstream pays Azure, in West US 3:
+
+| Line | Rate |
+| --- | --- |
+| A running machine, by size | $0.091 (small), $0.182 (standard), $0.364 (large) an hour |
+| A desktop's disk (`disk`) | $0.075 a gigabyte a month: a Standard SSD, $4.80 for 64 GiB and $9.60 for 128 |
+| An archived task (`archive`), a saved setup (`setup`) | $0.05 a gigabyte a month: a full snapshot on standard storage |
+
+The system administrator's page multiplies each line by its rate. A team's Usage page shows the same lines as amounts, hours by size and GB-months by kind, with no dollars: there is no customer price yet, and when there is one it is a second column in this table, not new rows. A spare's and a preparing machine's own disks last minutes and are not counted.
 
 ## Models
 
@@ -147,7 +166,7 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | Kept in | What |
 | --- | --- |
 | SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
-| The app's tables | Teams' limits and their pause and archive times, environments, tasks, messages, desktop runs (for hours), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
+| The app's tables | Teams' limits and their pause and archive times, environments, tasks, messages, desktop runs (for hours by size), storage runs (for GB-months by kind), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | A task's archive (a snapshot in the desktops' group) | A copy of that disk, in place of the disk, while the task is archived. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |

@@ -8,14 +8,15 @@ import { useT } from "@/lib/i18n";
 export type LandingPageProps = {
   signInHref: string;
   startHref: string;
+  docsHref: string;
 };
 
-const primaryLink =
+export const primaryLink =
   "inline-flex h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-const quietLink =
+export const quietLink =
   "inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
-export function LandingPage({ signInHref, startHref }: LandingPageProps) {
+export function LandingPage({ signInHref, startHref, docsHref }: LandingPageProps) {
   const t = useT("landing");
   const brand = useT("common")("brand.name");
   return (
@@ -26,6 +27,10 @@ export function LandingPage({ signInHref, startHref }: LandingPageProps) {
           {brand}
         </a>
         <nav aria-label={brand} className="flex items-center gap-1">
+          {/* A phone's header has room for two links, so there the docs are reached from the footer. */}
+          <a href={docsHref} className={`${quietLink} max-md:hidden`}>
+            {t("nav.docs")}
+          </a>
           <a href={signInHref} className={quietLink}>
             {t("nav.signIn")}
           </a>
@@ -90,17 +95,30 @@ export function LandingPage({ signInHref, startHref }: LandingPageProps) {
         </section>
       </main>
 
-      <footer className="border-t border-border">
-        <div className="mx-auto flex w-full max-w-[1120px] items-center justify-between px-5 py-6 text-[13px] text-muted-foreground">
-          <span>
-            © {new Date().getFullYear()} {t("footer.rights")}
-          </span>
+      <SiteFooter signInHref={signInHref} docsHref={docsHref} />
+    </div>
+  );
+}
+
+/** The website's footer, under the landing page and every docs page. */
+export function SiteFooter({ signInHref, docsHref }: { signInHref: string; docsHref: string }) {
+  const t = useT("landing");
+  return (
+    <footer className="border-t border-border">
+      <div className="mx-auto flex w-full max-w-[1120px] items-center justify-between px-5 py-6 text-[13px] text-muted-foreground">
+        <span>
+          © {new Date().getFullYear()} {t("footer.rights")}
+        </span>
+        <nav aria-label={t("footer.rights")} className="flex items-center gap-5">
+          <a href={docsHref} className="hover:text-foreground">
+            {t("nav.docs")}
+          </a>
           <a href={signInHref} className="hover:text-foreground">
             {t("nav.signIn")}
           </a>
-        </div>
-      </footer>
-    </div>
+        </nav>
+      </div>
+    </footer>
   );
 }
 

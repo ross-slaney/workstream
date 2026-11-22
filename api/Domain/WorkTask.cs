@@ -102,7 +102,7 @@ public sealed class WorkTask : ISqlOSResourceEntity
     /// when there is none. It is kept until the machine made from it has shown its screen.
     /// </summary>
     public string? Archive { get; private set; }
-    /// <summary>How much the archive holds, in bytes: what was on the disk when it was copied.</summary>
+    /// <summary>How much the archive holds, in bytes: what was on the disk when it was copied, which is what keeping it costs.</summary>
     public long? ArchiveBytes { get; private set; }
 
     /// <summary>Whether the machine is in use and counts toward the team's limit.</summary>

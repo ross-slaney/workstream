@@ -32,7 +32,7 @@ Any column that names an actor holds a principal id.
 | `group` | System administrators | `group::system_admins` | Seeded. Its members belong to the platform, not to a team. |
 | `service_account` | A desktop | `service_account::desktop-{desktopId}` | What the agent on that desktop signs in as, with a key only that desktop holds. The id is the task's for a desktop made for a task, and the spare's own for a spare. The key says which desktop is calling; what it may do is the grant below. |
 | `service_account` | The machine preparing an environment | `service_account::desktop-{setupId}` | One for each environment, with an id made from the environment's id (`EnvironmentSetup.DesktopIdFor`), so it is never a task's or a spare's. Each attempt to prepare gives it a new key, so a machine from an earlier attempt cannot speak for the current one. |
-| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare and prepare environments. No credential: the jobs run in the API process. |
+| `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare, prepare environments, and write down what each team keeps on storage. No credential: the jobs run in the API process. |
 | `agent` | The task notifier | `agent::task-notifier` | The background job that emails a task's people when the agent's turn ends. No credential. |
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
@@ -66,7 +66,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | --- | --- | --- |
 | `ADMIN_VIEW` | root | The system administrator's dashboard, and changing a team's limits. |
 | `TEAM_VIEW` | team | See the team, its people, its limits, and its GitHub connection with the repositories it reaches. |
-| `TEAM_VIEW_USAGE` | team | See what the team used this month. |
+| `TEAM_VIEW_USAGE` | team | See what the team used this month: models, desktop hours by size, storage by kind. |
 | `TEAM_MANAGE_MEMBERS` | team | Invite, remove and change people. |
 | `TEAM_MANAGE_SETTINGS` | team | Rename the team; change when its desktops are paused and archived; connect and disconnect GitHub. |
 | `TEAM_CREATE_ENVIRONMENT` | team | Add an environment. |
@@ -78,7 +78,7 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_DRIVE` | task | Use the desktop's mouse, keyboard and clipboard. Without it the relay drops what the browser would send them. Starting a paused, archived or failed desktop is using it, and takes this too. |
 | `TASK_MANAGE` | task | Rename, pause and delete it; share it, see who it is shared with, and take a share back. |
 | `TASK_RUN_AGENT` | task | The desktop's own: read its setup, exchange messages, call the model, and get a GitHub token for its environment's repository. |
-| `TASK_OPERATE_DESKTOP` | task | The operator's own: start, pause, archive and delete the desktop. |
+| `TASK_OPERATE_DESKTOP` | task | The operator's own: start, pause, archive and delete the desktop, and count the disk or archive the task keeps. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
 | `TASK_NOTIFY` | task | The notifier's own: read what the agent last said and email the task's people about it. |
 | `ENVIRONMENT_RUN_SETUP` | environment | The preparing desktop's own: read the environment's setup, with its variables, and say how it went. |
@@ -148,12 +148,13 @@ Grants are derived from these events. Nothing revokes "the grant this action mad
 | A team's environments | `Environments` in the team | `ENVIRONMENT_VIEW` | `Name` |
 | A task's messages | `TaskMessages` of the task, after an id | `TASK_VIEW` | `Id` |
 | Desktops the operator sweeps | `Tasks` | `TASK_OPERATE_DESKTOP` | `Id` |
+| What the tasks keep, for the storage job | `Tasks` that have a machine or an archive | `TASK_OPERATE_DESKTOP`, as the operator | `Id` |
 | The task a desktop works on | `Tasks` | `TASK_RUN_AGENT`, as the desktop | `Id`, first one |
 | The environment a desktop prepares | `Environments` | `ENVIRONMENT_RUN_SETUP`, as the desktop | `Id`, first one |
 
 "Shared with me" leaves out the teams the person is on (their SqlOS memberships), so what the page finds is what a task grant reaches. The filter is applied under each of the person's nodes, so the page also reads past their own teams' tasks under their team grants.
 
-A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Who a task is shared with is SqlOS's grants on the task's node with the three sharing roles whose `EffectiveTo` has not passed, and its waiting invitations are `TaskInvitations` rows, both read after one `TASK_MANAGE` check on the task. Usage and the administrator's numbers are sums, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
+A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Who a task is shared with is SqlOS's grants on the task's node with the three sharing roles whose `EffectiveTo` has not passed, and its waiting invitations are `TaskInvitations` rows, both read after one `TASK_MANAGE` check on the task. Usage and the administrator's numbers are sums over `ModelUsage`, `DesktopRuns` and `StorageRuns`, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
 
 ## App data, and why SqlOS does not hold it
 
@@ -165,7 +166,8 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `Tasks` | Title, environment, who created it (a principal id, a fact), the desktop's state and address, when it was last used, how much is on its disk, its archive's name and size (`Archive`, `ArchiveBytes`) while it has one, when it last emailed its people. | The desktop's lifecycle. |
 | `TaskMessages` | The conversation. | Content. |
 | `TaskInvitations` | A task shared with an address that has no account yet: the address, the role and end it will be granted with, who shared it, the hash of the link's token, and when the link stops working (a week, or sooner if the access ends sooner). | There is no principal to grant yet. SqlOS's invitations are memberships of an organization, and this person is not joining the team, so the grant waits here until they take the link; then it is a grant and the row is gone. If SqlOS gains an invitation to a role on a node, this table goes. |
-| `DesktopRuns` | When each machine ran, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own paused machine, its archive), and when each step of it happened. | Usage, cost, and how long starts take. |
+| `DesktopRuns` | When each machine ran, at which size, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own paused machine, its archive), and when each step of it happened. | Usage, cost, and how long starts take. |
+| `StorageRuns` | Each stretch of a team keeping something at one size: the kind (`disk`, `archive`, `setup`), the task or environment it belongs to, the gigabytes, and when it began and ended. | Usage and cost, like `DesktopRuns`. It relates a team to an amount, not a principal to a node, and is derived: a job makes the open rows agree with what the tasks and environments say is kept, so nothing else writes them. |
 | `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
 | `ModelUsage` | Tokens and cost of each model call. | Usage. |
 | `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
@@ -298,7 +300,23 @@ On the desktop, git's credential helper and the wrapper around gh ask for the to
 
 ### Usage and limits
 
-A team has a model allowance for the calendar month and a limit on desktops running at once; a paused or archived desktop is not running, and resuming one counts against the limit like starting one. People on the team see what was used. A system administrator sees every running desktop and can change a team's limits. Payments are not built; the numbers that a bill would be made from are.
+A team has a model allowance for the calendar month and a limit on desktops running at once; a paused or archived desktop is not running, and resuming one counts against the limit like starting one. People on the team see what was used this month (`GET /api/teams/{id}/usage`, `TEAM_VIEW_USAGE`), in the units a bill would use:
+
+- **Models**: dollars spent against the allowance, from `ModelUsage`.
+- **Desktop time**: hours for each size the team's tasks ran on (small, standard, large), from `DesktopRuns` with the purpose `task`. A spare and a machine preparing an environment are Workstream's cost, not the team's. How many are running now is shown beside the limit.
+- **Storage**: GB-months for each kind the team kept, from `StorageRuns`, with the gigabytes kept now.
+
+| Kind | What is kept | Counted at |
+| --- | --- | --- |
+| `disk` | The disk of a task's desktop, while the task has a machine (`Tasks.Host`), running or not. | The disk's full size for the desktop's size (`Workstream:Desktops:Azure:DiskSizesGb`). |
+| `archive` | What is kept of an archived task (`Tasks.Archive`). | What is on it (`Tasks.ArchiveBytes`). |
+| `setup` | An environment's saved setup (`EnvironmentSetups.Save`). | What is on it (`SaveBytes`). |
+
+A GB-month is one gigabyte kept for a month of 730 hours: the sum, over the rows, of gigabytes times the hours kept inside the month, divided by 730.
+
+Storage is not written when something happens. Every fifteen minutes a job (`StorageJobs`, as `agent::desktop-operator`) reads what every team keeps now, from the operator's page of tasks and from the saved setups, and makes the open `StorageRuns` rows agree: it begins a row for anything kept that has none, ends the row of anything that is gone, and when a size changed ends the row and begins another at the same moment. Run twice, it does nothing the second time, and a run that was missed is put right by the next, so a row is exact to fifteen minutes.
+
+The team's page shows amounts and no prices, except the model allowance. A system administrator sees every running desktop, can change a team's limits, and sees what each line costs Workstream: machine hours by purpose and size, and storage by kind, each at its rate in `DesktopOptions.Prices` (architecture.md, "What the desktops cost"). Payments are not built, and no customer price exists; the numbers that a bill would be made from are.
 
 ## Decisions
 

@@ -1,0 +1,46 @@
+---
+title: "Usage and limits"
+description: "What a team uses and what limits it: a monthly model allowance, desktop time counted per size, storage, and how many desktops run at once."
+order: 7
+updated: 2026-11-21
+---
+
+Usage is counted per team. Everyone on the team can see it on the Usage page. Workstream has no prices and takes no payment yet, so these are limits, not a bill.
+
+| What | How it is counted | The limit |
+| --- | --- | --- |
+| Models | The cost of every model call the team's agents make, in dollars | An allowance per team per calendar month |
+| Desktop time | Hours a desktop is running, counted separately for each size | None of its own; the limit is on how many run at once |
+| Storage | The disks of paused desktops, archived desktops and saved setups | None today |
+| Desktops at once | Desktops running at the same moment | A number per team |
+
+## Models
+
+Every model call an agent makes goes through Workstream, which counts the call's tokens and charges their cost in dollars against the team's allowance for the calendar month. The Usage page shows how much of the allowance is used and how much is left.
+
+When the allowance is used up, the team's agents stop until the next month starts or the allowance is raised. Desktops keep running and you can still use them yourself. There is no bring-your-own-key: a team cannot use a model key of its own.
+
+## Desktop time
+
+{/* PENDING usage metering: desktop time counted per size is from the plan. On main today the Usage page shows one total of desktop hours. */}
+A desktop adds time from when it starts until it is paused. Time is counted separately for Small, Standard and Large desktops, because a larger desktop costs more to run. A paused or archived desktop adds none.
+
+## Storage
+
+{/* PENDING usage metering and pause/archive: the three kinds of storage are from the plan. Check the names and what the Usage page shows against what ships. */}
+Three things are kept on disk while no machine is running:
+
+- the disk of each paused desktop,
+- the snapshot of each archived desktop,
+- each environment's saved setup.
+
+The Usage page shows how much the team has of each. To use less, delete tasks you no longer need. See [Running, paused, archived, deleted](/docs/running-paused-archived).
+
+## Desktops at once
+
+A team has a limit on how many desktops run at the same moment. Starting a task or resuming a paused one is refused when the team is at its limit, with a message that says so. Pause or delete a task to make room. Paused and archived desktops do not count.
+
+## Changing a limit
+
+{/* PENDING decision: there is no contact address to give here yet. Add how a team asks for a higher limit. */}
+The model allowance and the limit on running desktops are set per team by Workstream. A team cannot change them itself.

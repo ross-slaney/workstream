@@ -13,8 +13,10 @@ namespace Workstream.Api.Desktops;
 /// actions. A message it cannot read means it no longer knows where the next one starts: for a watcher the
 /// stream is closed, and a driver's bytes go through as they are from then on.
 ///
-/// It also notices use: a key or pointer event that reaches the display is a person at the desktop's mouse or
-/// keyboard (<see cref="TakeInput"/>). Asking for the picture is not, however long the stream stays open.
+/// It also notices use: a key event that reaches the display, or a pointer event that moves the pointer or
+/// changes a button, is a person at the desktop's mouse or keyboard (<see cref="TakeInput"/>). Asking for the
+/// picture is not, however long the stream stays open, and neither is a pointer event that says again where
+/// the pointer already is, which a browser can send with nobody there.
 /// </summary>
 public sealed class RfbClientFilter
 {
@@ -42,6 +44,9 @@ public sealed class RfbClientFilter
     bool passing;
     volatile bool drive;
     int input;
+    /// <summary>The buttons and the place of the last pointer event that reached the display, to tell a move from a repeat.</summary>
+    readonly byte[] pointer = new byte[5];
+    bool pointed;
 
     public RfbClientFilter(bool drive) => this.drive = drive;
 
@@ -137,7 +142,19 @@ public sealed class RfbClientFilter
             case FramebufferUpdateRequest: length = 10; acts = false; break;
             case EnableContinuousUpdates: length = 10; acts = false; break;
             case KeyEvent: length = 8; acts = true; hand = true; break;
-            case PointerEvent: length = 6; acts = true; hand = true; break;
+            case PointerEvent:
+                // The whole event is held, to see whether the pointer moved or a button changed.
+                if (held < 6) return true;
+                length = 6;
+                acts = true;
+                if (drive)
+                {
+                    var now = header.AsSpan(1, 5);
+                    hand = !pointed || !now.SequenceEqual(pointer);
+                    now.CopyTo(pointer);
+                    pointed = true;
+                }
+                break;
             case Xvp: length = 4; acts = true; break;
             case SetEncodings:
                 if (held < 4) return true;

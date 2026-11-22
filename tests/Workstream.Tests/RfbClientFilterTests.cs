@@ -173,6 +173,28 @@ public sealed class RfbClientFilterTests
     }
 
     [TestMethod]
+    public void A_pointer_event_that_says_where_the_pointer_already_is_is_not_use()
+    {
+        foreach (var delivery in Deliveries(Join(Rfb.Handshake(), Rfb.Pointer(100, 200, 0))))
+        {
+            var filter = new RfbClientFilter(drive: true);
+            Run(drive: true, delivery, filter);
+            Assert.IsTrue(filter.TakeInput());
+            // The same place and the same buttons, again and again: it still reaches the display, and nobody moved anything.
+            var repeats = Join([.. Enumerable.Repeat(Rfb.Pointer(100, 200, 0), 20)]);
+            var (open, through) = Run(drive: true, [repeats], filter);
+            Assert.IsTrue(open);
+            CollectionAssert.AreEqual(repeats, through);
+            Assert.IsFalse(filter.TakeInput());
+            // It moves, and then a button goes down where it is.
+            Run(drive: true, [Rfb.Pointer(101, 200, 0)], filter);
+            Assert.IsTrue(filter.TakeInput());
+            Run(drive: true, [Rfb.Pointer(101, 200, 1)], filter);
+            Assert.IsTrue(filter.TakeInput());
+        }
+    }
+
+    [TestMethod]
     public void Input_is_noticed_again_after_it_was_taken()
     {
         var filter = new RfbClientFilter(drive: true);
@@ -181,6 +203,8 @@ public sealed class RfbClientFilterTests
         Run(drive: true, [Rfb.UpdateRequest()], filter);
         Assert.IsFalse(filter.TakeInput());
         Run(drive: true, [Rfb.Pointer()], filter);
+        Assert.IsTrue(filter.TakeInput());
+        Run(drive: true, [Rfb.Key(down: false)], filter);
         Assert.IsTrue(filter.TakeInput());
     }
 

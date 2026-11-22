@@ -49,6 +49,9 @@ public static class Stack
     /// <summary>The background jobs, run when a test asks: starting, stopping and deleting desktops, and the sweep.</summary>
     public static DesktopJobs Jobs => Services.GetRequiredService<DesktopJobs>();
 
+    /// <summary>The job that writes down what every team keeps, for storage's GB-months.</summary>
+    public static StorageJobs Storage => Services.GetRequiredService<StorageJobs>();
+
     /// <summary>The job that emails a task's people when the agent's turn ends, with the played provider.</summary>
     public static TaskEmails Emails => Services.GetRequiredService<TaskEmails>();
 

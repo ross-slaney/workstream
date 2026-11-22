@@ -21,6 +21,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<TaskMessage> TaskMessages => Set<TaskMessage>();
     public DbSet<TaskInvitation> TaskInvitations => Set<TaskInvitation>();
     public DbSet<DesktopRun> DesktopRuns => Set<DesktopRun>();
+    public DbSet<StorageRun> StorageRuns => Set<StorageRun>();
     public DbSet<Spare> Spares => Set<Spare>();
     public DbSet<EnvironmentSetup> Setups => Set<EnvironmentSetup>();
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
@@ -147,6 +148,21 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             run.Property(x => x.Source).HasMaxLength(20).HasDefaultValue(StartSource.Image);
             run.HasIndex(x => new { x.TeamId, x.StartedAt });
             run.HasIndex(x => new { x.TaskId, x.EndedAt });
+            run.HasIndex(x => x.EndedAt);
+        });
+
+        // What each team keeps, for storage's GB-months. Not protected rows: a team's are read after one
+        // TEAM_VIEW_USAGE check, like its desktop runs.
+        model.Entity<StorageRun>(run =>
+        {
+            run.ToTable("StorageRuns");
+            run.Property(x => x.Id).HasMaxLength(36);
+            run.Property(x => x.TeamId).HasMaxLength(100);
+            run.Property(x => x.Kind).HasMaxLength(20);
+            run.Property(x => x.SourceId).HasMaxLength(36);
+            run.Property(x => x.Gb).HasPrecision(18, 3);
+            // A team's month, and every row still open (what the job reconciles).
+            run.HasIndex(x => new { x.TeamId, x.EndedAt });
             run.HasIndex(x => x.EndedAt);
         });
 
