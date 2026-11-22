@@ -41,7 +41,7 @@
       "branch": "Branch",
       "branchPlaceholder": "main",
       "setupScript": "Setup script",
-      "setupScriptHint": "Runs once on a new desktop, in a terminal you can watch, in the repository's folder when there is one.",
+      "setupScriptHint": "Runs once on a new desktop, in a terminal you can watch, in the repository's folder when there is one. Use it to install and build. Leave starting the project to the agent: a program the script leaves running stops when the script ends.",
       "setupScriptPlaceholder": "npm ci\ndocker pull postgres:17",
       "variables": "Variables",
       "variablesHint": "Set in every shell on the desktop and given to the agent. Values are stored protected and never shown again.",

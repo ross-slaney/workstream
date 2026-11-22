@@ -200,7 +200,23 @@ The prices are Azure's list prices in West US 3, kept in one place (`DesktopOpti
 
 Spares are the one cost that is not somebody's task. Their limits are two settings in `infra/api.bicep`: `sparesAtOnce` (2) and `spareHoursADay` (6). At those, spares cost at most 6 × $0.182 = $1.09 a day, about $33 in a month in which the limit is reached every day, and nothing on a day nobody opens the app. A spare nobody takes is removed after 15 minutes, which is $0.05.
 
-A saved setup is an environment's repository cloned and setup script run once, on a machine made only for that, whose disk is then kept as a snapshot that tasks' disks are made from (`EnvironmentSetup`, `api/Desktops/DesktopJobs.cs`). An environment keeps one: a new one replaces the old, deleting the environment deletes it, and one nothing has started from for 30 days is deleted; the sweep deletes any snapshot no environment knows. A desktop with 10 GB on its disk makes a save of about $0.50 a month. The preparing machines are limited by `Workstream:Desktops:Saves` (`api/Desktops/DesktopHosts.cs`, `SaveOptions`): one at a time over every team, four hours of preparing a day, 45 minutes at most each, so at most 4 × $0.182 = $0.73 a day for Standard desktops. A save older than a week is made again when a task next starts from it. Making the snapshot took about 13 seconds when measured, and a machine made from one booted like one made from the image.
+A saved setup is an environment's repository cloned and setup script run once, on a machine made only for that, whose disk is then kept as a snapshot that tasks' disks are made from (`EnvironmentSetup`, `api/Desktops/DesktopJobs.cs`). An environment keeps one: a new one replaces the old, deleting the environment deletes it, and one nothing has started from for 30 days is deleted; the sweep deletes any snapshot no environment knows. A desktop with 10 GB on its disk makes a save of about $0.50 a month. The preparing machines are limited by `Workstream:Desktops:Saves` (`api/Desktops/DesktopHosts.cs`, `SaveOptions`): one at a time over every team, four hours of preparing a day, each attempt as long as the setup script may run (`Workstream:Desktops:SetupMinutes`, 45) and half an hour more, so at most 4 × $0.182 = $0.73 a day for Standard desktops. A save older than a week is made again when a task next starts from it.
+
+The API's identity can do all of it with the two roles it holds on the desktops' group (`infra/desktops.bicep`): Virtual Machine Contributor makes the disk from a snapshot and the machine that takes it, and Disk Snapshot Contributor makes, reads and deletes the snapshots.
+
+To check the Azure host's part against Azure itself, in a resource group that is not the desktops' own, sign in with `az login` and run the one test that does it. It reads the gallery image and changes nothing outside the group it is given, which needs a virtual network with a subnet; it removes what it makes, and the group is yours to delete afterwards.
+
+```bash
+export WORKSTREAM_LIVE_AZURE_SUBSCRIPTION=<subscription id>
+export WORKSTREAM_LIVE_AZURE_GROUP=<a resource group for this check alone>
+export WORKSTREAM_LIVE_AZURE_SUBNET=<the id of a subnet in it>
+export WORKSTREAM_LIVE_AZURE_IMAGE=<the gallery image version's id, as Workstream:Desktops:Azure:ImageId>
+export WORKSTREAM_LIVE_AZURE_SIZE=large          # small, standard (when not said) or large
+export WORKSTREAM_LIVE_AZURE_FILL_GB=10          # gigabytes the "setup" writes, to time a real save; none when not said
+dotnet test tests/Workstream.Tests --filter "FullyQualifiedName~AzureSavedSetupLive" --logger "console;verbosity=detailed"
+```
+
+Without those variables the test is skipped. What it measured is in [docs/architecture.md](../docs/architecture.md), "A saved setup".
 
 A pool of stopped machines was measured and not built: Azure takes as long to start a stopped machine as to make a new one (a middle of about 17 seconds for either, and up to a minute), so its disks would have bought nothing.
 

@@ -2,7 +2,7 @@
 
 Workstream gives each task its own cloud desktop with an AI agent working on it. A person writes what they want done, a Linux desktop starts for that task, and the agent does the work there: it opens the browser, edits files in VS Code and runs commands in a terminal. The person watches the screen live in their browser, talks to the agent beside it, and takes the mouse whenever they want. Up to four tasks fit on one screen, side by side.
 
-A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. A team's administrator can connect the team to GitHub through Workstream's GitHub App; each desktop then gets a token for its own repository that lasts an hour, and its agent finishes the work as a branch and a pull request ([infra/README.md](infra/README.md), "GitHub").
+A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. A desktop has what a project's whole stack needs (Docker, .NET, Node, Java, the Android SDK and its emulator), and a container on it reaches the desktop as `host.docker.internal`, as on a Mac ([docs/architecture.md](docs/architecture.md), "A project's whole stack on a desktop"). A team's administrator can connect the team to GitHub through Workstream's GitHub App; each desktop then gets a token for its own repository that lasts an hour, and its agent finishes the work as a branch and a pull request ([infra/README.md](infra/README.md), "GitHub").
 
 Making a machine takes Azure from fifteen seconds to a minute. While someone is in a team's workspace, Workstream keeps one desktop running ahead of them, so the task they start begins on it at once.
 
@@ -57,6 +57,8 @@ az bicep build --file infra/main.bicep --stdout > /dev/null
 ```
 
 `.github/workflows/ci.yml` runs the same on every pull request and every push to `main`.
+
+One test talks to Azure itself and is skipped unless it is told where: `AzureSavedSetupLive` makes a machine from the desktops' image in a resource group of its own, saves its disk and makes a second machine from the save ([infra/README.md](infra/README.md), "What it costs when people use it").
 
 To try a running stack from outside, the way a browser would, including the desktop's display through the relay:
 
