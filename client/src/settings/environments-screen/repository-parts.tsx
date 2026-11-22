@@ -25,10 +25,10 @@ export function RepositorySection({ picker, draft, onChange }: { picker: Reposit
   const typed = typing || !signedIn || (draft.repositoryUrl.trim() !== "" && !name);
 
   return (
-    <fieldset className="flex flex-col gap-3">
-      <legend className="text-[13px] font-medium text-foreground">{t("environments.editor.repositorySection")}</legend>
+    <div className="flex flex-col gap-3">
       {picker.repositories.kind === "loading" ? (
         <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <span className="font-medium text-foreground">{t("environments.editor.repositorySection")}</span>
           <Spinner label={t("environments.editor.readingRepositories")} className="size-3" />
           {t("environments.editor.readingRepositories")}
         </p>
@@ -74,7 +74,7 @@ export function RepositorySection({ picker, draft, onChange }: { picker: Reposit
       )}
 
       {name && signedIn ? <Reading reading={picker.reading} repository={name} fromFile={draft.fromFile} onSuggest={picker.onSuggest} /> : null}
-    </fieldset>
+    </div>
   );
 }
 
@@ -87,11 +87,12 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
 function Finder({ repositories, more, onPick, onType }: { repositories: GitHubRepository[]; more: boolean; onPick: (repository: GitHubRepository) => void; onType: () => void }) {
   const t = useT("settings");
   const [query, setQuery] = useState("");
-  const matches = matchingRepositories(repositories, query);
+  // Before anything is typed, the few most recently pushed; then whatever matches.
+  const matches = matchingRepositories(repositories, query, query.trim() ? 8 : 5);
   return (
     <div className="flex flex-col gap-2">
       <TextField
-        label={t("environments.editor.findRepository")}
+        label={t("environments.editor.repositorySection")}
         placeholder={t("environments.editor.findRepositoryPlaceholder")}
         value={query}
         onChangeText={setQuery}
@@ -135,11 +136,14 @@ function Picked({ name, url, branch, branches, onBranch, onChange }: {
   const options = branches ? (branch && !branches.includes(branch) ? [branch, ...branches] : branches) : branch ? [branch] : [];
   return (
     <div className="grid items-end gap-3 md:grid-cols-[1fr_220px]">
-      <div className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
-        <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground underline-offset-2 hover:underline">
-          {name}
-        </a>
-        <Button size="small" tone="quiet" label={t("environments.editor.changeRepository")} onClick={onChange} />
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[13px] font-medium text-foreground">{t("environments.editor.repositorySection")}</span>
+        <div className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-card px-3 py-1">
+          <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground underline-offset-2 hover:underline">
+            {name}
+          </a>
+          <Button size="small" tone="quiet" label={t("environments.editor.changeRepository")} onClick={onChange} />
+        </div>
       </div>
       {options.length > 0 ? (
         <SelectField label={t("environments.editor.branch")} value={branch} onChangeValue={onBranch} options={options.map((value) => ({ value, label: value }))} />
@@ -216,14 +220,12 @@ export function Reading({ reading, repository, fromFile, onSuggest }: { reading:
 }
 
 /** Saving the saved environment to its repository as workstream.yml, and what that made on GitHub. */
-export function FileOffer({ offer, repository, onSave }: { offer: RepositoryFileOffer; repository: string; onSave: () => void }) {
+export function FileOffer({ offer, repository, onSave, plain }: { offer: RepositoryFileOffer; repository: string; onSave: () => void; plain?: boolean }) {
   const t = useT("settings");
   const link = "text-[13px] font-medium text-primary underline-offset-2 hover:underline";
   return (
-    <section aria-labelledby="environment-file" className="flex flex-col items-start gap-2 rounded-lg border border-primary/40 bg-primary-soft px-4 py-3">
-      <h3 id="environment-file" className="text-sm font-semibold text-foreground">
-        {offer.justSaved ? t("environments.editor.saved") : t("environments.editor.fileTitle")}
-      </h3>
+    <section aria-label={t("environments.editor.fileTitle")} className={cn("flex flex-col items-start gap-2", !plain && "rounded-lg border border-border px-4 py-3")}>
+      {plain ? null : <h3 className="text-sm font-semibold text-foreground">{t("environments.editor.fileTitle")}</h3>}
       {offer.saved ? (
         <p role="status" className="text-[13px] text-foreground">
           {offer.saved.kind === "commit" ? t("environments.editor.fileCommitted", { branch: offer.saved.branch }) : t("environments.editor.filePullRequest", { branch: offer.saved.branch })}{" "}

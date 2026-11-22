@@ -68,6 +68,19 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
   const advanced = Boolean(draft.setupScript || draft.instructions || draft.variables.length > 0);
   const repository = gitHubName(draft.repositoryUrl);
 
+  // Just saved, on a repository that could hold it: the dialog offers saving it there as workstream.yml, and nothing else.
+  if (p.editor.file?.justSaved && repository) {
+    return (
+      <Dialog
+        title={t("environments.editor.savedTitle", { name: draft.name })}
+        onClose={p.onCloseEditor}
+        footer={<Button label={t("environments.editor.done")} tone={p.editor.file.saved ? "primary" : "outline"} onClick={p.onCloseEditor} />}
+      >
+        <FileOffer offer={p.editor.file} repository={repository} onSave={p.onSaveFile} plain />
+      </Dialog>
+    );
+  }
+
   if (confirming) {
     return (
       <Dialog
@@ -94,19 +107,11 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
       footer={
         <>
           {id ? <Button label={t("environments.editor.delete")} tone="quiet" className="mr-auto text-destructive" onClick={() => setConfirming(true)} /> : null}
-          {p.editor.file?.justSaved ? (
-            <Button label={t("environments.editor.done")} tone="primary" onClick={p.onCloseEditor} />
-          ) : (
-            <>
-              <Button label={common("actions.cancel")} onClick={p.onCloseEditor} />
-              <Button label={t("environments.editor.save")} tone="primary" busy={busy} disabled={!draft.name.trim()} onClick={p.onSave} />
-            </>
-          )}
+          <Button label={common("actions.cancel")} onClick={p.onCloseEditor} />
+          <Button label={t("environments.editor.save")} tone="primary" busy={busy} disabled={!draft.name.trim()} onClick={p.onSave} />
         </>
       }
     >
-      {p.editor.file?.justSaved && repository ? <FileOffer offer={p.editor.file} repository={repository} onSave={p.onSaveFile} /> : null}
-
       <TextField label={t("environments.editor.name")} placeholder={t("environments.editor.namePlaceholder")} value={draft.name} onChangeText={(name) => set({ name })} maxLength={100} autoFocus={!id} />
 
       <RepositorySection picker={p.picker} draft={draft} onChange={set} />
@@ -176,7 +181,7 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
           <TextArea label={t("environments.editor.instructions")} hint={t("environments.editor.instructionsHint")} placeholder={t("environments.editor.instructionsPlaceholder")} value={draft.instructions} onChangeText={(instructions) => set({ instructions })} rows={4} />
         </div>
       </details>
-      {p.editor.file && !p.editor.file.justSaved && repository ? <FileOffer offer={p.editor.file} repository={repository} onSave={p.onSaveFile} /> : null}
+      {p.editor.file && repository ? <FileOffer offer={p.editor.file} repository={repository} onSave={p.onSaveFile} /> : null}
       {p.editor.setup ? <SetupSection setup={p.editor.setup} preparing={p.editor.preparing} error={p.editor.prepareError} onPrepare={p.onPrepare} /> : null}
       <ErrorNote message={error} />
     </Dialog>

@@ -116,13 +116,14 @@ describe("what Workstream does with the picked repository", () => {
 describe("saving the environment to its repository", () => {
   const offer = (changes: Partial<RepositoryFileOffer>): RepositoryFileOffer => ({ justSaved: true, busy: false, error: null, saved: null, ...changes });
 
-  it("is offered once the environment is saved, with Done in place of Save", () => {
+  it("is what the dialog offers once the environment is saved, with Done in place of the form", () => {
     const drawn = page({ draft: picked, id: "e", file: offer({}) });
-    expect(drawn).toContain("Saved.");
+    expect(drawn).toContain("Web app is saved");
     expect(drawn).toContain("Save these settings as workstream.yml in acme/web");
     expect(drawn).toContain("Save as workstream.yml in the repository");
     expect(drawn).toContain(">Done<");
     expect(drawn).not.toContain("Save environment");
+    expect(drawn).not.toContain("Apps on the desktop");
   });
 
   it("says what it made: a commit, or a pull request where the branch is protected", () => {
