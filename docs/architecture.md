@@ -198,9 +198,9 @@ The prices are a table in `ModelOptions`, with the two things that make a call c
 
 ## GitHub
 
-GitHub appears twice, and the two do not meet. People may sign in with GitHub, which is SqlOS's own connection to a GitHub OAuth client and reads a person's profile and verified address only ([the core model](core-model.md), "Sign up and sign in"); SqlOS keeps no GitHub token from it. Repositories are reached through Workstream's GitHub App, below.
+People may sign in with GitHub, which is SqlOS's own connection to a GitHub OAuth client, with the scopes `read:user`, `user:email` and `repo` ([the core model](core-model.md), "Sign up and sign in"). SqlOS keeps the token GitHub gives it; the API reads a person's token through `IGitHubTokens` (`api/GitHub/GitHub.cs`) and calls GitHub's API with it through one named client (`GitHubClient`): the person's repositories and branches, a repository's tree and files, a commit, a branch and a pull request. Nothing in the app keeps the token.
 
-A team connects GitHub by installing Workstream's GitHub App on its account or organization ([the core model](core-model.md), "Connect GitHub"). The API holds the app's private key and signs, with it, the short JWT GitHub takes from an app (`api/GitHub/GitHubApp.cs`, RS256, nine minutes). With that it asks GitHub for an installation token whenever a desktop asks for one, for that desktop's repository alone, and hands it over without keeping it.
+The API uses it for the environment form (a repository's workstream.yml, and a suggested setup from its files, asked of the model with Workstream's key and charged to the team, `api/Model/TeamModel.cs`), for saving workstream.yml, and for the desktops: a task's desktop gets the token of the person who started the task, so the agent pushes and opens pull requests as them ([the core model](core-model.md), "A desktop's GitHub token").
 
 On the desktop, git's credential helper for `https://github.com` is `desktop/agent/github.mjs`, and `gh` is a small wrapper first on the PATH (`desktop/agent/shims/gh`) that sets `GH_TOKEN` from the same script each time it runs. Each asks the API with the desktop's key, which it reads where the agent does (its user data, never its disk), so a token never runs out in the middle of a task and none is written down. A `GITHUB_TOKEN` an environment already has is used as it is. The agent is told to finish project work as a branch and a pull request, never on the default branch.
 
@@ -210,11 +210,11 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 
 - It holds one credential, its key. The key reaches `/api/desktop/*` and `/api/model/*` for its own task. It is not a person's token and opens no other route. The key is in the machine's user data, which Azure serves to that machine alone, and is never written to its disk: a copy of a desktop's disk carries nobody's key.
 - It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted.
-- It can ask for a GitHub token for its own environment's repository, when its team has connected GitHub: one repository, to push and open pull requests, for an hour. It never holds the app's key or anyone's own GitHub token. A leaked desktop key is also worth that repository's tokens until the task is deleted.
+- It can ask for the GitHub token of the person who started its task, which reaches what their GitHub account reaches. It is never written to the desktop's disk, but it is in the desktop's memory while git or gh uses it. A leaked desktop key is also worth that person's GitHub access until the task is deleted.
 - It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
 - It has no Azure identity.
 - A spare is a desktop with no task. Its key authenticates and nothing more until a task takes it, and it is never given to another team.
-- A machine preparing an environment holds a key that reads that environment's setup, gets a GitHub token for that environment's repository while its attempt lasts, and says how it went, and nothing else: no task, no conversation, no model. Its disk is saved for the environment's tasks only after it has removed the variables, the logs and the browser's profile, and its key is in its user data, never on the disk. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
+- A machine preparing an environment holds a key that reads that environment's setup, gets the GitHub token of whoever last saved the environment while its attempt lasts, and says how it went, and nothing else: no task, no conversation, no model. Its disk is saved for the environment's tasks only after it has removed the variables, the logs and the browser's profile, and its key is in its user data, never on the disk. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
 - A container on a desktop reaches that desktop's own loopback address through `host.docker.internal`, the agent's window and the browser's debugging port included. That is no more than any program on the desktop can do, and a container there is the task's own: nothing outside the machine can use that way in (the rule matches Docker's bridges only, and the network admits only the API's relay).
 - An environment's variables are stored protected and are sent only to a desktop made from that environment. They are on that desktop in plain text, because the work needs them there: anyone on the team can read them by opening the desktop.
 
@@ -222,8 +222,8 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 
 | Kept in | What |
 | --- | --- |
-| SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant. |
-| The app's tables | Teams' limits and their pause and archive times, environments, tasks, messages, how the setup script went on a task's desktop (its state and last lines), desktop runs (for hours by size), storage runs (for GB-months by kind), model usage (for dollars), and which GitHub installation a team is connected to. No GitHub token is kept anywhere. |
+| SqlOS (the app's SQL database) | People, teams, memberships, invitations, sessions; the resource tree and every grant; the GitHub token of each person who signed in with GitHub, encrypted. |
+| The app's tables | Teams' limits and their pause and archive times, environments, tasks, messages, how the setup script went on a task's desktop (its state and last lines), desktop runs (for hours by size), storage runs (for GB-months by kind), and model usage (for dollars). The app keeps no GitHub token of its own. |
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | A task's archive (a snapshot in the desktops' group) | A copy of that disk, in place of the disk, while the task is archived. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |

@@ -1,6 +1,6 @@
 # Infrastructure
 
-Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with three exceptions written down below: the Foundry resource and its model deployments, Workstream's GitHub App, and the GitHub OAuth client people sign in with.
+Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with two exceptions written down below: the Foundry resource and its model deployments, and the GitHub OAuth client people sign in with.
 
 ## What is deployed
 
@@ -43,19 +43,6 @@ Then set, on the GitHub environment `production`:
 | `MODEL_KEY` | secret | The Foundry resource's key. |
 
 Without the two model values the product deploys and agents say models are not set up. The `staging` environment takes the same two model values, and `ADMINISTRATOR_PASSWORD` as a secret.
-
-For GitHub, the same environment takes six more, all made when the GitHub App is (see "GitHub" below). GitHub refuses names that start with `GITHUB_`, so they start with `GH_APP_`:
-
-| Name | Kind | What |
-| --- | --- | --- |
-| `GH_APP_ID` | variable | The app's App ID. |
-| `GH_APP_SLUG` | variable | The app's name in its address, `https://github.com/apps/<slug>`. |
-| `GH_APP_CLIENT_ID` | variable | The app's Client ID. |
-| `GH_APP_CLIENT_SECRET` | secret | A client secret of the app. |
-| `GH_APP_PRIVATE_KEY` | secret | A private key of the app: the whole `.pem` file GitHub downloads. |
-| `GH_APP_WEBHOOK_SECRET` | secret | Optional. The app's webhook secret. |
-
-Without the first five, teams see that GitHub is not set up, and everything else works.
 
 For signing in with GitHub, the same environment takes two more, made when the OAuth client is (see "Sign in with GitHub" below):
 
@@ -160,64 +147,9 @@ az rest --method put \
 
 The deployment names are the defaults in `ModelOptions` (`api/Model/ModelGateway.cs`), with what each costs.
 
-## GitHub
-
-A team connects its GitHub account or organization by installing Workstream's GitHub App on it, from the team's page. Each desktop then asks the API for a token for its own environment's repository (`GET /api/desktop/github/token`), which GitHub makes good for one hour; git and gh on the desktop ask for one whenever they need it, and nothing stores it ([docs/core-model.md](../docs/core-model.md), "Connect GitHub"). The app itself is made by hand, once, because GitHub has no way to make an app without a person clicking through its form. It is the second thing made by hand, after the Foundry resource.
-
-### Making the app for production
-
-1. Open https://github.com/organizations/agenetix/settings/apps/new (the organization that owns Workstream; any account can own the app).
-2. **GitHub App name**: `Workstream`. GitHub makes the slug from it (`workstream`); if the name is taken, pick another and note the slug GitHub shows.
-3. **Homepage URL**: `https://workstream-web.happyhill-808cd2a4.westus3.azurecontainerapps.io`
-4. Under **Identifying and authorizing users**:
-   - **Callback URL**: `https://workstream-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/api/github/callback`
-   - Tick **Request user authorization (OAuth) during installation**. This is required: GitHub then hands back a code for the person who installed the app, and the API uses it to check that their GitHub account really reaches the installation they came back with. Without it anyone could name another account's installation.
-   - Leave **Expire user authorization tokens** as it is and **Enable Device Flow** off.
-5. Under **Post installation**: GitHub greys out **Setup URL** once the box above is ticked, because it then sends people to the callback URL instead. If it can still be filled, give it the same callback address and tick **Redirect on update**.
-6. Under **Webhook**: keep **Active** ticked.
-   - **Webhook URL**: `https://workstream-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/api/github/webhook`
-   - **Secret**: make one with `openssl rand -hex 32` and keep it for `GH_APP_WEBHOOK_SECRET`.
-   - With it, removing the app on GitHub disconnects every team that was connected to it. To go without, untick **Active** and skip that secret.
-7. Under **Permissions**, **Repository permissions** only:
-   - **Contents**: Read and write
-   - **Pull requests**: Read and write
-   - **Metadata**: Read-only (GitHub sets it)
-   - Nothing under **Organization permissions** or **Account permissions**.
-8. Under **Subscribe to events**: nothing. GitHub sends an app's installation events whether or not any are ticked.
-9. **Where can this GitHub App be installed?** **Any account**, so every team can install it on its own organization.
-10. **Create GitHub App**.
-
-Then, on the app's settings page:
-
-11. Note the **App ID** and the **Client ID** at the top of the page.
-12. Under **Client secrets**, **Generate a new client secret** and copy it.
-13. Under **Private keys**, **Generate a private key**. GitHub downloads a `.pem` file.
-14. Put the six values on the `production` environment:
-
-```bash
-gh variable set GH_APP_ID --env production --body <App ID>
-gh variable set GH_APP_SLUG --env production --body workstream
-gh variable set GH_APP_CLIENT_ID --env production --body <Client ID>
-gh secret set GH_APP_CLIENT_SECRET --env production            # paste the client secret
-gh secret set GH_APP_PRIVATE_KEY --env production < ~/Downloads/workstream.<date>.private-key.pem
-gh secret set GH_APP_WEBHOOK_SECRET --env production --body <the openssl secret>
-```
-
-15. Publish the next release. Its deploy passes them on (`.github/actions/deploy`, `infra/api.bicep`): the private key goes as its PEM in base64, and the API reads either form. The team's page then offers **Connect GitHub** to administrators.
-
-To check it once deployed: on a team's page, connect GitHub to a test organization with one private repository, make an environment that picks that repository, start a task, and ask the agent to change a line and open a pull request. The pull request shows the app as its author.
-
-### Staging and development
-
-An app sends people back to one callback address, so staging needs an app of its own to connect GitHub: the same steps with `Workstream staging` as its name, `https://workstream-staging-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/api/github/callback` as its callback and `…/api/github/webhook` as its webhook, and the same six names on the `staging` environment. Without them staging shows that GitHub is not set up. For a laptop, an app whose callback is `http://localhost:5280/api/github/callback` and the `WORKSTREAM_GITHUB_*` values in `.env` (`.env.example`); its webhook cannot reach a laptop, so leave it inactive.
-
-### Rotating
-
-A new client secret or private key is added on the app's page beside the old one; set the GitHub secret to the new value, publish a release, then delete the old one on GitHub. Tokens already handed to desktops last out their hour.
-
 ## Sign in with GitHub
 
-People can sign in with GitHub beside the emailed code. It is SqlOS's GitHub connection, seeded by the API at start from two settings (`SqlOS:Oidc:GitHub:ClientId` and `SqlOS:Oidc:GitHub:ClientSecret`; `api/Workstream.cs`, `SeedGitHubSignIn`). It needs a GitHub OAuth client, which GitHub calls an "OAuth App". This is not Workstream's GitHub App above: that one reaches repositories, this one only says who a person is. It is the third thing made by hand, because GitHub has no way to make one without a person filling its form.
+People can sign in with GitHub beside the emailed code. It is SqlOS's GitHub connection, seeded by the API at start from two settings (`SqlOS:Oidc:GitHub:ClientId` and `SqlOS:Oidc:GitHub:ClientSecret`; `api/Workstream.cs`, `SeedGitHubSignIn`). It needs a GitHub OAuth client, which GitHub calls an "OAuth App". It is the second thing made by hand, after the Foundry resource, because GitHub has no way to make one without a person filling its form. The same sign-in is how desktops reach GitHub: SqlOS keeps the token GitHub gives it, and a task's desktop pushes with the token of the person who started the task ([docs/core-model.md](../docs/core-model.md), "A desktop's GitHub token").
 
 ### Making the OAuth client for production
 
@@ -236,7 +168,7 @@ gh secret set GH_OAUTH_CLIENT_SECRET --env production   # paste the secret when 
 
 8. Publish the next release. Its deploy passes them on (`.github/actions/deploy`, `infra/api.bicep`), and the sign-in page then shows **Continue with GitHub**.
 
-The client asks GitHub for a person's profile and email addresses (`read:user`, `user:email`) and nothing else. A person needs a verified primary email address on GitHub; an address that already has a Workstream account signs in to that account.
+The client asks GitHub for a person's profile, their email addresses and their repositories (`read:user`, `user:email`, `repo`; the scopes are in code, `SeedGitHubSignIn`). GitHub shows them on its page the first time. A person needs a verified primary email address on GitHub; an address that already has a Workstream account signs in to that account.
 
 To check it once deployed: sign out, press **Continue with GitHub**, approve on GitHub, and you are in your workspace. Do it once with a GitHub account whose address already has a Workstream account, and once with one that has none, which gets a team of its own.
 
