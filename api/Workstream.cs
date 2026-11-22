@@ -181,10 +181,12 @@ public sealed class WorkstreamApp
     /// <summary>
     /// Where SqlOS sends a browser that reaches one of its hosted views: the web app's invite page for an
     /// invitation email's link, its device page for the command line's sign-in, its sign-in for anything else.
+    /// Someone back from GitHub who is on several teams lands on the sign-in page with the request, the
+    /// organization view and SqlOS's pending token, and the page picks the team (client/hooks/use-sign-in.ts).
     /// Someone who comes back from GitHub without being signed in (GitHub or SqlOS refused, or SqlOS has a
     /// question left) lands on the sign-in page with the request they began; the page says that signing in with
     /// GitHub did not work and shows the form again (client/app/sign-in.tsx). SqlOS's own words for the
-    /// refusal and its tokens stay out of the address.
+    /// refusal stay out of the address, and so do its tokens but the one pending token above.
     /// </summary>
     public string SignInUiUrl(SqlOSHeadlessUiRouteContext ui)
     {
@@ -196,6 +198,14 @@ public sealed class WorkstreamApp
         {
             var request = string.IsNullOrEmpty(ui.RequestId) ? "" : $"request={Uri.EscapeDataString(ui.RequestId)}&";
             return $"{WebOrigin}{DevicePath}?{request}view={Uri.EscapeDataString(ui.View)}";
+        }
+        if (!string.IsNullOrEmpty(ui.RequestId) && ui.View == "organization" && !string.IsNullOrEmpty(ui.PendingToken) && string.IsNullOrEmpty(ui.Error))
+        {
+            // Signed in by GitHub, and on several teams: SqlOS asks which one the session is for. The page answers
+            // as it does after an emailed code, with the first, and needs SqlOS's pending token to (the browser's
+            // cookie on this API's address does not reach a page on another site). The token is good once, for
+            // this request, and what it leads to is a code only this tab's PKCE verifier can redeem.
+            return $"{WebOrigin}{SignInPath}?request={Uri.EscapeDataString(ui.RequestId)}&view=organization&pendingToken={Uri.EscapeDataString(ui.PendingToken)}";
         }
         if (!string.IsNullOrEmpty(ui.RequestId) && (!string.IsNullOrEmpty(ui.Error) || !string.IsNullOrEmpty(ui.PendingToken)))
         {

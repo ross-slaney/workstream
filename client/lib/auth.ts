@@ -113,6 +113,17 @@ export function leaveForProvider(url: string, pending: PendingSignIn) {
 }
 
 /**
+ * Back from a provider on the sign-in page with SqlOS's question of which team the session is for: the address
+ * to read the request again with, when this tab began that sign-in (it kept a state and a PKCE verifier, so the
+ * code SqlOS ends with is this tab's to redeem). Null for anything else, which the page treats as a sign-in
+ * that did not work.
+ */
+export function teamChoiceFrom(params: { request?: string; view?: string; pendingToken?: string }, pending: PendingSignIn | null): string | null {
+  if (params.view !== "organization" || !params.request || !params.pendingToken || !pending?.codeVerifier || !pending.state) return null;
+  return `?request=${encodeURIComponent(params.request)}&view=organization&pendingToken=${encodeURIComponent(params.pendingToken)}`;
+}
+
+/**
  * The code to exchange when the browser lands on /auth/callback, or null when there is nothing to trust: no
  * code, nothing remembered, or a `state` that is not the one this tab's sign-in began with.
  */

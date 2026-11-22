@@ -2,7 +2,7 @@ import { credentialEnabled, type HeadlessAuthorization, type UseHeadlessAuthResu
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AUTH_SCOPE, completeAuthorization, leaveForProvider, newSignIn, signOut, type PendingSignIn } from "@/lib/auth";
+import { AUTH_SCOPE, completeAuthorization, forgetSignIn, leaveForProvider, newSignIn, signOut, type PendingSignIn } from "@/lib/auth";
 import { getAuthServerUrl, getRedirectUri, getSqlOsClientId } from "@/lib/config";
 import { translator } from "@/lib/i18n";
 import { getSession } from "@/lib/session";
@@ -70,6 +70,45 @@ export function useSignIn(initialIntent: Intent, after: string, invitationToken?
       if (getSession()) await signOut();
       await completeAuthorization(authorization);
       router.replace(invitation ? `/t/${encodeURIComponent(invitation.teamId)}` : after);
+    },
+  });
+}
+
+/**
+ * Back from GitHub signed in, on several teams: SqlOS asks which team the session is for and hands the browser
+ * to the sign-in page with the request, the organization view and its pending token (api/Workstream.cs
+ * SignInUiUrl). This reads the request again and answers as the emailed code does, with the first team (the
+ * steps' own choice below), then exchanges the code SqlOS ends with, using the PKCE verifier this tab kept for
+ * the trip to GitHub, and goes where the sign-in was for. Starting over begins a new sign-in, as the page would.
+ */
+export function useProviderTeamChoice(search: string, pending: PendingSignIn, after: string): SignInScreenProps {
+  const router = useRouter();
+  const auth = useHeadlessAuth({
+    issuer: getAuthServerUrl(),
+    clientId: getSqlOsClientId(),
+    redirectUri: getRedirectUri(),
+  });
+  const resumed = useRef(false);
+  const began = useRef<PendingSignIn>(pending);
+  return useSignInSteps(auth, "login", {
+    begin: async (next) => {
+      if (!resumed.current) {
+        resumed.current = true;
+        return auth.flow.resume(search);
+      }
+      const pkce = await newSignIn();
+      began.current = { state: pkce.state, codeVerifier: pkce.codeVerifier, returnTo: after };
+      return auth.flow.start({ scope: AUTH_SCOPE, view: next, ...pkce });
+    },
+    leave: (url) => leaveForProvider(url, began.current),
+    finish: async (authorization) => {
+      const kept = began.current;
+      forgetSignIn();
+      // The code must come back with the state this tab's sign-in began with, and be redeemed with its verifier.
+      if (!authorization || !kept.codeVerifier || !kept.state || authorization.state !== kept.state) throw new Error("Sign-in ended without a code for this tab.");
+      if (getSession()) await signOut();
+      await completeAuthorization({ ...authorization, codeVerifier: authorization.codeVerifier ?? kept.codeVerifier });
+      router.replace(kept.returnTo);
     },
   });
 }

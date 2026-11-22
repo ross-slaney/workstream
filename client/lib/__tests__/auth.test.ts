@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { providerReturn, type PendingSignIn } from "../auth";
+import { providerReturn, teamChoiceFrom, type PendingSignIn } from "../auth";
 
 /*
  * What /auth/callback exchanges when the browser comes back from GitHub: only a code that answers the sign-in
@@ -30,5 +30,21 @@ describe("a provider's return", () => {
   it("is refused for the command line's page, which keeps where it was and no verifier", () => {
     expect(providerReturn({ code: "code-1", state: "state-1" }, { state: null, codeVerifier: null, returnTo: "/device?request=req_1" })).toBeNull();
     expect(providerReturn({ code: "code-1" }, { state: null, codeVerifier: null, returnTo: "/device?request=req_1" })).toBeNull();
+  });
+});
+
+describe("back from GitHub on several teams", () => {
+  const asked = { request: "req-1", view: "organization", pendingToken: "pending/1" };
+
+  it("reads the request again with SqlOS's question and its token, for the sign-in this tab began", () => {
+    expect(teamChoiceFrom(asked, began)).toBe("?request=req-1&view=organization&pendingToken=pending%2F1");
+  });
+
+  it("is a sign-in that did not work otherwise", () => {
+    expect(teamChoiceFrom({ ...asked, view: "login" }, began)).toBeNull();
+    expect(teamChoiceFrom({ ...asked, pendingToken: undefined }, began)).toBeNull();
+    expect(teamChoiceFrom(asked, null)).toBeNull();
+    // The command line's page keeps no verifier: its own page finishes there.
+    expect(teamChoiceFrom(asked, { state: null, codeVerifier: null, returnTo: "/device?request=d" })).toBeNull();
   });
 });

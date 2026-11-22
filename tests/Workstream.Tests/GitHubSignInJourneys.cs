@@ -106,6 +106,25 @@ public sealed class GitHubSignInJourneys
             return JsonNode.Parse(text)!.AsObject();
         }
 
+        /// <summary>The page answers SqlOS's question with a team: where SqlOS sends the browser then.</summary>
+        public async Task<Uri> ChooseTeamAsync(string pendingToken, string teamId)
+        {
+            var result = await StepAsync("organization/select", new JsonObject { ["pendingToken"] = pendingToken, ["organizationId"] = teamId });
+            Assert.AreEqual("redirect", result["type"]?.GetValue<string>(), result.ToJsonString());
+            return new Uri(result["redirectUrl"]!.GetValue<string>());
+        }
+
+        /// <summary>SqlOS refuses the answer: the pending token was used, or never was one.</summary>
+        public async Task ChooseTeamFailsAsync(string pendingToken, string teamId)
+        {
+            using var response = await http.PostAsJsonAsync("/sqlos/auth/headless/organization/select", new JsonObject { ["pendingToken"] = pendingToken, ["organizationId"] = teamId });
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+                Assert.AreNotEqual("redirect", result["type"]?.GetValue<string>(), result.ToJsonString());
+            }
+        }
+
         /// <summary>
         /// The web app's callback page (client/app/auth/callback.tsx): the code SqlOS came back with, checked
         /// against the state the sign-in began with, becomes the person's session.
@@ -299,21 +318,39 @@ public sealed class GitHubSignInJourneys
     }
 
     [TestMethod]
-    public async Task Someone_on_several_teams_comes_back_from_GitHub_to_the_sign_in_page_signed_out()
+    public async Task Someone_on_two_teams_signs_in_with_GitHub_and_the_page_chooses_the_first_as_after_an_emailed_code()
     {
-        var (lin, _) = await OnTwoTeamsAsync();
+        var (lin, teamIds) = await OnTwoTeamsAsync();
         using var __ = lin;
 
         using var page = await SignInPage.OpenAsync();
         var github = await page.ContinueWithGitHubAsync();
         var landing = await page.ReturnFromGitHubAsync(github, Stack.GitHubSignIn.Approve(Stack.GitHubSignIn.NewAccount(lin.Email), github));
 
-        // SqlOS asks which team the session is for and hands the browser to the sign-in page. Since SqlOS 11.5.0
-        // reading the request back lists the teams to choose from (SqlOSHeadlessAuthService.GetRequestAsync),
-        // but the page does not finish that request yet: it says GitHub sign-in did not work and shows the form
-        // again (client/app/sign-in.tsx). Nobody is signed in.
-        page.AssertCameBackSignedOut(landing, "organization");
-        Assert.AreEqual(2, (await page.ReadAgainAsync("organization"))["organizationSelection"]!.AsArray().Count);
+        // SqlOS asks which team the session is for and hands the browser to the sign-in page with the request,
+        // the question and its pending token (api/Workstream.cs SignInUiUrl), and nothing else.
+        Assert.AreEqual($"{Stack.WebOrigin}{WorkstreamApp.SignInPath}", landing.GetLeftPart(UriPartial.Path));
+        var query = QueryHelpers.ParseQuery(landing.Query);
+        CollectionAssert.AreEquivalent(new[] { "request", "view", "pendingToken" }, query.Keys.ToArray());
+        Assert.AreEqual(page.RequestId, query["request"].ToString());
+        Assert.AreEqual("organization", query["view"].ToString());
+
+        // The page reads the request as the address has it (client/hooks/use-sign-in.ts, useProviderTeamChoice),
+        // which lists the teams, and answers with the first, as the emailed code's steps do.
+        var asked = await page.ReadAgainAsync($"organization&pendingToken={Uri.EscapeDataString(query["pendingToken"].ToString())}");
+        var teams = asked["organizationSelection"]!.AsArray().Select(x => x!["id"]!.GetValue<string>()).ToArray();
+        CollectionAssert.AreEquivalent(teamIds, teams);
+        var chosen = await page.ChooseTeamAsync(asked["pendingToken"]?.GetValue<string>() ?? query["pendingToken"].ToString(), teams[0]);
+
+        // SqlOS ends with a code for the web app's callback, which this tab's verifier redeems: the person is in.
+        using var signedIn = await page.FinishAsync(chosen, lin.Email);
+        Assert.AreEqual(lin.UserId, signedIn.UserId);
+        var listed = await signedIn.GetAsync<ListPage<TeamDto>>("/api/teams");
+        CollectionAssert.AreEquivalent(teamIds, listed.Data.Select(x => x.Id).ToArray());
+        await signedIn.GetAsync($"/api/teams/{teamIds[1]}/tasks").IsAsync(HttpStatusCode.OK);
+
+        // The pending token is good once.
+        await page.ChooseTeamFailsAsync(query["pendingToken"].ToString(), teams[0]);
     }
 
     /// <summary>On the command line's page, signed out: the person presses "Continue with GitHub". Where SqlOS sends the browser.</summary>

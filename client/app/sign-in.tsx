@@ -2,8 +2,8 @@ import { Redirect, useLocalSearchParams } from "expo-router";
 import Head from "expo-router/head";
 import type { Metadata } from "expo-router/server";
 import { useState } from "react";
-import { useSignIn } from "@/hooks/use-sign-in";
-import { readSignIn } from "@/lib/auth";
+import { useProviderTeamChoice, useSignIn } from "@/hooks/use-sign-in";
+import { readSignIn, teamChoiceFrom, type PendingSignIn } from "@/lib/auth";
 import { translator, useT } from "@/lib/i18n";
 import { useSessionStatus } from "@/lib/session";
 import { SignInScreen } from "@/src/auth/sign-in-screen";
@@ -16,6 +16,8 @@ import { SignInScreen } from "@/src/auth/sign-in-screen";
  * Someone who went to GitHub and was not signed in comes back here: from SqlOS with the `request` they began
  * (api/Workstream.cs SignInUiUrl), or from /auth/callback with `failed`. The form starts again and says that
  * signing in with GitHub did not work. If they had left from the command line's page, they are sent back to it.
+ * Someone GitHub signed in who is on several teams comes back with the request, `view=organization` and
+ * SqlOS's `pendingToken`: the page picks the first team, as it does after an emailed code, and finishes.
  */
 
 export function generateMetadata(): Metadata {
@@ -30,7 +32,7 @@ function ownPath(value: string | string[] | undefined): string {
 
 export default function SignInRoute() {
   const t = useT("auth");
-  const params = useLocalSearchParams<{ view?: string; returnTo?: string; request?: string; failed?: string }>();
+  const params = useLocalSearchParams<{ view?: string; returnTo?: string; request?: string; failed?: string; pendingToken?: string }>();
   const status = useSessionStatus();
   const intent = params.view === "signup" ? "signup" : "login";
   const after = ownPath(params.returnTo);
@@ -42,11 +44,15 @@ export default function SignInRoute() {
         <title>{t("meta.signInTitle")}</title>
       </Head>
       {status === "loading" ? <div className="h-full bg-canvas" />
-        : cameBack ? <CameBack intent={intent} after={after} signedIn={signedIn} />
+        : cameBack ? <CameBack intent={intent} after={after} signedIn={signedIn} request={params.request} view={params.view} pendingToken={params.pendingToken} />
         : signedIn ? <Redirect href={after} />
         : <SignIn intent={intent} after={after} />}
     </>
   );
+}
+
+function ChooseTeam({ search, pending, after }: { search: string; pending: PendingSignIn; after: string }) {
+  return <SignInScreen {...useProviderTeamChoice(search, pending, after)} />;
 }
 
 function SignIn({ intent, after, providerFailed }: { intent: "login" | "signup"; after: string; providerFailed?: boolean }) {
@@ -57,10 +63,15 @@ function SignIn({ intent, after, providerFailed }: { intent: "login" | "signup";
  * Back from a provider, not signed in by it. The page they left from says so: this one, or the command line's,
  * which a person signed in to the web app may well have come from.
  */
-function CameBack({ intent, after, signedIn }: { intent: "login" | "signup"; after: string; signedIn: boolean }) {
+function CameBack({ intent, after, signedIn, request, view, pendingToken }: {
+  intent: "login" | "signup"; after: string; signedIn: boolean; request?: string; view?: string; pendingToken?: string;
+}) {
   // Read in the browser only: this renders once the session has been read there.
   const [left] = useState(() => readSignIn());
   if (left && left.codeVerifier === null && left.returnTo.startsWith("/device?")) return <Redirect href={`${left.returnTo}&failed=provider`} />;
+  // Signed in by GitHub, on several teams, from this tab's own sign-in: choose the team and finish.
+  const search = teamChoiceFrom({ request, view, pendingToken }, left);
+  if (search && left) return <ChooseTeam search={search} pending={left} after={left.returnTo || after} />;
   if (signedIn) return <Redirect href={after} />;
   return <SignIn intent={intent} after={after} providerFailed />;
 }
