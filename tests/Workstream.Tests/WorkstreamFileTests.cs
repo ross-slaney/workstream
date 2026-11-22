@@ -130,27 +130,26 @@ public sealed class RepositoryAnalysisTests
     }
 
     [TestMethod]
-    public void The_model_is_asked_with_the_files_the_apps_and_one_tool_it_must_use()
+    public void The_model_is_asked_with_the_files_the_apps_and_the_JSON_it_must_answer()
     {
         var request = RepositoryAnalysis.Request("claude-sonnet-5-5", "acme/app", "main", ["package.json", "src/index.ts"], false,
             [new AnalysisFile("package.json", "{\"name\":\"app\"}", false)]);
         Assert.AreEqual("claude-sonnet-5-5", request["model"]!.GetValue<string>());
-        Assert.AreEqual(RepositoryAnalysis.ToolName, request["tool_choice"]!["name"]!.GetValue<string>());
+        Assert.IsNull(request["tool_choice"]);
         var prompt = request["messages"]![0]!["content"]!.GetValue<string>();
         StringAssert.Contains(prompt, "Repository: acme/app, branch main.");
         StringAssert.Contains(prompt, "src/index.ts\n");
         StringAssert.Contains(prompt, "<file path=\"package.json\">\n{\"name\":\"app\"}\n</file>");
         var system = request["system"]!.GetValue<string>();
         foreach (var app in AppCatalog.All) StringAssert.Contains(system, $"{app.Id}: {app.Name}");
-        var schema = request["tools"]![0]!["input_schema"]!;
+        var schema = request["output_config"]!["format"]!["schema"]!;
+        Assert.IsFalse(schema["additionalProperties"]!.GetValue<bool>());
         CollectionAssert.AreEqual(new[] { "small", "standard", "large" }, schema["properties"]!["size"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
     }
 
     static string Answer(JsonObject input) => new JsonObject
     {
-        ["content"] = new JsonArray(
-            new JsonObject { ["type"] = "text", ["text"] = "Here it is." },
-            new JsonObject { ["type"] = "tool_use", ["name"] = RepositoryAnalysis.ToolName, ["input"] = input }),
+        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = input.ToJsonString() }),
     }.ToJsonString();
 
     [TestMethod]
@@ -176,10 +175,11 @@ public sealed class RepositoryAnalysisTests
     }
 
     [TestMethod]
-    public void An_answer_without_the_tool_is_none()
+    public void An_answer_that_is_not_the_JSON_is_none()
     {
         Assert.IsNull(RepositoryAnalysis.Read("""{"content":[{"type":"text","text":"I think npm ci."}]}"""));
         Assert.IsNull(RepositoryAnalysis.Read("not json"));
-        Assert.IsNull(RepositoryAnalysis.Read("""{"content":[{"type":"tool_use","name":"other","input":{}}]}"""));
+        // Cut off at max_tokens: the JSON does not close.
+        Assert.IsNull(RepositoryAnalysis.Read("""{"content":[{"type":"text","text":"{\"size\":\"large\",\"setup_script\":\"npm"}]}"""));
     }
 }

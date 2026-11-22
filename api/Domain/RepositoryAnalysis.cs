@@ -21,8 +21,6 @@ public sealed record EnvironmentSuggestion(string Size, IReadOnlyList<string> Ap
 /// </summary>
 public static partial class RepositoryAnalysis
 {
-    /// <summary>The tool the model answers with, so its answer is fields and not prose.</summary>
-    public const string ToolName = "suggest_environment";
     const int MaxFiles = 30;
     const int MaxFileBytes = 12 * 1024;
     const int MaxLockfileBytes = 1500;
@@ -106,7 +104,7 @@ public static partial class RepositoryAnalysis
             total += file.Text.Length;
             prompt.Append($"\n<file path=\"{file.Path}\"{(file.Cut ? " cut=\"true\"" : "")}>\n{file.Text}\n</file>\n");
         }
-        prompt.Append($"\nSuggest the environment for this repository with the {ToolName} tool.");
+        prompt.Append("\nSuggest the environment for this repository.");
 
         var system = $"""
             You set up Workstream environments. An environment is what a cloud desktop comes with when someone starts a task on this repository: an agent then works on the task on that desktop.
@@ -134,33 +132,36 @@ public static partial class RepositoryAnalysis
             ["max_tokens"] = 4096,
             ["system"] = system,
             ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = prompt.ToString() }),
-            ["tools"] = new JsonArray(new JsonObject
+            // Structured output, so the answer is always this JSON. Sonnet 5.5 on Foundry refuses a forced tool_choice.
+            ["output_config"] = new JsonObject
             {
-                ["name"] = ToolName,
-                ["description"] = "The environment for the repository.",
-                ["input_schema"] = new JsonObject
+                ["format"] = new JsonObject
                 {
-                    ["type"] = "object",
-                    ["properties"] = new JsonObject
+                    ["type"] = "json_schema",
+                    ["schema"] = new JsonObject
                     {
-                        ["setup_script"] = new JsonObject { ["type"] = "string", ["description"] = "The bash setup script, or empty." },
-                        ["size"] = new JsonObject { ["type"] = "string", ["enum"] = sizes },
-                        ["apps"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["enum"] = apps } },
-                        ["variables"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
-                        ["instructions"] = new JsonObject { ["type"] = "string" },
-                        ["why"] = new JsonObject { ["type"] = "string" },
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["setup_script"] = new JsonObject { ["type"] = "string", ["description"] = "The bash setup script, or empty." },
+                            ["size"] = new JsonObject { ["type"] = "string", ["enum"] = sizes },
+                            ["apps"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["enum"] = apps } },
+                            ["variables"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
+                            ["instructions"] = new JsonObject { ["type"] = "string" },
+                            ["why"] = new JsonObject { ["type"] = "string" },
+                        },
+                        ["required"] = new JsonArray("setup_script", "size", "apps", "variables", "instructions", "why"),
+                        ["additionalProperties"] = false,
                     },
-                    ["required"] = new JsonArray("setup_script", "size", "apps", "variables", "instructions", "why"),
                 },
-            }),
-            ["tool_choice"] = new JsonObject { ["type"] = "tool", ["name"] = ToolName },
+            },
         };
     }
 
     /// <summary>
     /// The model's answer as settings a desktop can have: an unknown size becomes the standard one, apps the
     /// catalog does not have and names a shell cannot read are dropped, and text is cut to what an environment
-    /// holds. Null when the answer has no use of the tool.
+    /// holds. Null when the answer is not that JSON (cut off at max_tokens, or a refusal).
     /// </summary>
     public static EnvironmentSuggestion? Read(string answer)
     {
@@ -168,7 +169,8 @@ public static partial class RepositoryAnalysis
         try
         {
             var message = JsonNode.Parse(answer);
-            input = message?["content"]?.AsArray().FirstOrDefault(x => x?["type"]?.GetValue<string>() == "tool_use" && x["name"]?.GetValue<string>() == ToolName)?["input"];
+            var text = message?["content"]?.AsArray().FirstOrDefault(x => x?["type"]?.GetValue<string>() == "text")?["text"]?.GetValue<string>();
+            input = text is null ? null : JsonNode.Parse(text);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException)
         {

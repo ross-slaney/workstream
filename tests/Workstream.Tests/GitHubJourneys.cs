@@ -388,12 +388,12 @@ public sealed class GitHubJourneys
 
     // A suggestion.
 
-    /// <summary>The model's answer, as Foundry gives it when the model uses the tool it was handed.</summary>
+    /// <summary>The model's answer, as Foundry gives it for a request with a JSON schema output format.</summary>
     static string Suggested(object input) => new JsonObject
     {
         ["id"] = "msg_1", ["type"] = "message", ["role"] = "assistant", ["model"] = "claude-sonnet-5-5",
-        ["content"] = new JsonArray(new JsonObject { ["type"] = "tool_use", ["id"] = "toolu_1", ["name"] = RepositoryAnalysis.ToolName, ["input"] = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(input)) }),
-        ["stop_reason"] = "tool_use",
+        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = System.Text.Json.JsonSerializer.Serialize(input) }),
+        ["stop_reason"] = "end_turn",
         ["usage"] = new JsonObject { ["input_tokens"] = 20_000, ["output_tokens"] = 600 },
     }.ToJsonString();
 
@@ -434,7 +434,8 @@ public sealed class GitHubJourneys
             Assert.AreEqual("/anthropic/v1/messages", call.Uri.AbsolutePath);
             Assert.AreEqual(Stack.ModelKey, call.Headers["x-api-key"]);
             var asked = JsonNode.Parse(call.Body)!;
-            Assert.AreEqual(RepositoryAnalysis.ToolName, asked["tool_choice"]!["name"]!.GetValue<string>());
+            Assert.AreEqual("json_schema", asked["output_config"]!["format"]!["type"]!.GetValue<string>());
+            Assert.IsNull(asked["tool_choice"]);
             var prompt = asked["messages"]![0]!["content"]!.GetValue<string>();
             foreach (var file in new[] { "package.json", "pnpm-lock.yaml", ".nvmrc", "README.md", ".github/workflows/ci.yml", "docker-compose.yml" })
             {
