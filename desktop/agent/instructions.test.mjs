@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { projectTools } from "./instructions.mjs";
+import { noSetup, projectTools } from "./instructions.mjs";
 
 test("the agent is told to follow the repository's rules and skills, and that iPhone builds need a Mac", () => {
   const told = projectTools();
@@ -18,4 +18,12 @@ test("the agent is told how to start the Android emulator, on every size, and ho
 
 test("the agent is told that host.docker.internal is the desktop, from a container", () => {
   assert.match(projectTools(), /`host\.docker\.internal` is this desktop/);
+});
+
+test("the agent is told to install the project first when the environment has a repository and no setup script", () => {
+  const repository = { url: "https://github.com/acme/app", branch: "main" };
+  assert.match(noSetup({ repository, setupScript: null }), /No setup script ran on this desktop.*Install what the task needs/s);
+  assert.match(noSetup({ repository, setupScript: "  " }), /No setup script ran/);
+  assert.equal(noSetup({ repository, setupScript: "npm ci" }), "");
+  assert.equal(noSetup({ repository: null, setupScript: null }), "");
 });

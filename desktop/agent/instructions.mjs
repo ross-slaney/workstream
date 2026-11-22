@@ -34,6 +34,15 @@ Working on a project:
 `.trim();
 
 /**
+ * What the agent is told when the environment has a repository and no setup script (no workstream.yml, and
+ * nothing typed in the form): nothing of the project is installed, so it installs what the task needs first.
+ */
+export const noSetup = (setup) =>
+  setup?.repository && !setup.setupScript?.trim()
+    ? "No setup script ran on this desktop, so the project's packages and tools are not installed. Install what the task needs, the way the repository's README, AGENTS.md or CI workflow does it, before you build or test."
+    : "";
+
+/**
  * What the agent is told when the environment's setup script did not end well on this desktop, so it does
  * not take a half-installed project for a ready one. Nothing when it ended well, or none ran here.
  */
