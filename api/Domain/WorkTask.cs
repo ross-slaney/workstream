@@ -65,6 +65,10 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public string? Host { get; private set; }
     /// <summary>Where the API reaches the desktop's display: <c>host:port</c> on the private network. Null while it has none.</summary>
     public string? Address { get; private set; }
+    /// <summary>The name, at the desktop host, of what is kept of the task once it is archived. Null while it is not.</summary>
+    public string? Archive { get; private set; }
+    /// <summary>How much is on the archive, which is what keeping it costs. Null until it is known.</summary>
+    public long? ArchiveBytes { get; private set; }
     /// <summary>When, in this start, the host said the machine was on.</summary>
     public DateTimeOffset? OnAt { get; private set; }
     /// <summary>When, in this start, the display first answered.</summary>
