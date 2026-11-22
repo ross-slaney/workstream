@@ -32,24 +32,19 @@ param sparesAtOnce int = 0
 param spareHoursADay int = 6
 @description('The image version a desktop is made from: the one this deployment was made with.')
 param desktopImageId string
+@description('Whether a desktop hibernates when it is stopped (api/Desktops/DesktopHosts.cs, AzureOptions.Hibernate). Azure hibernates the Dasv6 sizes and not the Dasv7 ones the API otherwise uses, at the same cores, memory and price, so the sizes change with it.')
+param desktopsHibernate bool = false
 @description('The agents\' models (api/Model/ModelGateway.cs): the Foundry resource\'s Anthropic endpoint; empty leaves agents without one.')
 param modelEndpoint string = ''
 @secure()
 param modelKey string = ''
-@description('Workstream\'s GitHub App (api/GitHub/GitHubApp.cs): its id, slug and OAuth client id. All of them and the two secrets below, or GitHub is not set up.')
-param github object = {}
+@description('Sign in with GitHub (api/Workstream.cs SeedGitHubSignIn): the id of the GitHub OAuth client people sign in with, and its secret. Both, or the sign-in page shows no GitHub button and desktops get no GitHub token.')
+param gitHubSignInClientId string = ''
 @secure()
-param githubClientSecret string = ''
-@description('The app\'s private key: its PEM, or the PEM in base64.')
-@secure()
-param githubPrivateKey string = ''
-@description('Optional: the app\'s webhook secret. Without it the webhook is not taken.')
-@secure()
-param githubWebhookSecret string = ''
+param gitHubSignInClientSecret string = ''
 
 var models = !empty(modelEndpoint) && !empty(modelKey)
-var gitHubApp = !empty(github.?appId ?? '') && !empty(github.?appSlug ?? '') && !empty(github.?clientId ?? '') && !empty(githubClientSecret) && !empty(githubPrivateKey)
-var gitHubWebhook = gitHubApp && !empty(githubWebhookSecret)
+var gitHubSignIn = !empty(gitHubSignInClientId) && !empty(gitHubSignInClientSecret)
 var email = !empty(communication)
 var administrator = passwordSignIn && !empty(administratorEmail) && !empty(administratorPassword)
 
@@ -67,10 +62,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [], gitHubApp ? [
-        { name: 'github-client-secret', value: githubClientSecret }
-        { name: 'github-private-key', value: githubPrivateKey }
-      ] : [], gitHubWebhook ? [{ name: 'github-webhook-secret', value: githubWebhookSecret }] : [])
+      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [], gitHubSignIn ? [{ name: 'github-sign-in-client-secret', value: gitHubSignInClientSecret }] : [])
       registries: [{ server: registryHost, identity: identityId }]
       ingress: {
         external: true
@@ -109,7 +101,12 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'Workstream__Desktops__Spares__Enabled', value: sparesAtOnce > 0 ? 'true' : 'false' }
           { name: 'Workstream__Desktops__Spares__Max', value: string(sparesAtOnce) }
           { name: 'Workstream__Desktops__Spares__HoursPerDay', value: string(spareHoursADay) }
-        ], email ? [
+        ], desktopsHibernate ? [
+          { name: 'Workstream__Desktops__Azure__Hibernate', value: 'true' }
+          { name: 'Workstream__Desktops__Azure__Sizes__small', value: 'Standard_D2as_v6' }
+          { name: 'Workstream__Desktops__Azure__Sizes__standard', value: 'Standard_D4as_v6' }
+          { name: 'Workstream__Desktops__Azure__Sizes__large', value: 'Standard_D8as_v6' }
+        ] : [], email ? [
           { name: 'SqlOS__EmailOtp__AzureCommunicationServicesConnectionString', secretRef: 'acs' }
           { name: 'SqlOS__EmailOtp__FromAddress', value: communication.sender }
         ] : [], administrator ? [
@@ -117,14 +114,9 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         ] : [], models ? [
           { name: 'Workstream__Model__Endpoint', value: modelEndpoint }
           { name: 'Workstream__Model__Key', secretRef: 'model-key' }
-        ] : [], gitHubApp ? [
-          { name: 'Workstream__GitHub__AppId', value: github.appId }
-          { name: 'Workstream__GitHub__AppSlug', value: github.appSlug }
-          { name: 'Workstream__GitHub__ClientId', value: github.clientId }
-          { name: 'Workstream__GitHub__ClientSecret', secretRef: 'github-client-secret' }
-          { name: 'Workstream__GitHub__PrivateKey', secretRef: 'github-private-key' }
-        ] : [], gitHubWebhook ? [
-          { name: 'Workstream__GitHub__WebhookSecret', secretRef: 'github-webhook-secret' }
+        ] : [], gitHubSignIn ? [
+          { name: 'SqlOS__Oidc__GitHub__ClientId', value: gitHubSignInClientId }
+          { name: 'SqlOS__Oidc__GitHub__ClientSecret', secretRef: 'github-sign-in-client-secret' }
         ] : [])
         probes: [
           { type: 'Startup', httpGet: { path: '/health', port: 8080 }, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 90 }

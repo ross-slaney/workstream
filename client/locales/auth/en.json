@@ -51,12 +51,17 @@
     "password": "Password",
     "code": "Code"
   },
+  "provider": {
+    "or": "or",
+    "continue": "Continue with {provider}"
+  },
   "state": {
     "finishing": "Signing you in",
     "waiting": "One moment"
   },
   "errors": {
-    "failed": "Sign-in did not work. Try again."
+    "failed": "Sign-in did not work. Try again.",
+    "provider": "Signing in with GitHub did not work. Try again, or sign in with your email."
   },
   "invite": {
     "metaTitle": "Join a team · Workstream",

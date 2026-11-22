@@ -49,13 +49,27 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   rm -rf /home/work/.workstream/* /home/work/.cache/sessions /tmp/.X1-lock /tmp/.X11-unix/X1
 
   # What a desktop cannot do without.
-  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof > /dev/null
+  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof nft > /dev/null
   test -d /opt/workstream/agent/node_modules/@anthropic-ai/claude-agent-sdk
   systemctl is-enabled workstream-desktop.service workstream-grow-disk.service > /dev/null
   sudo -u work -H dotnet dev-certs https --check
-  # The Android emulator, with the processor's virtualization open to the desktop's person (it boots on Intel sizes only).
-  test -d /home/work/.android/avd/Phone.avd
-  sudo -u work /opt/android-sdk/emulator/emulator -accel-check
+  # The Android emulator boots as the desktop's person, and adb sees it (check-emulator.sh).
+  bash /opt/workstream/image/check-emulator.sh
+  # host.docker.internal is this machine, from a container and from itself (check-host-name.sh). What a
+  # desktop gets at boot is put in place by hand here, on a builder that has not started again since it was
+  # configured; Docker, started by the check, is stopped again.
+  sysctl -q --system
+  systemctl restart systemd-resolved
+  systemctl start workstream-host-name.service
+  bash /opt/workstream/image/check-host-name.sh
+  systemctl stop docker.service
+  systemctl is-enabled workstream-host-name.service > /dev/null
+  # What a desktop Azure hibernates needs: the room made at boot, the rule that answers Azure's request, and
+  # the early-boot script that lets only the machine that hibernated wake up from its disk (hibernate.sh).
+  command -v filefrag mkswap swapon > /dev/null
+  systemctl is-enabled workstream-hibernate.service > /dev/null
+  test -f /etc/udev/rules.d/90-workstream-hibernate.rules
+  lsinitramfs "/boot/initrd.img-$(uname -r)" | grep -q scripts/init-premount/workstream-resume-here
   test -f /home/work/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 } > "$log" 2>&1
 

@@ -31,21 +31,16 @@ param administratorEmail string = ''
 param administratorPassword string = ''
 @description('The version of the desktops\' image this deployment makes its desktops from, e.g. 0.2.0: the one its release baked, or the newest before it (scripts/desktop-image-version.sh). It is in the gallery before this runs.')
 param desktopImageVersion string
+@description('Whether a desktop hibernates when it is stopped, so that starting it again brings back every program as it was. Such desktops are made on the machine sizes Azure can hibernate, without Trusted Launch, from the gallery\'s machine-hibernate definition, which desktopImageVersion is then a version of (api.bicep, gallery.bicep). Set by the workflow that deploys (release.yml, staging.yml), which bakes into the same definition.')
+param desktopsHibernate bool = false
 @description('The agents\' models: the Foundry resource\'s Anthropic endpoint, e.g. https://<resource>.services.ai.azure.com/anthropic. The resource and its deployments are made by hand (README "Models"), never here; empty runs with agents that say models are not set up.')
 param modelEndpoint string = ''
 @secure()
 param modelKey string = ''
-@description('Workstream\'s GitHub App, which teams connect their GitHub accounts through (infra/README.md, "GitHub"): its id, the name in its address and its OAuth client\'s id, the GitHub variables GH_APP_ID, GH_APP_SLUG and GH_APP_CLIENT_ID. The app is made by hand, once; empty leaves GitHub "not set up".')
-param githubAppId string = ''
-param githubAppSlug string = ''
-param githubClientId string = ''
-@description('The secrets GH_APP_CLIENT_SECRET, GH_APP_PRIVATE_KEY (its PEM in base64, which the deploy action makes) and, optionally, GH_APP_WEBHOOK_SECRET.')
+@description('Sign in with GitHub: the Client ID of the GitHub OAuth client people sign in with, the GitHub variable GH_OAUTH_CLIENT_ID, and its secret, the secret GH_OAUTH_CLIENT_SECRET (infra/README.md, "Sign in with GitHub"). The client is made by hand, once; without both the sign-in page shows no GitHub button and desktops get no GitHub token.')
+param gitHubSignInClientId string = ''
 @secure()
-param githubClientSecret string = ''
-@secure()
-param githubPrivateKey string = ''
-@secure()
-param githubWebhookSecret string = ''
+param gitHubSignInClientSecret string = ''
 
 var production = empty(stage)
 var shared = 'workstream'
@@ -141,13 +136,12 @@ module api 'api.bicep' = {
     administratorPassword: production ? '' : administratorPassword
     desktopsGroup: desktopsGroup.name
     desktopsSubnetId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Network/virtualNetworks/subnets', 'workstream-net', 'desktops')
-    desktopImageId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images/versions', 'workstream', 'machine', desktopImageVersion)
+    desktopImageId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images/versions', 'workstream', desktopsHibernate ? 'machine-hibernate' : 'machine', desktopImageVersion)
+    desktopsHibernate: desktopsHibernate
     modelEndpoint: modelEndpoint
     modelKey: modelKey
-    github: { appId: githubAppId, appSlug: githubAppSlug, clientId: githubClientId }
-    githubClientSecret: githubClientSecret
-    githubPrivateKey: githubPrivateKey
-    githubWebhookSecret: githubWebhookSecret
+    gitHubSignInClientId: gitHubSignInClientId
+    gitHubSignInClientSecret: gitHubSignInClientSecret
   }
 }
 

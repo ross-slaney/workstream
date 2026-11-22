@@ -1,17 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { projectTools } from "./instructions.mjs";
+import { noSetup, projectTools } from "./instructions.mjs";
 
 test("the agent is told to follow the repository's rules and skills, and that iPhone builds need a Mac", () => {
-  const told = projectTools("AuthenticAMD");
+  const told = projectTools();
   assert.match(told, /AGENTS\.md/);
   assert.match(told, /skills/);
   assert.match(told, /need a Mac/);
 });
 
-test("the Android emulator is offered only on an Intel processor", () => {
-  assert.match(projectTools("GenuineIntel"), /emulator -avd Phone/);
-  assert.doesNotMatch(projectTools("AuthenticAMD"), /emulator -avd Phone/);
-  assert.match(projectTools("AuthenticAMD"), /does not run on this machine's processor/);
-  assert.match(projectTools(null), /does not run/);
+test("the agent is told how to start the Android emulator, on every size, and how to know it is up", () => {
+  const told = projectTools();
+  assert.match(told, /`emulator -avd Phone -gpu swiftshader_indirect -no-audio -no-snapshot -no-metrics -no-nested-warnings`/);
+  assert.match(told, /sys\.boot_completed/);
+  assert.doesNotMatch(told, /processor does not|Intel/);
+});
+
+test("the agent is told that host.docker.internal is the desktop, from a container", () => {
+  assert.match(projectTools(), /`host\.docker\.internal` is this desktop/);
+});
+
+test("the agent is told to install the project first when the environment has a repository and no setup script", () => {
+  const repository = { url: "https://github.com/acme/app", branch: "main" };
+  assert.match(noSetup({ repository, setupScript: null }), /No setup script ran on this desktop.*Install what the task needs/s);
+  assert.match(noSetup({ repository, setupScript: "  " }), /No setup script ran/);
+  assert.equal(noSetup({ repository, setupScript: "npm ci" }), "");
+  assert.equal(noSetup({ repository: null, setupScript: null }), "");
 });

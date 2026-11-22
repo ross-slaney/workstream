@@ -19,7 +19,9 @@ namespace Workstream.Tests;
 /// own, without the api and web resources. The API runs here, in the test process, with the same
 /// <c>AddWorkstreamApi</c>/<c>MapWorkstreamApi</c> as Program.cs, so coverage sees it. Three things are played
 /// instead of real: the desktops (<see cref="FakeDesktops"/>), the model (<see cref="FakeModel"/>), the mail
-/// provider (<see cref="TestMail"/>) and GitHub (<see cref="FakeGitHub"/>). No job
+/// provider (<see cref="TestMail"/>) and GitHub, both as a person's token reaches it (<see cref="FakeGitHub"/>, with
+/// the tokens SqlOS would keep in <see cref="FakeGitHubTokens"/>) and as SqlOS meets it when someone signs in
+/// with GitHub (<see cref="FakeGitHubSignIn"/>). No job
 /// server runs: a test calls the job it wants (<see cref="Jobs"/>). Tests isolate themselves by signing up
 /// new people, each with a team of their own.
 /// </summary>
@@ -40,6 +42,8 @@ public static class Stack
     public static readonly FakeModel Model = new();
     public static readonly TestMail Mail = new();
     public static readonly FakeGitHub GitHub = new();
+    public static readonly FakeGitHubTokens GitHubTokens = new();
+    public static readonly FakeGitHubSignIn GitHubSignIn = new();
 
     static DistributedApplication? aspire;
     static WebApplication? api;
@@ -48,6 +52,9 @@ public static class Stack
 
     /// <summary>The background jobs, run when a test asks: starting, stopping and deleting desktops, and the sweep.</summary>
     public static DesktopJobs Jobs => Services.GetRequiredService<DesktopJobs>();
+
+    /// <summary>The job that writes down what every team keeps, for storage's GB-months.</summary>
+    public static StorageJobs Storage => Services.GetRequiredService<StorageJobs>();
 
     /// <summary>The job that emails a task's people when the agent's turn ends, with the played provider.</summary>
     public static TaskEmails Emails => Services.GetRequiredService<TaskEmails>();
@@ -122,15 +129,11 @@ public static class Stack
         // The model: Foundry is played in this process, under the gateway's own client.
         builder.Configuration["Workstream:Model:Endpoint"] = "http://foundry.test/anthropic";
         builder.Configuration["Workstream:Model:Key"] = ModelKey;
-        // Workstream's GitHub App: GitHub is played in this process, under the API's own GitHub client.
-        builder.Configuration["Workstream:GitHub:AppId"] = FakeGitHub.AppId;
-        builder.Configuration["Workstream:GitHub:AppSlug"] = FakeGitHub.AppSlug;
-        builder.Configuration["Workstream:GitHub:ClientId"] = FakeGitHub.ClientId;
-        builder.Configuration["Workstream:GitHub:ClientSecret"] = FakeGitHub.ClientSecret;
-        builder.Configuration["Workstream:GitHub:PrivateKey"] = GitHub.PrivateKeyPem;
-        builder.Configuration["Workstream:GitHub:WebhookSecret"] = FakeGitHub.WebhookSecret;
+        // GitHub as people's tokens reach it: played in this process, under the API's own GitHub client.
         builder.Configuration["Workstream:GitHub:ApiUrl"] = FakeGitHub.Api;
-        builder.Configuration["Workstream:GitHub:WebUrl"] = FakeGitHub.Web;
+        // Sign in with GitHub: GitHub is played in this process, under SqlOS's own client for providers.
+        builder.Configuration[WorkstreamApp.GitHubSignInClientId] = FakeGitHubSignIn.ClientId;
+        builder.Configuration[WorkstreamApp.GitHubSignInClientSecret] = FakeGitHubSignIn.ClientSecret;
         // Every journey invites from this one address; SqlOS's hourly caps are for the public.
         builder.Configuration["SqlOS:Invitations:MaxInvitationsPerIpPerHour"] = "100000";
         builder.AddWorkstreamApi();
@@ -138,7 +141,9 @@ public static class Stack
         builder.Services.AddHttpClient(ModelGateway.ClientName).ConfigurePrimaryHttpMessageHandler(() => Model);
         // Email as if it were set up: SqlOS renders every message from its stored template and hands it here.
         builder.Services.AddSingleton<ISqlOSEmailSender>(Mail);
-        builder.Services.AddHttpClient(GitHubApp.ClientName).ConfigurePrimaryHttpMessageHandler(() => GitHub);
+        builder.Services.AddHttpClient(GitHubClient.ClientName).ConfigurePrimaryHttpMessageHandler(() => GitHub);
+        builder.Services.AddSingleton<IGitHubTokens>(GitHubTokens);
+        builder.Services.AddHttpClient(nameof(SqlOS.AuthServer.Services.SqlOSOidcAuthService)).ConfigurePrimaryHttpMessageHandler(() => GitHubSignIn);
         var app = builder.Build();
         app.MapWorkstreamApi();
         return app;

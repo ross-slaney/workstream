@@ -16,10 +16,13 @@ namespace Workstream.Api;
 /// </summary>
 public sealed record VariableChange(string Name, string? Value);
 
-/// <summary>An environment as a person writes it: the whole state.</summary>
+/// <summary>
+/// An environment as a person writes it: the whole state. <see cref="FromFile"/> says the form was filled from
+/// the repository's workstream.yml, which each task's start then reads again.
+/// </summary>
 public sealed record WriteEnvironment(
     string Name, IReadOnlyList<string>? Apps, string? Size, string? RepositoryUrl, string? RepositoryBranch, string? SetupScript, string? Instructions,
-    IReadOnlyList<VariableChange>? Variables);
+    IReadOnlyList<VariableChange>? Variables, bool? FromFile = null);
 
 public static partial class Operations
 {
@@ -69,7 +72,7 @@ public static partial class Operations
         {
             var now = DateTimeOffset.UtcNow;
             var before = environment.SetupInputs;
-            environment.Change(SettingsOf(body), now);
+            environment.Change(SettingsOf(body), caller.PrincipalId, now);
             KeepVariables(environment, body.Variables, protection, now);
             await db.SaveChangesAsync(ct);
             await KeepSetupAsync(environment, before, protection, db, jobs, options, ct);
@@ -112,7 +115,7 @@ public static partial class Operations
 
     static EnvironmentSettings SettingsOf(WriteEnvironment body) => new(
         body.Name, body.Apps ?? AppCatalog.Defaults, string.IsNullOrWhiteSpace(body.Size) ? DesktopSizes.Default : body.Size,
-        body.RepositoryUrl, body.RepositoryBranch, body.SetupScript, body.Instructions);
+        body.RepositoryUrl, body.RepositoryBranch, body.SetupScript, body.Instructions, body.FromFile ?? false);
 
     /// <summary>The environment's variables after a change: new values protected, kept values carried over.</summary>
     static void KeepVariables(WorkEnvironment environment, IReadOnlyList<VariableChange>? changes, IDataProtectionProvider protection, DateTimeOffset now)

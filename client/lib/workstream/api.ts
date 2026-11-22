@@ -13,42 +13,61 @@ export type Me = { userId: string; name: string; email: string | null; systemAdm
 /** The person's own settings: `taskEmails` is whether they are emailed when a task they started or wrote in is finished or needs them. */
 export type MySettings = { taskEmails: boolean };
 
-export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number };
+/** `pauseAfterMinutes`: a desktop nobody has used for that long is paused. `archiveAfterDays`: a desktop paused for that long is archived. */
+export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number; pauseAfterMinutes: number; archiveAfterDays: number };
 
 export type TeamPerson = { userId: string; name: string; email: string | null; admin: boolean; joinedAt: string };
 
 /** `link` comes only with the answer to making it; `emailed` says whether Workstream sent it to them as well. */
 export type PendingInvitation = { id: string; email: string; admin: boolean; expiresAt: string; link: string | null; emailed: boolean };
 
+/** The hours a team's desktops of one size (`small`, `standard`, `large`) ran this month. */
+export type SizeHours = { size: string; hours: number };
+
+/**
+ * The storage of one kind a team kept this month: `disk` (desktops' disks, at their full size), `archive`
+ * (archived tasks) or `setup` (environments' saved setups), both at what is on them. `gb` is kept now;
+ * `gbMonths` is the month so far, a gigabyte kept for the whole month being one.
+ */
+export type StorageUse = { kind: string; gb: number; gbMonths: number };
+
+/** What a team used this month, in the units a bill would use. A size or a kind it did not use is not listed. */
 export type TeamUsage = {
   since: string;
   modelSpentUsd: number;
   modelAllowanceUsd: number;
-  desktopHours: number;
+  desktopHours: SizeHours[];
+  storage: StorageUse[];
   runningDesktops: number;
   maxRunningDesktops: number;
 };
 
 /**
- * A team's GitHub connection. `available` says whether Workstream's GitHub App is set up at all; `manageUrl`
- * is where on GitHub the installation is changed (which repositories it reaches) or removed.
+ * A repository the person can reach on GitHub, with the token GitHub gave them at sign-in. `url` is what an
+ * environment clones.
  */
-export type GitHub = {
-  available: boolean;
-  connected: boolean;
-  account: string | null;
-  /** `Organization` or `User`, as GitHub says. */
-  accountType: string | null;
-  connectedAt: string | null;
-  connectedByName: string | null;
-  manageUrl: string | null;
-};
+export type GitHubRepository = { fullName: string; url: string; defaultBranch: string; private: boolean; pushedAt: string | null };
 
-/** A repository the team's GitHub connection reaches. `url` is what an environment clones. */
-export type GitHubRepository = { fullName: string; url: string; defaultBranch: string; private: boolean };
+/**
+ * The person's repositories, most recently pushed first. `available`: this Workstream signs people in with
+ * GitHub. `signedIn`: Workstream has their GitHub token. `more`: there are more than were read.
+ */
+export type GitHubRepositories = { available: boolean; signedIn: boolean; repositories: GitHubRepository[]; more: boolean };
 
-/** What GitHub hands back after an installation, which the web app passes on as the person signed in here. */
-export type ConnectGitHub = { state: string; code: string | null; installationId: number | null };
+/** A repository's branches, its default one first. */
+export type GitHubBranches = { defaultBranch: string; branches: string[]; more: boolean };
+
+/** What a repository's workstream.yml says. Variables are names only. */
+export type WorkstreamFileSettings = { size: DesktopSize; apps: string[]; setup: string | null; variables: string[]; instructions: string | null };
+
+/** A repository's workstream.yml on a branch: whether it is there, its settings, or what is wrong with it, a line each. */
+export type RepositoryFile = { found: boolean; settings: WorkstreamFileSettings | null; errors: string[] };
+
+/** workstream.yml saved in the repository: a `commit` to the environment's branch, or a `pull_request` from a new `branch`. */
+export type SavedRepositoryFile = { kind: "commit" | "pull_request"; url: string; branch: string };
+
+/** Whether a task's desktop reaches GitHub as the person who started it. */
+export type TaskGitHub = { signInNeeded: boolean; startedByYou: boolean; startedByName: string | null };
 
 export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean };
 
@@ -87,6 +106,8 @@ export type Environment = {
   variableNames: string[];
   updatedAt: string;
   setup: EnvironmentSetup;
+  /** Its settings are its repository's workstream.yml, which each task's start reads again. */
+  fromFile: boolean;
 };
 
 /** A variable as it is sent: a null value keeps the value the environment already has for that name. */
@@ -101,9 +122,16 @@ export type WriteEnvironment = {
   setupScript: string | null;
   instructions: string | null;
   variables: VariableChange[];
+  /** The settings were filled from the repository's workstream.yml. */
+  fromFile: boolean;
 };
 
-export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "failed" | "deleting";
+/**
+ * Where a task's desktop is. `stopping` and `stopped` are what people read as pausing and paused: the machine
+ * is released and its disk kept. `archived`: the disk is kept as a copy and the machine is deleted; starting
+ * makes a new machine from the copy.
+ */
+export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "archiving" | "archived" | "failed" | "deleting";
 
 /**
  * How far a starting desktop has come: its machine is being made or turned on, the machine is on and starting
@@ -134,7 +162,21 @@ export type Message = { id: number; author: "person" | "agent"; authorName: stri
 /** What the reader may do with a task: write to its agent, use its desktop's mouse and keyboard, and rename, stop, delete and share it. */
 export type TaskAccess = { prompt: boolean; drive: boolean; manage: boolean };
 
-export type Conversation = { messages: Message[]; task: Task; access: TaskAccess };
+/**
+ * The environment's setup script on the task's own desktop: `running` with the last lines it wrote, `done`,
+ * `failed` with its `exit` code, or `timed_out` when it ran for `limitMinutes` and the desktop stopped it.
+ */
+export type TaskSetup = {
+  state: "running" | "done" | "failed" | "timed_out";
+  exit: number | null;
+  output: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  limitMinutes: number;
+};
+
+/** `setup` is null when the task's desktop never ran a setup script: its environment has none, or it started from a saved setup. */
+export type Conversation = { messages: Message[]; task: Task; access: TaskAccess; setup: TaskSetup | null };
 
 /** What a task is shared to do: watch it, watch it and write to its agent, or use its desktop too. */
 export type ShareRole = "watcher" | "prompter" | "driver";
@@ -169,15 +211,18 @@ export type TeamNumbers = {
   desktopHours: number;
 };
 
-/** What machines cost this month for one purpose: `task` (tasks' desktops), `spare` or `prepare` (machines preparing an environment's setup). */
-export type MachineCost = { purpose: string; hours: number; usd: number };
+/** What machines of one size cost this month for one purpose: `task` (tasks' desktops), `spare` or `prepare` (machines preparing an environment's setup). */
+export type MachineCost = { purpose: string; size: string; hours: number; usd: number };
+
+/** What storage of one kind (`disk`, `archive`, `setup`) cost this month over every team: how many are kept now and their gigabytes, the month's GB-months, and their cost. */
+export type StorageCost = { kind: string; kept: number; gb: number; gbMonths: number; usd: number };
 
 export type SpareNow = { teamId: string; teamName: string; size: string; state: string; since: string };
 
-/** The machines' time this month by purpose, the disks and the saved setups kept now at what they cost a month, and the spares running now. */
-export type MachineCosts = { thisMonth: MachineCost[]; disks: number; disksMonthlyUsd: number; saves: number; savesMonthlyUsd: number; spares: SpareNow[] };
+/** The machines' time this month by purpose and size, the storage kept by kind, and the spares running now. */
+export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; spares: SpareNow[] };
 
-/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
+/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`, `archive`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
 
 export type AdminOverview = {
@@ -195,6 +240,8 @@ export type AdminOverview = {
 };
 
 const id = encodeURIComponent;
+/** `owner/name` in an address: each part escaped. */
+const repositoryPath = (fullName: string) => fullName.split("/").map(id).join("/");
 
 export const workstream = {
   me: () => apiJson<Me>("/api/me"),
@@ -206,6 +253,8 @@ export const workstream = {
   team: (teamId: string) => apiJson<Team>(`/api/teams/${id(teamId)}`),
   createTeam: (name: string) => apiSend<Team>("POST", "/api/teams", { name }),
   renameTeam: (teamId: string, name: string) => apiSend<Team>("PUT", `/api/teams/${id(teamId)}`, { name }),
+  setDesktopTimes: (teamId: string, pauseAfterMinutes: number, archiveAfterDays: number) =>
+    apiSend<Team>("PUT", `/api/teams/${id(teamId)}/desktop-times`, { pauseAfterMinutes, archiveAfterDays }),
   usage: (teamId: string) => apiJson<TeamUsage>(`/api/teams/${id(teamId)}/usage`),
 
   people: (teamId: string) => apiJson<TeamPerson[]>(`/api/teams/${id(teamId)}/people`),
@@ -215,12 +264,11 @@ export const workstream = {
   invite: (teamId: string, email: string, admin: boolean) => apiSend<PendingInvitation>("POST", `/api/teams/${id(teamId)}/invitations`, { email, admin }),
   revokeInvitation: (teamId: string, invitationId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/invitations/${id(invitationId)}`),
 
-  github: (teamId: string) => apiJson<GitHub>(`/api/teams/${id(teamId)}/github`),
-  githubRepositories: (teamId: string) => apiJson<GitHubRepository[]>(`/api/teams/${id(teamId)}/github/repositories`),
-  /** Where on GitHub an administrator installs the app, with a state the API signed for them. */
-  startGitHubInstall: (teamId: string) => apiSend<{ url: string }>("POST", `/api/teams/${id(teamId)}/github/install`),
-  connectGitHub: (body: ConnectGitHub) => apiSend<{ teamId: string; gitHub: GitHub }>("POST", "/api/github/connect", body),
-  disconnectGitHub: (teamId: string) => apiSend<void>("DELETE", `/api/teams/${id(teamId)}/github`),
+  /** The signed-in person's GitHub: their repositories, a repository's branches and its workstream.yml. */
+  myRepositories: () => apiJson<GitHubRepositories>("/api/github/repositories"),
+  branches: (fullName: string) => apiJson<GitHubBranches>(`/api/github/repositories/${repositoryPath(fullName)}/branches`),
+  repositoryFile: (fullName: string, branch: string | null) =>
+    apiJson<RepositoryFile>(`/api/github/repositories/${repositoryPath(fullName)}/workstream-file${branch ? `?branch=${id(branch)}` : ""}`),
 
   environments: (teamId: string) => apiJson<ListPage<Environment>>(`/api/teams/${id(teamId)}/environments`),
   addEnvironment: (teamId: string, environmentId: string, body: WriteEnvironment) =>
@@ -229,6 +277,9 @@ export const workstream = {
   deleteEnvironment: (environmentId: string) => apiSend<void>("DELETE", `/api/environments/${id(environmentId)}`),
   /** "Prepare again": the environment's setup is done again on a machine of its own, and saved for its tasks. */
   prepareEnvironment: (environmentId: string) => apiSend<Environment>("POST", `/api/environments/${id(environmentId)}/setup`),
+  /** Read the repository through GitHub and ask the model for its setup. It takes a while: ten to thirty seconds. */
+  /** Save the environment as workstream.yml in its repository, as the person: a commit, or a pull request where the branch is protected. */
+  saveRepositoryFile: (environmentId: string) => apiSend<SavedRepositoryFile>("POST", `/api/environments/${id(environmentId)}/workstream-file`),
 
   tasks: (teamId: string) => apiJson<ListPage<Task>>(`/api/teams/${id(teamId)}/tasks`),
   /**
@@ -244,6 +295,7 @@ export const workstream = {
   startDesktop: (taskId: string) => apiSend<Task>("POST", `/api/tasks/${id(taskId)}/start`),
   interrupt: (taskId: string) => apiSend<void>("POST", `/api/tasks/${id(taskId)}/interrupt`),
   conversation: (taskId: string, after: number) => apiJson<Conversation>(`/api/tasks/${id(taskId)}/messages?after=${after}`),
+  taskGitHub: (taskId: string) => apiJson<TaskGitHub>(`/api/tasks/${id(taskId)}/github`),
   say: (taskId: string, text: string, key: string) => apiSend<Message>("POST", `/api/tasks/${id(taskId)}/messages`, { text, key }),
 
   /** Tasks of other teams shared with the person. */

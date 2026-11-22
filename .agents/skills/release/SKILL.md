@@ -58,6 +58,8 @@ gh run watch "$(gh run list --workflow Release --limit 1 --json databaseId -q '.
 
 The run has three jobs: it resolves the tag, bakes the desktops' image if `desktop/` changed (about half an hour; the builder machine is deleted when it ends, whether it worked or not), then deploys the web app and the API with that image's version and checks both origins serve the tag's commit. Read the log of anything red. Report the two origins from the run's summary.
 
+The image goes into the gallery definition `release.yml` names in `DEFINITION`: `machine`, or `machine-hibernate` once desktops hibernate when they are paused (infra/README.md, "Hibernation"). Changing that line is a decision of the owner's, not part of a release; the first release after it bakes whether or not `desktop/` changed, because the other definition has no version yet.
+
 A fresh installation needs `scripts/setup-azure.sh` run once and the `production` environment's `ADMINISTRATOR_EMAIL`, `MODEL_ENDPOINT` and `MODEL_KEY` (infra/README.md).
 
 ## If the run fails

@@ -12,8 +12,9 @@ namespace Workstream.Api.Desktops;
 
 /// <summary>
 /// Everything that happens to a desktop outside a request: making and starting its machine and following it
-/// until its screen can be watched, stopping it, deleting it, keeping a team's spare, and the sweep that stops
-/// idle desktops, removes spares nobody took and deletes strays. Each job is an operation run by a
+/// until its screen can be watched, pausing it, archiving it, deleting it, keeping a team's spare, and the
+/// sweep that pauses unused desktops, archives ones paused a long time, removes spares nobody took and deletes
+/// strays. Each job is an operation run by a
 /// principal of its own, <c>agent::desktop-operator</c>, which holds <c>desktop_operator</c> on root: it checks
 /// <c>TASK_OPERATE_DESKTOP</c> on every task it touches and pages the tasks it sweeps with the same permission.
 /// A job changes a task only from the state the person's request left it in, so a job that runs twice, or late,
@@ -53,14 +54,18 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), task.Id, task.TeamId, ct);
                 await DesktopKeys.GrantAsync(db, task.Id, task, ct);
                 await db.SaveChangesAsync(ct);
+                // An archived desktop comes back from its own archive and nothing else: the new machine's disk
+                // is a copy of the one that was archived. Any other new machine starts from the environment's
+                // saved setup, or the image.
                 spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key,
-                    Save: await SaveForAsync(scope, db, task, ct));
+                    Save: task.Archive is null ? await SaveForAsync(scope, db, task, ct) : null, Archive: task.Archive);
             }
         }
         var machine = spec?.Name ?? existing!;
 
         // A desktop that failed costs nothing: whatever part of a new machine was made is removed, and a
-        // machine that would not start again is released. Starting the task again begins from there.
+        // machine that would not start again is released. Starting the task again begins from there: a task
+        // whose new machine was removed has none, so the next start makes one, from its archive when it has one.
         async Task FailAsync(Exception error)
         {
             log.LogError(error, "The desktop of task {TaskId} did not start.", taskId);
@@ -68,6 +73,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             {
                 if (task.State != DesktopState.Starting) return;
                 task.Fail(WordsFor(error), now);
+                if (spec is not null) task.MachineRemoved();
                 await EndRunAsync(db, task.Id, now, ct);
             }, ct);
             try
@@ -112,19 +118,40 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 task.MachineOn(now);
                 run?.MachineOn(now);
             }, ct),
-            display: () => StepAsync(taskId, (task, run, now) =>
+            display: async () =>
             {
-                task.DisplayUp(now);
-                run?.DisplayUp(now);
-            }, ct),
+                await StepAsync(taskId, (task, run, now) =>
+                {
+                    task.DisplayUp(now);
+                    run?.DisplayUp(now);
+                }, ct);
+                await ForgetArchiveAsync(taskId, ct);
+            },
             failed: why => FailAsync(new InvalidOperationException(why)),
             wanted: () => IsStartingAsync(taskId, ct),
             // The agent was there before the display was seen to answer. It is answering: its time is kept.
             unwanted: async () =>
             {
-                if (await host.DisplayAnswersAsync(place, ct)) await StepAsync(taskId, (_, run, now) => run?.DisplayUp(now), ct);
+                if (!await host.DisplayAnswersAsync(place, ct)) return;
+                await StepAsync(taskId, (_, run, now) => run?.DisplayUp(now), ct);
+                await ForgetArchiveAsync(taskId, ct);
             },
             what: $"task {taskId}", ct);
+    }
+
+    /// <summary>
+    /// The desktop is up on a machine of its own again, so the archive it came back from is no longer needed
+    /// and is removed. Until then the archive is the only whole copy of the task's disk, and stays.
+    /// </summary>
+    async Task ForgetArchiveAsync(string taskId, CancellationToken ct)
+    {
+        string? archive = null;
+        await ChangeAsync(taskId, (_, task, _) =>
+        {
+            archive = task.Restored();
+            return Task.CompletedTask;
+        }, ct);
+        if (archive is not null) await host.DeleteArchiveAsync(archive, ct);
     }
 
     /// <summary>
@@ -553,7 +580,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }
     }
 
-    /// <summary>Release the machine of a task a person, or the sweep, asked to stop.</summary>
+    /// <summary>
+    /// Pause the desktop of a task a person, or the sweep, asked to pause: the machine is released
+    /// (<see cref="IDesktopHost.StopAsync"/>) and its disk is kept.
+    /// </summary>
     [AutomaticRetry(Attempts = 2)]
     public async Task StopAsync(string taskId, CancellationToken ct)
     {
@@ -574,7 +604,73 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }, ct);
     }
 
-    /// <summary>Remove a deleted task for good: its machine, its key, its conversation, who watched it, then the row and its node.</summary>
+    /// <summary>
+    /// Archive a desktop that has been paused for as long as its team allows (docs/core-model.md, "Pause,
+    /// archive, delete"): copy its disk to an archive, write the archive down on the task, and only then delete
+    /// the machine and its disk. A copy that cannot be made leaves the desktop paused as it was, to be tried at
+    /// the next sweep. A task left <see cref="DesktopState.Archiving"/> by an attempt that was cut short is
+    /// taken up again here; the copy that attempt made, if any, is nobody's and the sweep removes it.
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    public async Task ArchiveAsync(string taskId, CancellationToken ct)
+    {
+        string machine;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct);
+            if (task is not { State: DesktopState.Stopped or DesktopState.Archiving, Host: not null }) return;
+            if (!await scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>().Allows(Operator, Permissions.TaskOperateDesktop, task.ResourceId))
+            {
+                log.LogError("The desktop operator may not act on task {TaskId}.", taskId);
+                return;
+            }
+            machine = task.Host;
+            if (task.State == DesktopState.Stopped)
+            {
+                task.Archiving();
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        var archive = DesktopHosting.NewArchiveNameFor(taskId);
+        long? bytes;
+        try
+        {
+            bytes = await host.ArchiveAsync(machine, archive, ct);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            log.LogWarning(error, "The disk of task {TaskId} could not be archived.", taskId);
+            await ChangeAsync(taskId, (_, task, _) =>
+            {
+                task.NotArchived();
+                return Task.CompletedTask;
+            }, ct);
+            // The machine and its disk are untouched, so whatever was made of the copy can go.
+            await host.DeleteArchiveAsync(archive, ct);
+            return;
+        }
+
+        var kept = false;
+        await ChangeAsync(taskId, async (db, task, now) =>
+        {
+            if (task.State != DesktopState.Archiving) return;
+            task.Archived(archive, bytes, now);
+            // No machine holds the desktop's key any more, so it is ended. The machine the desktop comes back on is given a new one.
+            await DesktopKeys.RetireForTaskAsync(db, task, ct);
+            kept = true;
+        }, ct);
+        // The task was deleted while its disk was being copied: the copy is nobody's, and the delete job removes the machine.
+        if (!kept)
+        {
+            await host.DeleteArchiveAsync(archive, ct);
+            return;
+        }
+        await host.DeleteAsync(machine, ct);
+    }
+
+    /// <summary>Remove a deleted task for good: its machine, its archive, its key, its conversation, who watched it, then the row and its node.</summary>
     [AutomaticRetry(Attempts = 2)]
     public async Task DeleteAsync(string taskId, CancellationToken ct)
     {
@@ -586,6 +682,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             if (task is not { State: DesktopState.Deleting }) return;
             // The name is the same every time, so a machine still being made by a start job is found too.
             await host.DeleteAsync(task.Host ?? DesktopHosting.NameFor(taskId), ct);
+            if (task.Archive is not null) await host.DeleteArchiveAsync(task.Archive, ct);
         }
         // The conversation goes in pieces, tracked, so SqlOS's page entries go with the rows.
         while (true)
@@ -615,41 +712,64 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
     }
 
     /// <summary>
-    /// Every five minutes: stop the desktops nobody is using, fail the ones that never came up, finish what a
-    /// lost job left half done, and delete machines no task owns.
+    /// Every five minutes: pause the desktops nobody is using, archive the ones paused for as long as their
+    /// team allows, fail the ones that never came up, finish what a lost job left half done, and delete
+    /// machines and archives no task owns. Nothing here deletes a task: only a person does.
     /// </summary>
     [DisableConcurrentExecution(timeoutInSeconds: 240)]
     [AutomaticRetry(Attempts = 0)]
     public async Task SweepAsync(CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        var idle = TimeSpan.FromMinutes(options.IdleMinutes);
         var startTimeout = TimeSpan.FromMinutes(options.StartTimeoutMinutes);
         var stuck = TimeSpan.FromMinutes(20);
         var owned = new HashSet<string>(StringComparer.Ordinal);
+        var archives = new HashSet<string>(StringComparer.Ordinal);
         string? cursor = null;
         do
         {
             List<WorkTask> tasks;
+            Dictionary<string, (TimeSpan Pause, TimeSpan Archive)> times;
             await using (var scope = scopes.CreateAsyncScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
                 var page = await db.Tasks.AsNoTracking().OrderBy(x => x.Id).ToPageAsync(Operator, Permissions.TaskOperateDesktop, PageSize, cursor, ct);
                 tasks = [.. page.Data];
                 cursor = page.NextCursor;
+                // When each of these tasks' teams pauses and archives: the team's own settings.
+                var teamIds = tasks.Select(x => x.TeamId).Distinct().ToList();
+                times = (await db.Teams.AsNoTracking().Where(x => teamIds.Contains(x.Id)).Select(x => new { x.Id, x.PauseAfterMinutes, x.ArchiveAfterDays }).ToListAsync(ct))
+                    .ToDictionary(x => x.Id, x => (TimeSpan.FromMinutes(x.PauseAfterMinutes), TimeSpan.FromDays(x.ArchiveAfterDays)));
             }
             foreach (var task in tasks)
             {
-                owned.Add(task.Host ?? DesktopHosting.NameFor(task.Id));
-                if (task.State == DesktopState.Ready && !task.AgentWorking && now - task.ActiveAt > idle)
+                // An archived desktop has no machine: one still there under its name was left by a delete that
+                // failed, and goes as a stray.
+                if (task.State != DesktopState.Archived) owned.Add(task.Host ?? DesktopHosting.NameFor(task.Id));
+                if (task.Archive is not null) archives.Add(task.Archive);
+                var (pauseAfter, archiveAfter) = times.GetValueOrDefault(task.TeamId,
+                    (TimeSpan.FromMinutes(Team.DefaultPauseAfterMinutes), TimeSpan.FromDays(Team.DefaultArchiveAfterDays)));
+                if (task.IsIdle(now, pauseAfter))
                 {
-                    log.LogInformation("Stopping the idle desktop of task {TaskId}.", task.Id);
+                    log.LogInformation("Pausing the desktop of task {TaskId}: nobody has used it for {Minutes} minutes.", task.Id, pauseAfter.TotalMinutes);
                     await ChangeAsync(task.Id, (_, current, at) =>
                     {
-                        if (current.State == DesktopState.Ready) current.Stop(at);
+                        // Read again: someone may have used it since the page was read.
+                        if (current.IsIdle(now, pauseAfter)) current.Stop(at);
                         return Task.CompletedTask;
                     }, ct);
                     await StopAsync(task.Id, ct);
+                }
+                else if (task.IsDueForArchive(now, archiveAfter) || task.State == DesktopState.Archiving)
+                {
+                    log.LogInformation("Archiving the desktop of task {TaskId}: it has been paused for {Days} days.", task.Id, archiveAfter.TotalDays);
+                    await ArchiveAsync(task.Id, ct);
+                    if (await ArchiveOfAsync(task.Id, ct) is { } made) archives.Add(made);
+                }
+                else if (task.State == DesktopState.Ready && task.Archive is not null)
+                {
+                    // Back from its archive, on a start whose job did not see the screen come up.
+                    await ForgetArchiveAsync(task.Id, ct);
                 }
                 else if (task.State == DesktopState.Starting && now - task.StateChangedAt > startTimeout)
                 {
@@ -704,9 +824,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
             var before = now - stuck;
             deleting = await db.Tasks.AsNoTracking().Where(x => x.State == DesktopState.Deleting && x.StateChangedAt < before).Select(x => x.Id).Take(PageSize).ToListAsync(ct);
-            foreach (var pending in await db.Tasks.AsNoTracking().Where(x => x.State == DesktopState.Deleting).Select(x => new { x.Id, x.Host }).ToListAsync(ct))
+            foreach (var pending in await db.Tasks.AsNoTracking().Where(x => x.State == DesktopState.Deleting).Select(x => new { x.Id, x.Host, x.Archive }).ToListAsync(ct))
             {
                 owned.Add(pending.Host ?? DesktopHosting.NameFor(pending.Id));
+                if (pending.Archive is not null) archives.Add(pending.Archive);
             }
         }
         foreach (var id in deleting) await DeleteAsync(id, ct);
@@ -723,6 +844,21 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             log.LogWarning("Deleting the machine {Machine}: no task owns it.", stray.Name);
             await host.DeleteAsync(stray.Name, ct);
         }
+
+        // The same for archives: one no task names is a stray once it has been there a while. A newer one may
+        // have been made for a task since this sweep read the tasks, or be one that is being made now.
+        foreach (var stray in (await host.ListArchivesAsync(ct)).Where(archive =>
+                     archive.Name.StartsWith(DesktopHosting.ArchivePrefix, StringComparison.Ordinal) && !archives.Contains(archive.Name) && now - archive.CreatedAt > StrayAfter))
+        {
+            log.LogWarning("Deleting the archive {Archive}: no task owns it.", stray.Name);
+            await host.DeleteArchiveAsync(stray.Name, ct);
+        }
+    }
+
+    async Task<string?> ArchiveOfAsync(string taskId, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Tasks.AsNoTracking().Where(x => x.Id == taskId).Select(x => x.Archive).SingleOrDefaultAsync(ct);
     }
 
     async Task SweepSetupsAsync(HashSet<string> owned, DateTimeOffset now, CancellationToken ct)
@@ -736,10 +872,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         {
             var machine = setup.RunHost ?? DesktopHosting.NameFor(setup.RunId!);
             owned.Add(machine);
-            if (now - setup.RunStartedAt > TimeSpan.FromMinutes(options.Saves.MaxMinutes))
+            if (now - setup.RunStartedAt > TimeSpan.FromMinutes(options.PrepareMinutes))
             {
                 log.LogWarning("Environment {EnvironmentId} took too long to prepare.", setup.EnvironmentId);
-                await EndPreparingAsync(setup.EnvironmentId, setup.RunId!, $"The setup did not finish in {options.Saves.MaxMinutes} minutes.", machine, ct);
+                await EndPreparingAsync(setup.EnvironmentId, setup.RunId!, $"Preparing did not finish in {options.PrepareMinutes} minutes.", machine, ct);
             }
         }
         foreach (var setup in setups.Where(x => x.Save is not null && now - (x.UsedAt ?? x.SavedAt ?? now) > TimeSpan.FromDays(options.Saves.UnusedDays)))
@@ -851,7 +987,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
     static string WordsFor(Exception error) => error.Message switch
     {
         var message when message.Contains("quota", StringComparison.OrdinalIgnoreCase) || message.Contains("capacity", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("allocation", StringComparison.OrdinalIgnoreCase) => "There is no capacity for another desktop right now. Stop one, or try again later.",
+            || message.Contains("allocation", StringComparison.OrdinalIgnoreCase) => "There is no capacity for another desktop right now. Pause one, or try again later.",
         var message when message.Contains("no desktop host", StringComparison.OrdinalIgnoreCase) => error.Message,
         _ => "The desktop could not be started. Start it again; if it keeps failing, tell us.",
     };

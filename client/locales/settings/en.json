@@ -21,6 +21,23 @@
       "editTitle": "Edit environment",
       "name": "Name",
       "namePlaceholder": "Web app",
+      "repositorySection": "Repository",
+      "repositorySectionHint": "Pick one of your GitHub repositories. If it has a workstream.yml, Workstream fills the settings from it.",
+      "findRepository": "Find a repository",
+      "findRepositoryPlaceholder": "Find one of your repositories by name",
+      "readingRepositories": "Reading your repositories on GitHub",
+      "noRepositoryMatches": "None of your repositories matches.",
+      "noRepositories": "Your GitHub account has no repositories yet.",
+      "moreRepositories": "Only your {count} most recently pushed repositories are listed. For another, type its address.",
+      "privateRepository": "Private",
+      "pushed": "Pushed {date}",
+      "changeRepository": "Change",
+      "noRepository": "No repository",
+      "typeAddress": "Type an address instead",
+      "pickFromGitHub": "Pick from your repositories",
+      "signInForRepositories": "Sign in with GitHub to pick from your repositories. Desktops then push and open pull requests as you.",
+      "signInWithGitHub": "Sign out and sign in with GitHub",
+      "repositoriesFailed": "Your repositories could not be read from GitHub. {message}",
       "apps": "Apps on the desktop",
       "appsHint": "Each one gets a button on the desktop's panel.",
       "size": "Desktop size",
@@ -30,18 +47,36 @@
         "large": "Large · 8 cores, 32 GB memory, 128 GB disk"
       },
       "advanced": "Advanced",
-      "advancedHint": "For a project that needs its code, tools and keys in place before the agent starts.",
+      "advancedHint": "The setup script, variables and instructions for the agent.",
       "repository": "Repository",
-      "repositoryPick": "Repository on GitHub",
-      "repositoryPickNone": "Another address",
-      "repositoryPickPrivate": "{name} (private)",
       "repositoryPlaceholder": "https://github.com/acme/app",
-      "repositoryHint": "Cloned when the desktop is made. For a private GitHub repository, an administrator connects GitHub on the Team page.",
-      "repositoryHintConnected": "Desktops clone it, push branches and open pull requests through the team's GitHub connection.",
+      "repositoryHint": "Cloned when the desktop is made, from any https address. Desktops reach GitHub as the person who started the task.",
       "branch": "Branch",
       "branchPlaceholder": "main",
+      "moreBranches": "This repository has more branches than Workstream lists. Type the branch's name.",
+      "reading": "Looking for workstream.yml in {repository}",
+      "fromFile": "Filled from workstream.yml on {branch}. Each task reads the file again when it starts, so change the file to change these settings.",
+      "followsFile": "Its settings are workstream.yml in the repository. Each task reads the file again when it starts, so change the file to change these settings.",
+      "fileChanged": "You changed settings that came from workstream.yml, so this environment no longer follows the file.",
+      "badFile": "workstream.yml in this repository has mistakes, so nothing was filled from it:",
+      "readAgain": "Read workstream.yml again",
+      "readFailed": "workstream.yml could not be read. {message}",
+      "noFileTitle": "How to write workstream.yml",
+      "noFile": "{repository} has no workstream.yml on {branch}. To keep this environment's settings in the repository, add a file named workstream.yml at its root, like this:",
+      "noFileOr": "Or fill in the settings below. After you save, you can save them to the repository as workstream.yml.",
+      "fileReference": "Every setting the file can have",
+      "savedTitle": "{name} is saved",
+      "fileTitle": "workstream.yml",
+      "fileOffer": "Save these settings as workstream.yml in {repository}, so they live with the code and each task reads them from there.",
+      "fileOfferKept": "Variable names go in the file; their values stay in Workstream.",
+      "saveFile": "Save as workstream.yml in the repository",
+      "fileCommitted": "Committed workstream.yml to {branch}.",
+      "seeCommit": "See the commit on GitHub",
+      "filePullRequest": "The branch takes changes only through pull requests, so Workstream opened one from {branch}. Once it is merged, tasks read the file.",
+      "seePullRequest": "See the pull request",
+      "done": "Done",
       "setupScript": "Setup script",
-      "setupScriptHint": "Runs once on a new desktop, in a terminal you can watch, in the repository's folder when there is one.",
+      "setupScriptHint": "Runs once on a new desktop, in a terminal you can watch, in the repository's folder when there is one. Use it to install and build. Leave starting the project to the agent: a program the script leaves running stops when the script ends.",
       "setupScriptPlaceholder": "npm ci\ndocker pull postgres:17",
       "variables": "Variables",
       "variablesHint": "Set in every shell on the desktop and given to the agent. Values are stored protected and never shown again.",
@@ -61,7 +96,7 @@
     "setup": {
       "title": "Setup",
       "hint": "The repository is cloned and the setup script run once, on a desktop of its own, and that desktop is saved. Tasks then start from it with everything in place, and pull the newest commits.",
-      "nothing": "Nothing to prepare. Add a repository or a setup script under Advanced.",
+      "nothing": "Nothing to prepare. Add a repository, or a setup script under Advanced.",
       "notPrepared": "Not prepared. Each task clones the repository and runs the setup script itself.",
       "waiting": "Preparing: waiting for a desktop to prepare it on.",
       "preparing": "Preparing since {since}.",
@@ -108,29 +143,20 @@
       "emailedBody": "We emailed {email} an invitation. You can also send them this link yourself. It works once, and only for that address."
     },
     "adminOnly": "Only an administrator can invite people or change who is on the team.",
+    "desktops": {
+      "title": "Desktops",
+      "body": "A desktop that nobody is using is paused: its machine is released and its files are kept, and it resumes in about half a minute when someone clicks it or writes to its agent. Use is a person's mouse or keyboard, a message, or the agent working. Having a task open is not. A desktop that stays paused is archived: its disk is saved and its machine deleted, and it comes back in about a minute. Only deleting a task deletes its files.",
+      "pauseAfter": "Pause after, in minutes without use",
+      "pauseAfterHint": "Between {min} and {max} minutes.",
+      "archiveAfter": "Archive after, in days paused",
+      "archiveAfterHint": "Between {min} and {max} days.",
+      "save": "Save",
+      "now": "Paused after {minutes, plural, one {# minute} other {# minutes}} without use, and archived after {days, plural, one {# day} other {# days}} paused. An administrator can change this."
+    },
     "email": {
       "title": "Email",
       "taskEmails": "Email me when a task I started or wrote in is finished or needs me",
       "taskEmailsHint": "Not while you have its desktop on screen, and at most once every ten minutes for each task. This is your own setting and applies on every team you are on."
-    },
-    "github": {
-      "title": "GitHub",
-      "notSetUp": "GitHub is not set up for Workstream yet.",
-      "body": "Connect GitHub and the team's desktops can clone its repositories, push branches and open pull requests. Each desktop gets a token for its own repository that lasts an hour.",
-      "connect": "Connect GitHub",
-      "adminOnly": "An administrator can connect GitHub.",
-      "connectedTo": "Connected to {account}",
-      "organization": "Organization",
-      "personal": "Personal account",
-      "connectedBy": "Connected by {name} on {date}",
-      "connectedOn": "Connected on {date}",
-      "manage": "Choose repositories on GitHub",
-      "disconnect": "Disconnect",
-      "repositories": "Repositories it reaches",
-      "private": "Private",
-      "noRepositories": "It reaches no repositories yet. Choose some on GitHub.",
-      "disconnectTitle": "Disconnect GitHub?",
-      "disconnectBody": "The team's desktops stop getting GitHub tokens. Workstream stays installed on {account} on GitHub until someone removes it there."
     }
   },
   "usage": {
@@ -144,18 +170,43 @@
       "left": "{left} left"
     },
     "desktops": {
-      "title": "Desktops",
-      "hours": "{hours, plural, one {# hour} other {# hours}} of desktop time",
+      "title": "Desktop time",
       "running": "{running} of {limit} running now",
-      "body": "A desktop counts from when it starts until it stops. Idle desktops stop by themselves."
+      "size": "Size",
+      "month": "This month",
+      "sizes": {
+        "small": "Small",
+        "standard": "Standard",
+        "large": "Large"
+      },
+      "machines": {
+        "small": "2 cores, 8 GB memory",
+        "standard": "4 cores, 16 GB memory",
+        "large": "8 cores, 32 GB memory"
+      },
+      "hours": "{hours, plural, one {# hour} other {# hours}}",
+      "empty": "No desktop has run this month.",
+      "body": "A desktop counts from when it starts until it is paused, and each size is counted on its own. A desktop nobody is using is paused by itself."
+    },
+    "storage": {
+      "title": "Storage",
+      "kind": "What is kept",
+      "now": "Kept now",
+      "month": "This month",
+      "kinds": {
+        "disk": "Desktop disks",
+        "archive": "Archived tasks",
+        "setup": "Saved setups"
+      },
+      "about": {
+        "disk": "The disk of each task's desktop, whether the desktop is running or not. Counted at the disk's full size.",
+        "archive": "What is kept of each archived task. Counted at what is on it.",
+        "setup": "Each environment's saved setup, which its tasks start from. Counted at what is on it."
+      },
+      "gb": "{amount} GB",
+      "gbMonths": "{amount, plural, one {# GB‑month} other {# GB‑months}}",
+      "empty": "Nothing has been kept this month.",
+      "body": "A GB‑month is one gigabyte kept for a whole month, so 64 GB kept for half a month is 32 GB‑months. What is kept is counted every 15 minutes."
     }
-  },
-  "github": {
-    "metaTitle": "GitHub · Workstream",
-    "connecting": "Connecting GitHub",
-    "requestedTitle": "Waiting for GitHub",
-    "requestedBody": "GitHub sent your request to install Workstream to the account's owners. Once one of them approves it, connect GitHub again from the team's page.",
-    "failedTitle": "GitHub was not connected",
-    "backToTeam": "Back to the team"
   }
 }

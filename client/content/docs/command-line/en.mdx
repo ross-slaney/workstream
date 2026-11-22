@@ -1,0 +1,59 @@
+---
+title: "The command line"
+description: "Start and follow Workstream tasks from a terminal: workstream login, start, status, tasks and envs."
+order: 8
+updated: 2026-11-21
+---
+
+The command line starts tasks and reads them from a terminal, as you. A script, or a coding agent on your own computer, can use it to hand a piece of work to Workstream.
+
+It is one program, `workstream.mjs`, that needs Node.js 22 or newer and nothing else. The examples below call it `workstream`.
+
+## Sign in
+
+```bash
+workstream login --api https://<the Workstream API's address>
+```
+
+`login` prints a link and a code and opens your browser. You sign in there, check the code, and allow the command line. The address is remembered, so later a plain `workstream login` is enough. Use `--no-browser` on a computer with no browser, and open the link on another one.
+
+`workstream logout` signs this computer out. Its access stops working at once.
+
+## What it can and cannot do
+
+The command line can read what you can read and start tasks, as you. It cannot stop, delete or rename a task, write to an agent, change a team, or open a desktop. A task it starts is your task, the same as one started in the web app.
+
+What it keeps to stay signed in is in `~/.config/workstream/`, readable by your user alone.
+
+## Start a task
+
+```bash
+workstream start --team "My team" --env "Standard desktop" \
+  "Fix the failing test, then open a pull request"
+```
+
+`start` prints the task's link in the web app and waits until its desktop is ready.
+
+| Option | What it does |
+| --- | --- |
+| `--team <name or id>` | The team. Can be left out when you are on one team. |
+| `--env <name or id>` | The environment. Can be left out when the team has one. |
+| `--title <title>` | The task's title. |
+| `--no-wait` | Print the link and return at once. |
+| `--timeout <seconds>` | How long to wait for the desktop. |
+| `--json` | Print the result as JSON, for a script. |
+| `-` in place of the prompt | Read the prompt from standard input. |
+
+## Follow tasks
+
+```bash
+workstream status <task id or link>
+workstream tasks [--team <name or id>]
+workstream envs [--team <name or id>]
+```
+
+- `status` shows where one task is.
+- `tasks` lists the latest tasks of your teams, or of one team.
+- `envs` lists your teams' environments, with the repository each starts with.
+
+Each takes `--json`. `workstream help` prints all of this.

@@ -24,13 +24,15 @@
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.13" />
-    <PackageReference Include="SqlOS" Version="11.4.1" />
+    <PackageReference Include="SqlOS" Version="11.5.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.13" />
     <PackageReference Include="EFCore.SchemaSync" Version="0.4.0" />
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.14" />
     <PackageReference Include="Hangfire.Core" Version="1.8.14" />
     <PackageReference Include="Hangfire.SqlServer" Version="1.8.14" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
+    <!-- workstream.yml, read strictly (Domain/WorkstreamFile.cs). -->
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
 </Project>

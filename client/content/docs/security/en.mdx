@@ -1,0 +1,59 @@
+---
+title: "Security"
+description: "A desktop has no public address, only people who may see its task see its screen, and it reaches GitHub as the person who started the task."
+order: 9
+updated: 2026-11-21
+---
+
+A desktop runs whatever its agent is asked to, with every permission on that machine. So Workstream treats every desktop as untrusted and limits what one can reach.
+
+<Flow>
+  <Stage name="Your browser">Signed in to Workstream.</Stage>
+  <Stage name="The Workstream API">Checks that you may see the task, then passes the screen through.</Stage>
+  <Stage name="The task's desktop">On a private network, with no public address.</Stage>
+</Flow>
+
+## The network
+
+- A desktop has no public address. Nothing on the internet can connect to it.
+- Its network accepts one caller, the Workstream API, and only on the port of the desktop's display. It refuses everything else, other desktops included.
+- A desktop reaches the internet outbound through one gateway, to clone repositories, install packages and open web pages.
+
+## Who sees the screen
+
+Your browser never connects to a desktop. It opens a connection to the Workstream API, carrying your sign-in. The API checks that you may see that task, connects to the desktop on the private network, and passes the screen through.
+
+- Only signed-in people who may see the task get its screen: the task's team, and people the task is [shared](/docs/sharing) with.
+- For someone a task is shared with only to watch or to write to the agent, the API drops their mouse, keyboard and clipboard before anything reaches the desktop.
+- The API checks again every minute and closes the screen when access has ended.
+
+## What a desktop holds
+
+A desktop holds one credential of its own, its key.
+
+- The key reaches that desktop's own task and nothing else: not another task, not another team, not a person's Workstream account.
+- The key is given to the machine when it is made and is never written to its disk. A copy of a desktop's disk carries nobody's key.
+- The key stops working when the task is deleted.
+- A desktop never holds a model key. Its model calls go through Workstream, which adds the key on its side. A leaked desktop key is worth at most what is left of one team's monthly allowance.
+- With its key, a desktop can ask for one more thing: the GitHub token of the person who started its task, so `git` and `gh` push and open pull requests as them. It reaches what that person's GitHub account reaches. It is asked for each time it is needed and never written to the desktop's disk, but it is in the desktop's memory while it is used, so anyone who can use the desktop, or tell its agent what to do, could read it during the task. A desktop whose environment's variables hold a `GITHUB_TOKEN` uses that instead. See [GitHub](/docs/github).
+
+## Secrets you put on a desktop
+
+An [environment's variables](/docs/environments#variables) are stored protected and are sent only to desktops made from that environment. On the desktop they are in plain text, because the work needs them there. Anyone who can use the desktop can read them: everyone on the team, and anyone the task is shared with to use its desktop.
+
+The same is true of anything you type or sign in to on a desktop. It stays on that desktop's disk until the task is deleted.
+
+## Signing in
+
+People sign in with a code sent to their email address, or with their GitHub account, which gives Workstream GitHub's `repo` scope (see [GitHub](/docs/github#what-workstream-can-do-with-your-github-account)). The [command line](/docs/command-line) signs in through the browser and gets access that can read and start tasks and nothing else, so what a laptop keeps cannot stop or delete a task or open a desktop.
+
+## Where things are kept
+
+| Kept in | What |
+| --- | --- |
+| Workstream's database | People, teams, invitations and sessions; the GitHub token of each person who signed in with GitHub, encrypted; environments, tasks and conversations; usage. |
+| A desktop's disk | The work itself: the repository, files, the browser's profile and the agent's session. It goes when the task is deleted. |
+| A saved setup | An environment's repository and whatever its setup script installed, and nothing of any task. It goes when the environment is deleted. |
+| Your browser | Your sign-in, and which team you had open last. |
+
+Desktops are virtual machines on Microsoft Azure, and the agent's model calls go to Claude models on Microsoft Foundry.

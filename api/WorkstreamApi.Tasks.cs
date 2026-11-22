@@ -11,6 +11,8 @@ namespace Workstream.Api;
 
 /// <summary>
 /// A task as the list and the screen show it: what it is, who started it, and where its desktop is.
+/// <see cref="State"/> is <c>starting</c>, <c>ready</c>, <c>stopping</c> and <c>stopped</c> (which people read
+/// as pausing and paused), <c>archiving</c>, <c>archived</c>, <c>failed</c> or <c>deleting</c>.
 /// <see cref="Step"/> says how far a starting desktop has come: <c>machine</c> (being made or turned on),
 /// <c>boot</c> (on and starting up) or <c>agent</c> (its screen can be watched; the agent has not joined yet).
 /// </summary>
@@ -32,9 +34,10 @@ public sealed record MessageDto(long Id, string Author, string? AuthorName, bool
 
 /// <summary>
 /// The conversation after a message, with the task as it is now and what the reader may do with it: one read
-/// keeps a screen current, including a share that changed or ended.
+/// keeps a screen current, including a share that changed or ended. <see cref="Setup"/> is the environment's
+/// setup script as it runs, or ran, on this task's own desktop; null when its desktop never ran one.
 /// </summary>
-public sealed record ConversationDto(IReadOnlyList<MessageDto> Messages, TaskDto Task, TaskAccess Access);
+public sealed record ConversationDto(IReadOnlyList<MessageDto> Messages, TaskDto Task, TaskAccess Access, TaskSetupDto? Setup = null);
 
 /// <summary>Share a task: an email, a role (<c>watcher</c>, <c>prompter</c>, <c>driver</c>), and how long (<c>hour</c>, <c>day</c>, <c>week</c>, <c>never</c> to end).</summary>
 public sealed record ShareTask(string Email, string Role, string? ExpiresIn);
@@ -61,7 +64,7 @@ public static partial class WorkstreamApi
         api.MapPost("/tasks/{id}/start", StartDesktop).WithName("start_desktop").WithTags("Tasks").Produces<TaskDto>().ProducesProblem(402);
         api.MapPost("/tasks/{id}/interrupt", Interrupt).WithName("interrupt_agent").WithTags("Tasks");
         api.MapGet("/tasks/{id}/messages", ListMessages).WithName("list_messages").WithTags("Tasks").Produces<ConversationDto>();
-        api.MapPost("/tasks/{id}/messages", SayMessage).WithName("say").WithTags("Tasks").Produces<MessageDto>(201).ProducesProblem(409);
+        api.MapPost("/tasks/{id}/messages", SayMessage).WithName("say").WithTags("Tasks").Produces<MessageDto>(201).ProducesProblem(402).ProducesProblem(409);
 
         api.MapGet("/shared-tasks", ListSharedTasks).WithName("list_shared_tasks").WithTags("Sharing").Produces<ListPage<TaskDto>>();
         api.MapGet("/tasks/{id}/access", GetTaskAccess).WithName("list_task_access").WithTags("Sharing").Produces<TaskAccessList>().ProducesProblem(403);
@@ -76,8 +79,10 @@ public static partial class WorkstreamApi
         desktop.MapGet("/setup", GetDesktopSetup).ExcludeFromDescription();
         desktop.MapPost("/setup", ReportSetup).ExcludeFromDescription();
         desktop.MapPost("/exchange", Exchange).ExcludeFromDescription();
-        // A token for the desktop's repository from the team's GitHub connection (WorkstreamApi.GitHub.cs).
+        // The GitHub token of the person who started the desktop's task (WorkstreamApi.GitHub.cs).
         desktop.MapGet("/github/token", GetDesktopGitHubToken).ExcludeFromDescription();
+        // Who its commits are by: the same person, as their GitHub account says.
+        desktop.MapGet("/github/author", GetDesktopGitAuthor).ExcludeFromDescription();
     }
 
     static TaskDto ToDto(WorkTask x, IReadOnlyDictionary<string, string> names) => new(
@@ -100,8 +105,10 @@ public static partial class WorkstreamApi
         return Results.Ok(new ListPage<TaskDto>([.. page.Data.Select(x => ToDto(x, names))], page.NextCursor));
     }
 
-    static async Task<IResult> PostTask(string teamId, StartTask body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct) =>
-        await TaskResultAsync(await Operations.StartTaskAsync(CallerOf(http), teamId, body, db, fga, jobs, desktops, ct), db, ct, created: true);
+    static async Task<IResult> PostTask(string teamId, StartTask body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions desktops,
+        IDataProtectionProvider protection, Workstream.Api.GitHub.IGitHubTokens tokens, Workstream.Api.GitHub.GitHubClient github, ILoggerFactory logs, CancellationToken ct) =>
+        await TaskResultAsync(await Operations.StartTaskAsync(CallerOf(http), teamId, body, db, fga, jobs, desktops,
+            new StartFrom(protection, tokens, github, logs.CreateLogger("Workstream.Tasks")), ct), db, ct, created: true);
 
     /// <summary>
     /// Someone is in the team's workspace: have a desktop running for their next task. 204 whether or not one
@@ -154,7 +161,7 @@ public static partial class WorkstreamApi
         if (error is not null) return error;
         var names = await NamesAsync(db, page!.Data.Select(x => x.AuthorId).Append(seen.Value!.CreatedBy), ct);
         return Results.Ok(new ConversationDto([.. page.Data.Select(x => ToDto(x, names, caller.PrincipalId))], ToDto(seen.Value!, names),
-            await Operations.AccessOfAsync(caller, seen.Value!, fga)));
+            await Operations.AccessOfAsync(caller, seen.Value!, fga), await Operations.TaskSetupOfAsync(db, id, ct)));
     }
 
     /// <summary>
@@ -201,10 +208,10 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(new AcceptedTaskInvitation(outcome.Value!)) : ToResult(outcome);
     }
 
-    static async Task<IResult> SayMessage(string id, Say body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    static async Task<IResult> SayMessage(string id, Say body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
         var caller = CallerOf(http);
-        var outcome = await Operations.SayAsync(caller, id, body.Text, body.Key, db, fga, ct);
+        var outcome = await Operations.SayAsync(caller, id, body.Text, body.Key, db, fga, jobs, ct);
         if (!outcome.IsOk) return ToResult(outcome);
         return Results.Created($"/api/tasks/{id}/messages", ToDto(outcome.Value!, await NamesAsync(db, [caller.PrincipalId], ct), caller.PrincipalId));
     }
@@ -215,10 +222,10 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
-    /// <summary>The preparing desktop says how the environment's setup is going.</summary>
-    static async Task<IResult> ReportSetup(SetupReport body, HttpContext http, WorkstreamDbContext db, IBackgroundJobClient jobs, CancellationToken ct)
+    /// <summary>A desktop says how the setup is going: a task's own, for the task's screen, or the machine preparing an environment's saved setup.</summary>
+    static async Task<IResult> ReportSetup(SetupReport body, HttpContext http, WorkstreamDbContext db, IBackgroundJobClient jobs, DesktopOptions desktops, CancellationToken ct)
     {
-        var outcome = await Operations.ReportSetupAsync(Caller.Desktop(http), body, db, jobs, ct);
+        var outcome = await Operations.ReportSetupAsync(Caller.Desktop(http), body, db, jobs, desktops, ct);
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
     }
 

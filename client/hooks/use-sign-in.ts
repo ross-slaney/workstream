@@ -2,7 +2,7 @@ import { credentialEnabled, type HeadlessAuthorization, type UseHeadlessAuthResu
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AUTH_SCOPE, completeAuthorization, signOut } from "@/lib/auth";
+import { AUTH_SCOPE, completeAuthorization, forgetSignIn, leaveForProvider, newSignIn, signOut, type PendingSignIn } from "@/lib/auth";
 import { getAuthServerUrl, getRedirectUri, getSqlOsClientId } from "@/lib/config";
 import { translator } from "@/lib/i18n";
 import { getSession } from "@/lib/session";
@@ -22,6 +22,12 @@ import type { SignInScreenProps } from "@/src/auth/sign-in-screen";
  * the account accepts it: the link proves the mailbox, so someone new only gives their name. The person
  * lands in the team that invited them.
  *
+ * Where the API has a GitHub OAuth client (api/Workstream.cs SeedGitHubSignIn), SqlOS lists GitHub with the
+ * flow and the form shows "Continue with GitHub" beside the emailed code. Pressing it asks SqlOS where to go
+ * and leaves for GitHub; SqlOS takes the browser back and sends it to /auth/callback with the code
+ * (app/auth/callback.tsx), or to /sign-in again when GitHub did not sign the person in. An invitation is for
+ * one address, so its form offers no provider.
+ *
  * A person on several teams is asked by SqlOS which one the session is for. The app does not care: every
  * request names its team in its address and is checked against it, so the first is chosen without asking.
  *
@@ -36,17 +42,27 @@ type Invitation = { teamId: string; teamName: string; email: string };
 
 const VERIFY_VIEWS = ["email-otp-verify", "invite-email-otp-verify"];
 
-export function useSignIn(initialIntent: Intent, after: string, invitationToken?: string): SignInScreenProps {
+export function useSignIn(initialIntent: Intent, after: string, invitationToken?: string, providerFailed?: boolean): SignInScreenProps {
   const router = useRouter();
   const auth = useHeadlessAuth({
     issuer: getAuthServerUrl(),
     clientId: getSqlOsClientId(),
     redirectUri: getRedirectUri(),
   });
+  // What the flow on screen began with, kept so a trip to a provider can be finished by the page that comes back.
+  const began = useRef<PendingSignIn | null>(null);
   return useSignInSteps(auth, initialIntent, {
     invitationToken,
-    // Given a token and no view, SqlOS answers with the invitation.
-    begin: (next) => auth.flow.start(invitationToken ? { scope: AUTH_SCOPE, invitationToken } : { scope: AUTH_SCOPE, view: next }),
+    providerFailed,
+    begin: async (next) => {
+      const pkce = await newSignIn();
+      began.current = { state: pkce.state, codeVerifier: pkce.codeVerifier, returnTo: after };
+      // Given a token and no view, SqlOS answers with the invitation.
+      return auth.flow.start(invitationToken ? { scope: AUTH_SCOPE, invitationToken, ...pkce } : { scope: AUTH_SCOPE, view: next, ...pkce });
+    },
+    leave: (url) => {
+      if (began.current) leaveForProvider(url, began.current);
+    },
     // SqlOS ended the flow with a code: exchange it, keep the session, go on.
     finish: async (authorization, invitation) => {
       if (!authorization) throw new Error("Sign-in ended without a code.");
@@ -58,17 +74,60 @@ export function useSignIn(initialIntent: Intent, after: string, invitationToken?
   });
 }
 
+/**
+ * Back from GitHub signed in, on several teams: SqlOS asks which team the session is for and hands the browser
+ * to the sign-in page with the request, the organization view and its pending token (api/Workstream.cs
+ * SignInUiUrl). This reads the request again and answers as the emailed code does, with the first team (the
+ * steps' own choice below), then exchanges the code SqlOS ends with, using the PKCE verifier this tab kept for
+ * the trip to GitHub, and goes where the sign-in was for. Starting over begins a new sign-in, as the page would.
+ */
+export function useProviderTeamChoice(search: string, pending: PendingSignIn, after: string): SignInScreenProps {
+  const router = useRouter();
+  const auth = useHeadlessAuth({
+    issuer: getAuthServerUrl(),
+    clientId: getSqlOsClientId(),
+    redirectUri: getRedirectUri(),
+  });
+  const resumed = useRef(false);
+  const began = useRef<PendingSignIn>(pending);
+  return useSignInSteps(auth, "login", {
+    begin: async (next) => {
+      if (!resumed.current) {
+        resumed.current = true;
+        return auth.flow.resume(search);
+      }
+      const pkce = await newSignIn();
+      began.current = { state: pkce.state, codeVerifier: pkce.codeVerifier, returnTo: after };
+      return auth.flow.start({ scope: AUTH_SCOPE, view: next, ...pkce });
+    },
+    leave: (url) => leaveForProvider(url, began.current),
+    finish: async (authorization) => {
+      const kept = began.current;
+      forgetSignIn();
+      // The code must come back with the state this tab's sign-in began with, and be redeemed with its verifier.
+      if (!authorization || !kept.codeVerifier || !kept.state || authorization.state !== kept.state) throw new Error("Sign-in ended without a code for this tab.");
+      if (getSession()) await signOut();
+      await completeAuthorization({ ...authorization, codeVerifier: authorization.codeVerifier ?? kept.codeVerifier });
+      router.replace(kept.returnTo);
+    },
+  });
+}
+
 export type SignInSteps = {
   /** Starts the flow the form steps through, and starts it again for another address or the other form. */
   begin: (intent: Intent) => Promise<unknown>;
   /** SqlOS ended the flow with a redirect, with a code or without one. A throw shows that sign-in did not work. */
   finish: (authorization: HeadlessAuthorization | null, invitation: Invitation | null) => Promise<void>;
+  /** SqlOS answered "Continue with GitHub" with GitHub's address: go there, remembering what coming back needs. */
+  leave: (url: string) => void;
   invitationToken?: string;
+  /** The browser came back from a provider without being signed in: the form says so. */
+  providerFailed?: boolean;
 };
 
 /** The sign-in form's steps over a headless flow: which fields are on screen, what submitting does, and when it is done. */
 export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Intent, steps: SignInSteps): SignInScreenProps {
-  const { flow, status, view, viewModel, error, fieldErrors, authorization } = auth;
+  const { flow, status, view, viewModel, error, fieldErrors, authorization, redirectUrl } = auth;
   const { invitationToken } = steps;
   const latest = useRef(steps);
   latest.current = steps;
@@ -77,13 +136,14 @@ export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Inten
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(steps.providerFailed ? words("errors.provider") : null);
   const [finishing, setFinishing] = useState(false);
   // The invitation SqlOS resolved from the token, kept once known: later views do not repeat it.
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const started = useRef(false);
   const exchanging = useRef(false);
   const choosing = useRef(false);
+  const leaving = useRef(false);
 
   const invited = invitationToken ? { invitationToken } : {};
   const restart = async (next: Intent) => {
@@ -112,7 +172,15 @@ export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Inten
 
   // SqlOS ended the flow: whoever began it says what that means.
   useEffect(() => {
-    if (status !== "redirect" || exchanging.current) return;
+    if (status !== "redirect") return;
+    // A redirect with no code, after the provider's button: SqlOS answered with the provider's own address.
+    // Nothing here waits on it, so a browser that comes back with its Back button finds the form as it was.
+    if (leaving.current && !authorization && redirectUrl) {
+      leaving.current = false;
+      latest.current.leave(redirectUrl);
+      return;
+    }
+    if (exchanging.current) return;
     exchanging.current = true;
     setFinishing(true);
     void latest.current.finish(authorization, invitation).catch(() => {
@@ -120,7 +188,7 @@ export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Inten
       setFinishing(false);
       exchanging.current = false;
     });
-  }, [status, authorization, invitation]);
+  }, [status, authorization, invitation, redirectUrl]);
 
   // On several teams: the session is for the one that invited them, else the first. The app asks for a team
   // by its address, not by the session.
@@ -140,6 +208,7 @@ export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Inten
   // A link with no token, or one SqlOS would not resolve: expired, withdrawn or already used.
   const unusable = invitationToken !== undefined && !invitation && (invitationToken === "" || status === "error");
   const address = invitation?.email ?? email.trim();
+  const choosingMethod = !unusable && !finishing && !verifying && !naming && view !== "organization";
 
   const send = () =>
     intent === "login" ? flow.emailOtp.start({ email: address, ...invited })
@@ -163,8 +232,17 @@ export function useSignInSteps(auth: UseHeadlessAuthResult, initialIntent: Inten
     onNameChange: setName,
     onPasswordChange: setPassword,
     onCodeChange: setCode,
+    // An invitation is for one address, which a provider may not answer with: it is accepted by code or password.
+    providers: choosingMethod && invitationToken === undefined ? (viewModel?.providers ?? []).map((provider) => ({ id: provider.connectionId, name: provider.displayName, kind: provider.providerType.toLowerCase() })) : [],
+    onProvider: (id) => {
+      if (busy) return;
+      setLocalError(null);
+      leaving.current = true;
+      void flow.provider.start({ connectionId: id });
+    },
     onSubmit: () => {
       if (busy) return;
+      leaving.current = false;
       setLocalError(null);
       void (naming
         ? flow.emailOtp.signupComplete({ displayName: name.trim(), ...invited })

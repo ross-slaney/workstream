@@ -15,8 +15,14 @@ namespace Workstream.Api;
 /// <summary>A task as a person starts it: the environment its desktop comes from, and what they want done.</summary>
 public sealed record StartTask(string Id, string EnvironmentId, string? Title, string? Prompt, string? PromptKey);
 
-/// <summary>What the agent said or did since the desktop's last exchange, and where the desktop is in the conversation.</summary>
-public sealed record DesktopExchange(bool Working, long After, IReadOnlyList<DesktopMessage>? Messages);
+/// <summary>What a task's start needs to read its environment's workstream.yml again (Operations/GitHub.cs).</summary>
+public sealed record StartFrom(IDataProtectionProvider Protection, Workstream.Api.GitHub.IGitHubTokens Tokens, Workstream.Api.GitHub.GitHubClient GitHub, ILogger Log);
+
+/// <summary>
+/// What the agent said or did since the desktop's last exchange, and where the desktop is in the conversation.
+/// <see cref="DiskBytes"/> is how much is on the desktop's disk, which it says every few minutes.
+/// </summary>
+public sealed record DesktopExchange(bool Working, long After, IReadOnlyList<DesktopMessage>? Messages, long? DiskBytes = null);
 
 /// <summary>A message from the desktop: the agent's (<c>agent</c>) or someone typing in the agent's window on the desktop (<c>person</c>).</summary>
 public sealed record DesktopMessage(string Key, string Author, string Kind, string Text);
@@ -35,10 +41,11 @@ public sealed record DesktopModel(string BaseUrl, string Main, string Sonnet, st
 /// Everything a desktop needs to set itself up, read with its key each time it starts. A desktop that
 /// <see cref="Prepare"/>s is doing an environment's setup to be saved: it has no task (<see cref="TaskId"/> is
 /// empty), no instructions and no model, and <see cref="Title"/> is the environment's name.
+/// <see cref="SetupMinutes"/> is how long the setup script may run before the desktop stops it.
 /// </summary>
 public sealed record DesktopSetup(
     string TaskId, string Title, IReadOnlyList<string> Apps, DesktopRepository? Repository, string? SetupScript,
-    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false);
+    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false, int SetupMinutes = 45);
 
 public static partial class Operations
 {
@@ -72,14 +79,14 @@ public static partial class Operations
         db.Tasks.CountAsync(x => x.TeamId == teamId && (x.State == DesktopState.Starting || x.State == DesktopState.Ready || x.State == DesktopState.Stopping), ct);
 
     static string DesktopLimitWords(int limit) =>
-        $"Your team can run {limit} {(limit == 1 ? "desktop" : "desktops")} at once. Stop one to start another.";
+        $"Your team can run {limit} {(limit == 1 ? "desktop" : "desktops")} at once. Pause one to start another.";
 
     /// <summary>
     /// Start a task: the row, its first message, and a desktop on its way. The check is on the team (a create
     /// checks the parent) and on the environment the desktop comes from.
     /// </summary>
     public static async Task<Outcome<WorkTask>> StartTaskAsync(Caller caller, string teamId, StartTask body,
-        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions options, CancellationToken ct)
+        WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, DesktopOptions options, StartFrom from, CancellationToken ct)
     {
         var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamCreateTask, "You can't start tasks in this team.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<WorkTask>();
@@ -91,6 +98,9 @@ public static partial class Operations
             return Outcome<WorkTask>.Invalid("Choose one of the team's environments.");
         }
         if (await RunningDesktopsAsync(db, teamId, ct) >= team.MaxRunningDesktops) return Outcome<WorkTask>.LimitReached(DesktopLimitWords(team.MaxRunningDesktops));
+        // An environment that is its repository's workstream.yml takes what the file says now, before anything
+        // is decided from its settings.
+        await ReadFileAtStartAsync(environment, caller, db, from.Protection, jobs, options, from.Tokens, from.GitHub, from.Log, ct);
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -150,10 +160,10 @@ public static partial class Operations
         }
     }
 
-    /// <summary>Stop the desktop: the machine is released, its disk kept.</summary>
+    /// <summary>Pause the desktop: the machine is released, its disk kept.</summary>
     public static async Task<Outcome<WorkTask>> StopTaskAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
-        var allowed = await TaskWithAsync(caller, id, Permissions.TaskManage, "You can't stop this task's desktop.", db, fga, ct);
+        var allowed = await TaskWithAsync(caller, id, Permissions.TaskManage, "You can't pause this task's desktop.", db, fga, ct);
         if (!allowed.IsOk) return allowed;
         try
         {
@@ -168,19 +178,21 @@ public static partial class Operations
         }
     }
 
-    /// <summary>Start a stopped desktop again: the same machine and disk, within the team's limit.</summary>
+    /// <summary>
+    /// Start a desktop again, within the team's limit: a paused one on its own machine and disk, an archived
+    /// one on a new machine made from its archive, a failed one from wherever it was left. Starting a desktop
+    /// is using it, so the check is <c>TASK_DRIVE</c>: the team, and someone the task is shared with to use
+    /// its desktop.
+    /// </summary>
     public static async Task<Outcome<WorkTask>> StartDesktopAsync(Caller caller, string id, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
-        var allowed = await TaskWithAsync(caller, id, Permissions.TaskManage, "You can't start this task's desktop.", db, fga, ct);
+        var allowed = await TaskWithAsync(caller, id, Permissions.TaskDrive, "You can't start this task's desktop.", db, fga, ct);
         if (!allowed.IsOk) return allowed;
         var task = allowed.Value!;
-        var team = await db.Teams.AsNoTracking().SingleAsync(x => x.Id == task.TeamId, ct);
-        if (await RunningDesktopsAsync(db, task.TeamId, ct) >= team.MaxRunningDesktops) return Outcome<WorkTask>.LimitReached(DesktopLimitWords(team.MaxRunningDesktops));
+        if (await RoomToStartAsync(db, task, ct) is { } full) return Outcome<WorkTask>.LimitReached(full);
         try
         {
-            var now = DateTimeOffset.UtcNow;
-            task.StartAgain(now);
-            db.DesktopRuns.Add(DesktopRun.Begin(task, now));
+            StartAgain(db, task, DateTimeOffset.UtcNow);
             await db.SaveChangesAsync(ct);
             jobs.Enqueue<DesktopJobs>(job => job.StartAsync(id, CancellationToken.None));
             return allowed;
@@ -189,6 +201,21 @@ public static partial class Operations
         {
             return Outcome<WorkTask>.Invalid(rule);
         }
+    }
+
+    /// <summary>Why the task's desktop cannot start now, when its team already runs as many as it may. Null when there is room.</summary>
+    static async Task<string?> RoomToStartAsync(WorkstreamDbContext db, WorkTask task, CancellationToken ct)
+    {
+        var team = await db.Teams.AsNoTracking().SingleAsync(x => x.Id == task.TeamId, ct);
+        return await RunningDesktopsAsync(db, task.TeamId, ct) >= team.MaxRunningDesktops ? DesktopLimitWords(team.MaxRunningDesktops) : null;
+    }
+
+    /// <summary>The desktop is starting again, and its time is counted from now, with what it starts from.</summary>
+    static void StartAgain(WorkstreamDbContext db, WorkTask task, DateTimeOffset now)
+    {
+        var source = task.StartsFrom;
+        task.StartAgain(now);
+        db.DesktopRuns.Add(DesktopRun.Begin(task, now, source));
     }
 
     /// <summary>Delete the task: it leaves every list now; the machine, the conversation and the node follow.</summary>
@@ -212,8 +239,14 @@ public static partial class Operations
         return Outcome<bool>.Ok(true);
     }
 
-    /// <summary>A person writes in the conversation. A send tried again answers that it already exists.</summary>
-    public static async Task<Outcome<TaskMessage>> SayAsync(Caller caller, string taskId, string? text, string? clientKey, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    /// <summary>
+    /// A person writes in the conversation. A send tried again answers that it already exists. Writing to a
+    /// paused or archived task starts its desktop, and the agent reads the message when it is up: its
+    /// exchange asks for what was written after the last message it read, which it keeps on its disk. When the
+    /// team already runs as many desktops as it may, nothing is written and the answer says so, so a message
+    /// is never left waiting for a desktop nobody knows is not coming.
+    /// </summary>
+    public static async Task<Outcome<TaskMessage>> SayAsync(Caller caller, string taskId, string? text, string? clientKey, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)
     {
         var allowed = await TaskWithAsync(caller, taskId, Permissions.TaskPrompt, "You can watch this task but not write to its agent.", db, fga, ct);
         if (!allowed.IsOk) return allowed.As<TaskMessage>();
@@ -222,13 +255,18 @@ public static partial class Operations
         {
             return Outcome<TaskMessage>.Exists("That message was already sent.");
         }
+        if (task.State == DesktopState.Archiving) return Outcome<TaskMessage>.Invalid("The desktop is being archived. Send this again in a minute.");
+        var resumes = task.CanResume;
+        if (resumes && await RoomToStartAsync(db, task, ct) is { } full) return Outcome<TaskMessage>.LimitReached(full);
         try
         {
             var now = DateTimeOffset.UtcNow;
             var message = TaskMessage.Write(task, caller.PrincipalId, MessageAuthor.Person, MessageKind.Text, text, clientKey ?? "", now);
             db.TaskMessages.Add(message);
-            task.Active(now);
+            if (resumes) StartAgain(db, task, now);
+            else task.Active(now);
             await db.SaveChangesAsync(ct);
+            if (resumes) jobs.Enqueue<DesktopJobs>(job => job.StartAsync(taskId, CancellationToken.None));
             return Outcome<TaskMessage>.Ok(message);
         }
         catch (DomainRuleException rule)
@@ -268,7 +306,7 @@ public static partial class Operations
     {
         if (await DesktopTaskAsync(desktop, db, ct, tracked: false) is not { } task)
         {
-            if (await PreparingAsync(desktop, db, ct) is { } preparing) return Outcome<DesktopSetup>.Ok(PrepareSetupOf(preparing.Environment, protection));
+            if (await PreparingAsync(desktop, db, ct) is { } preparing) return Outcome<DesktopSetup>.Ok(PrepareSetupOf(preparing.Environment, protection, desktops));
             await SpareAskedAsync(desktop, db, ct);
             return Outcome<DesktopSetup>.NotFound();
         }
@@ -277,7 +315,7 @@ public static partial class Operations
             task.Id, task.Title, environment.Apps,
             environment.RepositoryUrl is { } url ? new DesktopRepository(url, environment.RepositoryBranch) : null,
             environment.SetupScript, VariablesOf(environment, protection), environment.Instructions,
-            new DesktopModel($"{desktops.ApiUrl.TrimEnd('/')}{ModelGateway.Path}", model.Main, model.Sonnet, model.Small)));
+            new DesktopModel($"{desktops.ApiUrl.TrimEnd('/')}{ModelGateway.Path}", model.Main, model.Sonnet, model.Small), SetupMinutes: desktops.SetupMinutes));
     }
 
     /// <summary>
@@ -315,7 +353,7 @@ public static partial class Operations
             task.Active(now);
         }
         var turnEnded = task.EndsTurn(body.Working);
-        if (task.DesktopSeen(body.Working, now))
+        if (task.DesktopSeen(body.Working, now, body.DiskBytes))
         {
             // The first exchange of this start: how long the agent took is kept with the run.
             foreach (var run in await db.DesktopRuns.Where(x => x.TaskId == task.Id && x.EndedAt == null).ToListAsync(ct)) run.Ready(now);

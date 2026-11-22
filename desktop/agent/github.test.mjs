@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { credentialAnswer, isGitHub, parseCredentialRequest, tokenFor } from "./github.mjs";
+import { askToken, authorFor, credentialAnswer, isGitHub, parseCredentialRequest, tokenFor } from "./github.mjs";
 import { projectWork } from "./instructions.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +28,15 @@ function helper(args, input, env) {
   return new Promise((resolve, reject) => {
     const child = execFile(process.execPath, [path.join(here, "github.mjs"), ...args], { env, timeout: 20_000 }, (error, stdout, stderr) =>
       error ? reject(Object.assign(error, { stderr })) : resolve(stdout));
+    child.stdin.end(input);
+  });
+}
+
+/** The same, with what it wrote to stderr as well. */
+function helperWithStderr(args, input, env) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(process.execPath, [path.join(here, "github.mjs"), ...args], { env, timeout: 20_000 }, (error, stdout, stderr) =>
+      error ? reject(error) : resolve({ stdout, stderr }));
     child.stdin.end(input);
   });
 }
@@ -84,14 +93,19 @@ test("a token pasted into the environment is used as it is, without asking", asy
   }
 });
 
-test("with nothing to give, git hears nothing and goes on as it would without the helper", async () => {
-  const stack = await api({ status: 404, body: {} });
+test("with nothing to give, git hears no token and is told why, in the API's words", async () => {
+  const why = "Grace Hopper has not signed in to Workstream with GitHub, so this desktop cannot reach GitHub as them.";
+  const stack = await api({ status: 404, body: { title: why } });
   try {
-    assert.equal(await helper(["credential", "get"], "protocol=https\nhost=github.com\n\n", told(stack.url)), "");
+    const said = await helperWithStderr(["credential", "get"], "protocol=https\nhost=github.com\n\n", told(stack.url));
+    assert.equal(said.stdout, "");
+    assert.equal(said.stderr, `Workstream: ${why}\n`);
+    // gh's wrapper hears the same.
+    assert.equal((await helperWithStderr(["token"], "", told(stack.url))).stderr, `Workstream: ${why}\n`);
     // Another host, or git storing or erasing what it was given: nothing is asked and nothing is kept.
     assert.equal(await helper(["credential", "get"], "protocol=https\nhost=gitlab.com\n\n", told(stack.url)), "");
     assert.equal(await helper(["credential", "store"], "protocol=https\nhost=github.com\npassword=x\n\n", told(stack.url)), "");
-    assert.equal(stack.asked.length, 1);
+    assert.equal(stack.asked.length, 2);
   } finally {
     await stack.close();
   }
@@ -103,6 +117,7 @@ test("an API that cannot be reached gives no token rather than an error", async 
   };
   assert.equal(await tokenFor({ env: {}, told: async () => ({ api: "http://127.0.0.1:9", key: "wsd_key" }), fetch: failing }), null);
   assert.equal(await tokenFor({ env: {}, told: async () => ({ api: "", key: "" }) }), null);
+  assert.match((await askToken({ env: {}, told: async () => ({ api: "http://127.0.0.1:9", key: "wsd_key" }), fetch: failing })).reason, /could not be reached/);
 });
 
 test("a desktop with a repository is told to finish on a branch and a pull request", () => {
@@ -110,5 +125,27 @@ test("a desktop with a repository is told to finish on a branch and a pull reque
   assert.match(told, /https:\/\/github\.com\/acme\/app, on its branch develop/);
   assert.match(told, /gh pr create/);
   assert.match(told, /Never push to the default branch/);
-  assert.equal(projectWork(null), "");
+});
+
+test("a desktop without a repository is told it can clone one as the person, and to finish the same way", () => {
+  const told = projectWork(null);
+  assert.match(told, /No repository is cloned on this desktop/);
+  assert.match(told, /gh repo clone owner\/name/);
+  assert.match(told, /Never push to the default branch/);
+});
+
+test("commits are by the person who started the task, as the API says, and by nobody when it says nothing", async () => {
+  const author = { name: "Ada Lovelace", email: "583231+octocat@users.noreply.github.com" };
+  const asked = [];
+  const answering = (status, body) => async (url, init) => {
+    asked.push({ url, authorization: init.headers.authorization });
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  };
+  const told = async () => ({ api: "http://api.test", key: "wsd_key" });
+  assert.deepEqual(await authorFor({ env: {}, told, fetch: answering(200, author) }), author);
+  assert.deepEqual(asked, [{ url: "http://api.test/api/desktop/github/author", authorization: "Bearer wsd_key" }]);
+  assert.equal(await authorFor({ env: {}, told, fetch: answering(404, { title: "Grace Hopper has not signed in to Workstream with GitHub." }) }), null);
+  assert.equal(await authorFor({ env: {}, told, fetch: answering(200, { name: "", email: "x" }) }), null);
+  assert.equal(await authorFor({ env: {}, told, fetch: async () => { throw new TypeError("fetch failed"); } }), null);
+  assert.equal(await authorFor({ env: {}, told: async () => ({ api: "", key: "" }) }), null);
 });

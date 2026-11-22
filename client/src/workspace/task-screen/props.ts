@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Task, TaskAccess } from "@/lib/workstream/api";
+import type { Task, TaskAccess, TaskGitHub, TaskSetup } from "@/lib/workstream/api";
 
 /** One entry in the conversation as the screen draws it. */
 export type ChatEntry = {
@@ -28,6 +28,19 @@ export type TaskScreenProps = {
    * writes nothing and sees no menu; the team may do everything, sharing included.
    */
   access: TaskAccess | null;
+  /**
+   * The environment's setup script on this task's desktop: running now, with what it wrote last, or how it
+   * ended. Null, or left out, when the desktop ran none.
+   */
+  setup?: TaskSetup | null;
+  /**
+   * Whether the desktop reaches GitHub as the person who started the task. When they have not signed in
+   * with GitHub, the screen says so: to them, with a way to sign in with GitHub; to anyone else, who it is.
+   * Null, or left out, until it is read.
+   */
+  github?: TaskGitHub | null;
+  /** Sign out and sign in again with GitHub. */
+  onSignInWithGitHub?: () => void;
   /** The task is not there any more: deleted here or by a teammate. */
   missing: boolean;
   entries: ChatEntry[];
@@ -38,7 +51,9 @@ export type TaskScreenProps = {
   onRetry: (entryId: string) => void;
   /** Ask the agent to stop what it is doing. */
   onInterrupt: () => void;
+  /** Bring back a paused or archived desktop, or start a failed one again. Clicking a paused pane does this. */
   onStartDesktop: () => void;
+  /** Pause the desktop: its machine is released, its files kept. */
   onStopDesktop: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
@@ -48,7 +63,7 @@ export type TaskScreenProps = {
   onClose: () => void;
   /** An action on the task is under way. */
   busy: boolean;
-  /** Why the last action was refused, in the server's words. */
+  /** Why the last action, or the last message, was refused, in the server's words. */
   error: string | null;
   /** The live desktop, which the controller draws from the moment there is a screen to watch: a little before the agent joins. */
   desktop: ReactNode;

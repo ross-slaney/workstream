@@ -97,6 +97,7 @@ public static class ModelGateway
     public static WebApplicationBuilder AddModelGateway(this WebApplicationBuilder builder)
     {
         builder.Services.AddSingleton(builder.Configuration.GetSection("Workstream:Model").Get<ModelOptions>() ?? new ModelOptions());
+        builder.Services.AddMemoryCache();
         // An agent's turn can stream for many minutes: no overall timeout, only the caller going away ends it.
         builder.Services.AddHttpClient(ClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler

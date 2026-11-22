@@ -1,0 +1,53 @@
+---
+title: "How Workstream works"
+description: "A task gets its own cloud desktop with an agent working on it. You watch it live, write to the agent, and take over when you want."
+order: 1
+updated: 2026-11-21
+---
+
+<Flow>
+  <Stage name="You write the task">What you want done, and the environment it starts from.</Stage>
+  <Stage name="A desktop starts">A Linux computer in the cloud, made for this task alone.</Stage>
+  <Stage name="The agent works">In the browser, the editor and the terminal on that desktop.</Stage>
+  <Stage name="You watch or take over">The screen is live in your browser the whole time.</Stage>
+</Flow>
+
+## A task
+
+A task is one piece of work. To start one you press New task, write what the agent should do, and choose an environment. The environment decides what the desktop starts with: its apps and size, and for a project its repository, setup script and variables. [Environments](/docs/environments) has the details.
+
+Every task has two things: a desktop, and a conversation with the agent on that desktop. They sit side by side on screen, the conversation on the left and the desktop on the right.
+
+## The desktop
+
+Each task gets a desktop of its own, a Linux virtual machine with a graphical desktop, a browser, VS Code and a terminal. Tasks never share one, so two tasks cannot get in each other's way. [Desktops](/docs/desktops) lists what is installed and the sizes.
+
+The desktop's screen appears in your browser about half a minute after you start the task. The work runs on the desktop, not on your computer, so it continues when you close the tab or your laptop.
+
+## The agent
+
+The agent is a program on the desktop, built on the Claude Agent SDK. It works where you can see it: it drives the same browser window you can use, files it edits open in VS Code, and commands run in a terminal. On a project it follows the repository's own `CLAUDE.md` and `AGENTS.md` and uses its skills, as it would on a developer's laptop.
+
+Every model call the agent makes goes through Workstream and counts against the team's monthly allowance. See [Usage and limits](/docs/usage-and-limits).
+
+## Watching, writing and taking over
+
+- **Watch.** The desktop in your browser is the real screen, live. Several people can watch the same desktop at once.
+- **Write to the agent.** Send a message in the conversation at any time, while the agent is working or after it has stopped. The Stop button ends what the agent is doing now.
+- **Take over.** Click into the desktop and the mouse and keyboard are yours. Fix something, sign in to a site yourself, then write to the agent to hand the work back.
+
+The agent also has a window of its own on the desktop, opened with the Agent button on the desktop's panel. It shows the same conversation, and what you type there reaches the conversation in the web app too.
+
+## Up to four tasks side by side
+
+The sidebar lists the team's tasks. Drag a task onto the screens to open it beside the ones already open. Up to four fit on one screen, each with its own conversation and desktop. With four open, dropping a fifth on a screen replaces the task there.
+
+## Teams
+
+Tasks and environments belong to a team. Everyone on the team can see, use and manage every task and environment in it: open a running task, read what the agent did, write to it, and use its desktop. When you sign up you get a team of your own, and you can create more or be invited to others. An administrator invites people and changes who is on the team.
+
+To give someone outside the team one task and nothing else, see [Sharing](/docs/sharing).
+
+## Email when a task needs you
+
+When the agent finishes its turn, Workstream emails the person who started the task and everyone who wrote in it. The email says the task is finished, or that it needs you when the agent ended with a question. You are not emailed while you have the task's desktop on screen, and a task emails at most once every ten minutes. The switch for these emails is on the Team page and is your own setting.

@@ -9,7 +9,8 @@ import { useT } from "@/lib/i18n";
 import type { DesktopSize, Environment, EnvironmentSetup } from "@/lib/workstream/api";
 import { SettingsPage } from "../page";
 import type { EnvironmentDraft, EnvironmentsScreenProps } from "./props";
-import { sameRepository } from "./repository";
+import { gitHubName } from "./repository";
+import { FileOffer, RepositorySection } from "./repository-parts";
 
 /** The page, the same on every surface: the list, and the editor over it. */
 export function EnvironmentsPage(p: EnvironmentsScreenProps) {
@@ -64,7 +65,21 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
   const [confirming, setConfirming] = useState(false);
   const set = (change: Partial<EnvironmentDraft>) => p.onChangeDraft({ ...draft, ...change });
   const sizes: DesktopSize[] = ["small", "standard", "large"];
-  const advanced = Boolean(draft.repositoryUrl || draft.setupScript || draft.instructions || draft.variables.length > 0);
+  const advanced = Boolean(draft.setupScript || draft.instructions || draft.variables.length > 0);
+  const repository = gitHubName(draft.repositoryUrl);
+
+  // Just saved, on a repository that could hold it: the dialog offers saving it there as workstream.yml, and nothing else.
+  if (p.editor.file?.justSaved && repository) {
+    return (
+      <Dialog
+        title={t("environments.editor.savedTitle", { name: draft.name })}
+        onClose={p.onCloseEditor}
+        footer={<Button label={t("environments.editor.done")} tone={p.editor.file.saved ? "primary" : "outline"} onClick={p.onCloseEditor} />}
+      >
+        <FileOffer offer={p.editor.file} repository={repository} onSave={p.onSaveFile} plain />
+      </Dialog>
+    );
+  }
 
   if (confirming) {
     return (
@@ -99,6 +114,8 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
     >
       <TextField label={t("environments.editor.name")} placeholder={t("environments.editor.namePlaceholder")} value={draft.name} onChangeText={(name) => set({ name })} maxLength={100} autoFocus={!id} />
 
+      <RepositorySection picker={p.picker} draft={draft} onChange={set} />
+
       <fieldset className="flex flex-col gap-2">
         <legend className="text-[13px] font-medium text-foreground">{t("environments.editor.apps")}</legend>
         <p className="text-[13px] text-muted-foreground">{t("environments.editor.appsHint")}</p>
@@ -128,36 +145,6 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
           <span className="ml-2 font-normal text-muted-foreground">{t("environments.editor.advancedHint")}</span>
         </summary>
         <div className="flex flex-col gap-4 border-t border-border px-4 py-4">
-          {p.repositories && p.repositories.length > 0 ? (
-            <SelectField
-              label={t("environments.editor.repositoryPick")}
-              value={p.repositories.find((repository) => sameRepository(repository.url, draft.repositoryUrl))?.url ?? ""}
-              onChangeValue={(url) => {
-                const picked = p.repositories?.find((repository) => repository.url === url);
-                // A repository picked brings its default branch, unless one is already written.
-                set(picked ? { repositoryUrl: picked.url, repositoryBranch: draft.repositoryBranch || picked.defaultBranch } : { repositoryUrl: "", repositoryBranch: "" });
-              }}
-              options={[
-                { value: "", label: t("environments.editor.repositoryPickNone") },
-                ...p.repositories.map((repository) => ({
-                  value: repository.url,
-                  label: repository.private ? t("environments.editor.repositoryPickPrivate", { name: repository.fullName }) : repository.fullName,
-                })),
-              ]}
-            />
-          ) : null}
-          <div className="grid gap-3 md:grid-cols-[1fr_180px]">
-            <TextField
-              label={t("environments.editor.repository")}
-              placeholder={t("environments.editor.repositoryPlaceholder")}
-              hint={p.repositories ? t("environments.editor.repositoryHintConnected") : t("environments.editor.repositoryHint")}
-              value={draft.repositoryUrl}
-              onChangeText={(repositoryUrl) => set({ repositoryUrl })}
-              inputMode="url"
-              spellCheck={false}
-            />
-            <TextField label={t("environments.editor.branch")} placeholder={t("environments.editor.branchPlaceholder")} value={draft.repositoryBranch} onChangeText={(repositoryBranch) => set({ repositoryBranch })} spellCheck={false} />
-          </div>
           <TextArea label={t("environments.editor.setupScript")} hint={t("environments.editor.setupScriptHint")} placeholder={t("environments.editor.setupScriptPlaceholder")} value={draft.setupScript} onChangeText={(setupScript) => set({ setupScript })} rows={6} code />
           <fieldset className="flex flex-col gap-2">
             <legend className="text-[13px] font-medium text-foreground">{t("environments.editor.variables")}</legend>
@@ -194,6 +181,7 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
           <TextArea label={t("environments.editor.instructions")} hint={t("environments.editor.instructionsHint")} placeholder={t("environments.editor.instructionsPlaceholder")} value={draft.instructions} onChangeText={(instructions) => set({ instructions })} rows={4} />
         </div>
       </details>
+      {p.editor.file && repository ? <FileOffer offer={p.editor.file} repository={repository} onSave={p.onSaveFile} /> : null}
       {p.editor.setup ? <SetupSection setup={p.editor.setup} preparing={p.editor.preparing} error={p.editor.prepareError} onPrepare={p.onPrepare} /> : null}
       <ErrorNote message={error} />
     </Dialog>

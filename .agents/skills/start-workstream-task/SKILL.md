@@ -72,6 +72,6 @@ Tell the person the task's link and whether its desktop is ready. They watch the
 
 If starting is refused:
 
-- "Your team can run N desktops at once": a limit; the person stops a task in the web app or asks to wait.
+- "Your team can run N desktops at once": a limit; the person pauses a task in the web app or asks to wait.
 - "Not found, or not yours to see": the team or environment is not theirs. List again with `workstream envs`.
 - "This connection can only read and start tasks": the command line cannot change, stop or delete tasks or send messages. Point the person at the link to do that in the web app.

@@ -1,12 +1,14 @@
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DesktopStream } from "@/components/app/desktop-stream";
 import { useAction } from "@/hooks/use-action";
+import { signOut } from "@/lib/auth";
 import { ApiError } from "@/lib/api/errors";
 import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { useOnlineRead } from "@/hooks/use-online-read";
-import { workstream, type Message, type Task, type TaskAccess, type TaskShared } from "@/lib/workstream/api";
+import { workstream, type Message, type Task, type TaskAccess, type TaskSetup, type TaskShared } from "@/lib/workstream/api";
 import { ShareDialog } from "@/src/workspace/share-dialog";
 import { TaskScreen, type ChatEntry } from "@/src/workspace/task-screen";
 
@@ -22,16 +24,24 @@ type Unsent = { key: string; text: string; failed: boolean };
  * writes, and does what they ask of the task. Each read also says what the person may do with it, so a share
  * that changes or ends shows on the screen at the next read; the team shares the task from here. The view
  * and the live desktop below it know nothing of the API.
+ *
+ * A paused or archived desktop comes back when the person clicks its pane (`onStartDesktop`) or sends a
+ * message, which the API starts it for. Reading the conversation, which this does for as long as the screen
+ * is open, starts nothing.
  */
 export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: string; onClose: () => void; onChanged: () => void }) {
   const t = useT("workspace");
   const session = useSession();
   const [task, setTask] = useState<Task | null>(null);
   const [access, setAccess] = useState<TaskAccess | null>(null);
+  const [setup, setSetup] = useState<TaskSetup | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shared, setShared] = useState<TaskShared | null>(null);
   const shareAction = useAction();
   const people = useOnlineRead(() => (sharing ? workstream.taskAccess(taskId) : Promise.resolve(null)), `access:${taskId}:${sharing}`);
+  // Read once a screen: whether the desktop reaches GitHub as the person who started the task.
+  const github = useOnlineRead(() => workstream.taskGitHub(taskId), `task-github:${taskId}`);
+  const router = useRouter();
   const [missing, setMissing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [unsent, setUnsent] = useState<Unsent[]>([]);
@@ -40,6 +50,8 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
   const [desktopShape, setDesktopShape] = useState(4 / 3);
   const last = useRef(0);
   const action = useAction();
+  // Why the last message was refused, when the server said: the team's limit of running desktops, most often.
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const take = useCallback((incoming: Message[]) => {
     if (incoming.length === 0) return;
@@ -58,9 +70,11 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
     last.current = 0;
     setTask(null);
     setAccess(null);
+    setSetup(null);
     setMissing(false);
     setMessages([]);
     setUnsent([]);
+    setSendError(null);
     const read = async () => {
       if (reading || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
       reading = true;
@@ -70,6 +84,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         starting = conversation.task.state === "starting";
         setTask(conversation.task);
         setAccess(conversation.access);
+        setSetup(conversation.setup ?? null);
         take(conversation.messages);
       } catch (error) {
         // Gone: deleted here or by a teammate. Anything else is a read that will be tried again.
@@ -92,13 +107,18 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
 
   const send = useCallback(
     async (key: string, text: string) => {
+      setSendError(null);
       try {
         take([await workstream.say(taskId, text, key)]);
         setUnsent((current) => current.filter((entry) => entry.key !== key));
       } catch (error) {
         // 409: an earlier try already wrote it, and the next read brings it.
         if (error instanceof ApiError && error.status === 409) setUnsent((current) => current.filter((entry) => entry.key !== key));
-        else setUnsent((current) => current.map((entry) => (entry.key === key ? { ...entry, failed: true } : entry)));
+        else {
+          setUnsent((current) => current.map((entry) => (entry.key === key ? { ...entry, failed: true } : entry)));
+          // A paused desktop the team has no room to resume: the message is not kept, and the server says why.
+          if (error instanceof ApiError && (error.status === 402 || error.status === 400) && error.message) setSendError(error.message);
+        }
       }
     },
     [taskId, take],
@@ -140,6 +160,12 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
       <TaskScreen
         task={task}
         access={access}
+        setup={setup}
+        github={github.kind === "ready" ? github.value : null}
+        onSignInWithGitHub={() => {
+          // A new sign-in, with GitHub: SqlOS keeps GitHub's token from it, and the person comes back to the workspace.
+          void signOut().then(() => router.replace(`/sign-in?returnTo=${encodeURIComponent(`/t/${task?.teamId ?? ""}`)}`));
+        }}
         missing={missing}
         entries={entries}
         draft={draft}
@@ -176,7 +202,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         }}
         onClose={onClose}
         busy={action.busy}
-        error={action.error}
+        error={action.error ?? sendError}
         // There is a screen to watch as soon as the display answers, which is before the agent has joined.
         desktop={
           task && (task.state === "ready" || (task.state === "starting" && task.step === "agent")) ? (

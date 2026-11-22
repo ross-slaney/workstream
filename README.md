@@ -2,7 +2,9 @@
 
 Workstream gives each task its own cloud desktop with an AI agent working on it. A person writes what they want done, a Linux desktop starts for that task, and the agent does the work there: it opens the browser, edits files in VS Code and runs commands in a terminal. The person watches the screen live in their browser, talks to the agent beside it, and takes the mouse whenever they want. Up to four tasks fit on one screen, side by side.
 
-A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. A team's administrator can connect the team to GitHub through Workstream's GitHub App; each desktop then gets a token for its own repository that lasts an hour, and its agent finishes the work as a branch and a pull request ([infra/README.md](infra/README.md), "GitHub").
+A team shares its tasks and its environments. One task can also be shared with someone outside the team, by email, for them to watch, to write to its agent too, or to use its desktop as well, for as long as the person sharing it chooses. An environment is what a desktop starts with: which apps, and optionally a repository, a setup script, variables and instructions for the agent. It can be kept in the repository as `workstream.yml`. A desktop has what a project's whole stack needs (Docker, .NET, Node, Java, the Android SDK and its emulator), and a container on it reaches the desktop as `host.docker.internal`, as on a Mac ([docs/architecture.md](docs/architecture.md), "A project's whole stack on a desktop"). Someone who signs in with GitHub picks the environment's repository from their own, and the desktop of each task they start pushes and opens pull requests as them; its agent finishes the work as a branch and a pull request ([docs/core-model.md](docs/core-model.md), "A desktop's GitHub token").
+
+A desktop runs while someone is using it or its agent is working. One that nobody has used for half an hour is paused: its machine is released and its files are kept, and it resumes in about half a minute when someone clicks it or writes to its agent. One that stays paused for a week is archived: its disk is saved and the machine deleted, and it comes back in about a minute. A team's administrator sets both times on the team's page. Having a task open in a browser tab is not using it, and only deleting a task deletes its files ([docs/core-model.md](docs/core-model.md#pause-archive-delete)).
 
 Making a machine takes Azure from fifteen seconds to a minute. While someone is in a team's workspace, Workstream keeps one desktop running ahead of them, so the task they start begins on it at once.
 
@@ -11,7 +13,7 @@ Making a machine takes Azure from fifteen seconds to a minute. While someone is 
 | Folder | What it is |
 | --- | --- |
 | `api/` | The API: .NET 10 with SqlOS for sign-in and authorization. One process is the REST API, the relay that carries a desktop's display to the people watching, the gateway every agent's model calls go through, and the background jobs that make and remove desktops. |
-| `client/` | The web app: Expo and expo-router, rendered on the server for public pages and in the browser for signed-in ones. The landing page, sign-in, the workspace and the system administrator's page. |
+| `client/` | The web app: Expo and expo-router, rendered on the server for public pages and in the browser for signed-in ones. The landing page, the docs (`/docs`, written in `client/content/docs`), sign-in, the workspace and the system administrator's page. |
 | `cli/` | The command line: start and follow tasks from a terminal, as yourself, after signing in through the browser. Node 22 and nothing else. |
 | `desktop/` | The desktop: the scripts that make the machine image, and the agent that runs on it (the Claude Agent SDK with its own window on the desktop). |
 | `apphost/` | The .NET Aspire AppHost that runs the whole product on a laptop. |
@@ -29,7 +31,7 @@ docker build -t workstream-desktop:local desktop
 dotnet run --project apphost
 ```
 
-The web app is at http://localhost:8091 and the API at http://localhost:5280. Create an account at `/sign-in?view=signup` with any email and a password; locally nobody needs an inbox. The system administrator is `admin@workstream.test` with the password in `.env.example`, and reaches `/admin`.
+The web app is at http://localhost:8091 and the API at http://localhost:5280. Create an account at `/sign-in?view=signup` with any email and a password; locally nobody needs an inbox. The form also shows Continue with GitHub once `.env` has a GitHub OAuth client of your own (`WORKSTREAM_GITHUB_OAUTH_CLIENT_ID` and `WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET`, see `.env.example`). The system administrator is `admin@workstream.test` with the password in `.env.example`, and reaches `/admin`.
 
 Locally a desktop is a Docker container made from `desktop/Dockerfile`, which runs the same two scripts the Azure image is baked with. The first build takes several minutes and about 3 GB.
 
@@ -58,13 +60,15 @@ az bicep build --file infra/main.bicep --stdout > /dev/null
 
 `.github/workflows/ci.yml` runs the same on every pull request and every push to `main`.
 
+One test talks to Azure itself and is skipped unless it is told where: `AzureSavedSetupLive` makes a machine from the desktops' image in a resource group of its own, saves its disk and makes a second machine from the save ([infra/README.md](infra/README.md), "What it costs when people use it").
+
 To try a running stack from outside, the way a browser would, including the desktop's display through the relay:
 
 ```bash
 node scripts/try-stack.mjs --api http://localhost:5280 --web http://localhost:8091
 ```
 
-It works against the local stack and against staging, which sign in with a password. Production signs in by emailed code.
+It works against the local stack and against staging, which sign in with a password. Production signs in by emailed code, or with GitHub where its OAuth client is set ([infra/README.md](infra/README.md), "Sign in with GitHub").
 
 ## Ship it
 

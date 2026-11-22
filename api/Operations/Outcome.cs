@@ -35,6 +35,8 @@ public sealed record Outcome<T>(OutcomeKind Kind, T? Value, string? Message)
     public static Outcome<T> Invalid(DomainRuleException rule) => Invalid(rule.Message);
     public static Outcome<T> Forbidden(string message) => new(OutcomeKind.Forbidden, default, message);
     public static Outcome<T> NotFound() => new(OutcomeKind.NotFound, default, null);
+    /// <summary>Not there, with words for whoever asked: a desktop's agent passes them on.</summary>
+    public static Outcome<T> NotFound(string message) => new(OutcomeKind.NotFound, default, message);
     public static Outcome<T> Exists(string message) => new(OutcomeKind.Exists, default, message);
     public static Outcome<T> LimitReached(string message) => new(OutcomeKind.LimitReached, default, message);
     public static Outcome<T> Unavailable(string message) => new(OutcomeKind.Unavailable, default, message);

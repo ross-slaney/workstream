@@ -1,8 +1,9 @@
 name: Bake the desktops' image
 description: >-
-  Makes a Debian 13 machine in a resource group of its own, runs desktop/image/bake.sh on it, and captures
-  it into the gallery as one version of the desktops' image (infra/gallery.bicep). The builder is deleted
-  whether or not it worked. Expects azure/login and a checkout of the commit being baked.
+  Makes a Debian 13 machine in a resource group of its own (infra/image-builder.bicep), runs
+  desktop/image/bake.sh on it, and captures it into the gallery as one version of the desktops' image
+  (infra/gallery.bicep). The builder is deleted whether or not it worked. Expects azure/login and a checkout
+  of the commit being baked.
 inputs:
   version:
     description: The version to publish. A release's own, X.Y.Z; 0.0.N for a bake staging makes for itself.
@@ -13,6 +14,11 @@ inputs:
   token:
     description: A token that reads this repository, for the builder's checkout. The workflow's own, which ends with the job.
     required: true
+  definition:
+    description: >-
+      The gallery's definition the version goes into: machine, or machine-hibernate for desktops that
+      hibernate, which is built on a machine without Trusted Launch (infra/gallery.bicep).
+    default: machine
   location:
     default: westus3
 runs:
@@ -33,16 +39,16 @@ runs:
       shell: bash
       env:
         BUILDER: workstream-image-${{ github.run_id }}
+        DEFINITION: ${{ inputs.definition }}
         LOCATION: ${{ inputs.location }}
         SHA: ${{ inputs.sha }}
         TOKEN: ${{ inputs.token }}
       run: |
         set -euo pipefail
         az group create -n "$BUILDER" -l "$LOCATION" --tags project=workstream purpose=image-build -o none
-        az vm create -g "$BUILDER" -n builder --image Debian:debian-13:13-gen2:latest --size Standard_D4as_v7 \
-          --admin-username builder --authentication-type password --admin-password "$(openssl rand -hex 20)Aa1-" \
-          --public-ip-sku Standard --nsg-rule NONE --os-disk-size-gb 64 --storage-sku Premium_LRS \
-          --security-type TrustedLaunch -o none
+        trusted=true; [ "$DEFINITION" = machine ] || trusted=false
+        az deployment group create -g "$BUILDER" -n builder -f infra/image-builder.bicep -o none --only-show-errors \
+          -p trustedLaunch="$trusted" adminPassword="$(openssl rand -hex 20)Aa1-"
         # The script's output comes back when it ends (its last 4 KB); it prints the last line only if every step ran.
         az vm run-command invoke -g "$BUILDER" -n builder --command-id RunShellScript --scripts @desktop/image/bake.sh \
           --parameters "$TOKEN" "$GITHUB_REPOSITORY" "$SHA" --query "value[0].message" -o tsv | tee build.log
@@ -52,14 +58,15 @@ runs:
       shell: bash
       env:
         BUILDER: workstream-image-${{ github.run_id }}
+        DEFINITION: ${{ inputs.definition }}
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
         az vm deallocate -g "$BUILDER" -n builder -o none
-        az sig image-version create -g workstream --gallery-name workstream --gallery-image-definition machine \
+        az sig image-version create -g workstream --gallery-name workstream --gallery-image-definition "$DEFINITION" \
           --gallery-image-version "$VERSION" --virtual-machine "$(az vm show -g "$BUILDER" -n builder --query id -o tsv)" \
           --replica-count 1 --storage-account-type Standard_LRS -o none
-        echo "### Desktops' image \`$VERSION\` published" >> "$GITHUB_STEP_SUMMARY"
+        echo "### Desktops' image \`$VERSION\` published in \`$DEFINITION\`" >> "$GITHUB_STEP_SUMMARY"
     - name: Delete the builder
       if: always()
       shell: bash

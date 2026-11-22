@@ -117,6 +117,98 @@ public sealed class RfbClientFilterTests
     }
 
     [TestMethod]
+    public void A_key_or_a_pointer_event_that_reaches_the_display_is_a_person_using_the_desktop()
+    {
+        foreach (var hand in new[] { Rfb.Key(), Rfb.Key(down: false), Rfb.Pointer(), Rfb.Pointer(buttons: 0), Rfb.QemuKey() })
+        {
+            foreach (var delivery in Deliveries(Join(Rfb.Handshake(), Picture, hand, Rfb.UpdateRequest())))
+            {
+                var filter = new RfbClientFilter(drive: true);
+                Assert.IsTrue(Run(drive: true, delivery, filter).Open);
+                Assert.IsTrue(filter.TakeInput());
+                // Asked once, it is taken: the next answer is about what came after.
+                Assert.IsFalse(filter.TakeInput());
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Asking_for_the_picture_is_not_using_the_desktop_however_long_it_goes_on()
+    {
+        // Everything an open pane sends by itself: the handshake, then requests for the picture, over and over.
+        var stream = Join([Rfb.Handshake(), Picture, .. Enumerable.Repeat(Join(Rfb.UpdateRequest(), Rfb.ContinuousUpdates(), Rfb.Fence([9, 9]), Rfb.DesktopSize()), 50)]);
+        foreach (var delivery in Deliveries(stream))
+        {
+            var filter = new RfbClientFilter(drive: true);
+            Assert.IsTrue(Run(drive: true, delivery, filter).Open);
+            Assert.IsFalse(filter.TakeInput());
+        }
+    }
+
+    [TestMethod]
+    public void The_clipboard_and_a_power_action_are_not_a_hand_on_the_desktop()
+    {
+        // A browser can send its clipboard without anyone touching the desktop.
+        var filter = new RfbClientFilter(drive: true);
+        Assert.IsTrue(Run(drive: true, [Join(Rfb.Handshake(), Rfb.CutText("hunter2"), Rfb.CutText("extended text", extended: true), Rfb.Xvp())], filter).Open);
+        Assert.IsFalse(filter.TakeInput());
+    }
+
+    [TestMethod]
+    public void What_a_watcher_sends_never_reaches_the_display_so_it_is_not_use()
+    {
+        foreach (var delivery in Deliveries(Join(Rfb.Handshake(), Picture, Acting, Rfb.UpdateRequest())))
+        {
+            var filter = new RfbClientFilter(drive: false);
+            Assert.IsTrue(Run(drive: false, delivery, filter).Open);
+            Assert.IsFalse(filter.TakeInput());
+        }
+        // Once they may use the desktop, what they send counts from then on.
+        var shared = new RfbClientFilter(drive: false);
+        Run(drive: false, [Join(Rfb.Handshake(), Rfb.Pointer())], shared);
+        Assert.IsFalse(shared.TakeInput());
+        shared.Drive = true;
+        Run(drive: true, [Rfb.Pointer()], shared);
+        Assert.IsTrue(shared.TakeInput());
+    }
+
+    [TestMethod]
+    public void A_pointer_event_that_says_where_the_pointer_already_is_is_not_use()
+    {
+        foreach (var delivery in Deliveries(Join(Rfb.Handshake(), Rfb.Pointer(100, 200, 0))))
+        {
+            var filter = new RfbClientFilter(drive: true);
+            Run(drive: true, delivery, filter);
+            Assert.IsTrue(filter.TakeInput());
+            // The same place and the same buttons, again and again: it still reaches the display, and nobody moved anything.
+            var repeats = Join([.. Enumerable.Repeat(Rfb.Pointer(100, 200, 0), 20)]);
+            var (open, through) = Run(drive: true, [repeats], filter);
+            Assert.IsTrue(open);
+            CollectionAssert.AreEqual(repeats, through);
+            Assert.IsFalse(filter.TakeInput());
+            // It moves, and then a button goes down where it is.
+            Run(drive: true, [Rfb.Pointer(101, 200, 0)], filter);
+            Assert.IsTrue(filter.TakeInput());
+            Run(drive: true, [Rfb.Pointer(101, 200, 1)], filter);
+            Assert.IsTrue(filter.TakeInput());
+        }
+    }
+
+    [TestMethod]
+    public void Input_is_noticed_again_after_it_was_taken()
+    {
+        var filter = new RfbClientFilter(drive: true);
+        Run(drive: true, [Join(Rfb.Handshake(), Rfb.Key())], filter);
+        Assert.IsTrue(filter.TakeInput());
+        Run(drive: true, [Rfb.UpdateRequest()], filter);
+        Assert.IsFalse(filter.TakeInput());
+        Run(drive: true, [Rfb.Pointer()], filter);
+        Assert.IsTrue(filter.TakeInput());
+        Run(drive: true, [Rfb.Key(down: false)], filter);
+        Assert.IsTrue(filter.TakeInput());
+    }
+
+    [TestMethod]
     public void A_driver_sends_everything_as_it_is()
     {
         var stream = Join(Rfb.Handshake(), Picture, Acting, Rfb.UpdateRequest());

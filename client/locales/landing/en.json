@@ -4,6 +4,7 @@
     "description": "Give each task its own cloud desktop with an AI agent working on it. Watch it live, take over when you want, and keep several going at once."
   },
   "nav": {
+    "docs": "Docs",
     "signIn": "Sign in",
     "start": "Get started"
   },

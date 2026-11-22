@@ -35,7 +35,7 @@ EOF
 
 # The agent and its packages.
 (cd "$ROOT/agent" && npm ci --omit=dev --no-audit --no-fund && npm cache clean --force >/dev/null 2>&1)
-chmod +x "$ROOT/start.sh" "$ROOT/session.sh" "$ROOT/panel.sh" "$ROOT/agent/shims/gh"
+chmod +x "$ROOT/start.sh" "$ROOT/session.sh" "$ROOT/panel.sh" "$ROOT/agent/shims/gh" "$ROOT"/image/*.sh
 
 # What the person's programs start with: no trust or telemetry questions in VS Code, the environment's
 # variables in every shell, a plain window manager and a plain background, which are quick to stream, and
@@ -119,7 +119,7 @@ if command -v dotnet >/dev/null; then
   dotnet dev-certs https --trust >/dev/null 2>&1 || dotnet dev-certs https >/dev/null
 fi
 if [ -d /opt/android-sdk/system-images ]; then
-  echo no | avdmanager create avd --force -n Phone -k "system-images;android-36;google_apis;x86_64" -d pixel_7 >/dev/null
+  /opt/workstream/image/phone.sh Phone
 fi
 EOF
 
@@ -134,15 +134,61 @@ if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   chmod +x "$ROOT/image/grow-disk.sh"
   install -m 0644 "$ROOT/image/workstream-grow-disk.service" /etc/systemd/system/workstream-grow-disk.service
   systemctl enable workstream-grow-disk.service
-  # A project's stack watches many files (Metro, dotnet watch, VS Code) and keeps many open.
+  # A desktop Azure can hibernate (api/Desktops/DesktopHosts.cs, Hibernate) writes its memory to its own disk
+  # when it is stopped, and is back as it was when it is started. Azure asks through the machine's Hyper-V
+  # tools; the kernel passes the request on as an event, and nothing in Debian answers it. So: room for the
+  # memory, made at boot, and the rule that answers the request (run as a unit of its own, because a rule's
+  # program may not turn swap on and is ended after a while). On a machine Azure was not asked to make
+  # hibernate, both do nothing (image/hibernate.sh).
+  chmod +x "$ROOT/image/hibernate.sh"
+  # Only the machine that hibernated wakes up from its disk; a copy started as another machine boots afresh.
+  install -m 0755 "$ROOT/image/resume-here.sh" /etc/initramfs-tools/scripts/init-premount/workstream-resume-here
+  update-initramfs -u
+  install -m 0644 "$ROOT/image/workstream-hibernate.service" /etc/systemd/system/workstream-hibernate.service
+  systemctl enable workstream-hibernate.service
+  cat > /etc/udev/rules.d/90-workstream-hibernate.rules <<'RULE'
+SUBSYSTEM=="vmbus", ACTION=="change", DRIVER=="hv_utils", ENV{EVENT}=="hibernate", RUN+="/usr/bin/systemd-run --no-block /opt/workstream/image/hibernate.sh now"
+RULE
+  # A project's stack watches many files (Metro, dotnet watch, VS Code) and keeps many open. The last line is
+  # for host.docker.internal, below.
   cat > /etc/sysctl.d/90-workstream.conf <<'CONF'
 fs.inotify.max_user_watches = 1048576
 fs.inotify.max_user_instances = 8192
 vm.max_map_count = 262144
+net.ipv4.conf.all.route_localnet = 1
 CONF
-  # Containers' logs are kept small, on a disk they share with the work.
   if [ -d /etc/docker ]; then
-    echo '{ "log-driver": "local", "log-opts": { "max-size": "20m", "max-file": "3" } }' > /etc/docker/daemon.json
+    # host.docker.internal. On a Mac, Docker Desktop gives every container that name for the computer it
+    # runs on, and projects' scripts and settings use it. Docker Engine on Linux has no such name, and no
+    # setting that adds one to every container, so a desktop gives it itself, with no change to a project:
+    #
+    #   - The name is one address, 172.16.255.254, in /etc/hosts. It is outside the networks Docker hands out
+    #     (172.17 to 172.31, and 192.168).
+    #   - Containers ask the desktop for names: Docker tells each one to ask at its bridge's address ("dns"),
+    #     where the desktop's own resolver listens as well and answers from /etc/hosts, then asks onward as
+    #     before. That covers `docker run`, a compose project's own network and the steps of a build.
+    #   - `--add-host host.docker.internal:host-gateway`, which projects written for Linux already pass, means
+    #     the same address ("host-gateway-ip").
+    #   - Whatever is sent to that address is delivered to the desktop's loopback address
+    #     (image/host-docker-internal.nft), so a server listening only on localhost answers too, as it does
+    #     through Docker Desktop.
+    #
+    # Checked when the image is baked (image/check-host-name.sh). Containers' logs are kept small, on a disk
+    # they share with the work.
+    cat > /etc/docker/daemon.json <<'JSON'
+{
+  "log-driver": "local",
+  "log-opts": { "max-size": "20m", "max-file": "3" },
+  "bip": "172.17.0.1/16",
+  "dns": ["172.17.0.1"],
+  "host-gateway-ip": "172.16.255.254"
+}
+JSON
+    grep -q "host.docker.internal" /etc/hosts || echo "172.16.255.254 host.docker.internal" >> /etc/hosts
+    install -d /etc/systemd/resolved.conf.d
+    printf '[Resolve]\nDNSStubListenerExtra=172.17.0.1\n' > /etc/systemd/resolved.conf.d/workstream.conf
+    install -m 0644 "$ROOT/image/workstream-host-name.service" /etc/systemd/system/workstream-host-name.service
+    systemctl enable workstream-host-name.service
   fi
   if systemctl cat docker.socket >/dev/null 2>&1; then
     systemctl disable docker.service containerd.service

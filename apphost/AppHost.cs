@@ -54,14 +54,11 @@ var api = builder
     // The agent's models: Workstream's Foundry resource (README, "Models"). Without these the agent says models are not set up.
     .WithEnvironment("Workstream__Model__Endpoint", Setting("WORKSTREAM_MODEL_ENDPOINT", ""))
     .WithEnvironment("Workstream__Model__Key", Setting("WORKSTREAM_MODEL_KEY", ""))
-    // A GitHub App of the developer's own, sending people back to this API (infra/README.md, "GitHub").
-    // Without one, teams see GitHub as not set up.
-    .WithEnvironment("Workstream__GitHub__AppId", Setting("WORKSTREAM_GITHUB_APP_ID", ""))
-    .WithEnvironment("Workstream__GitHub__AppSlug", Setting("WORKSTREAM_GITHUB_APP_SLUG", ""))
-    .WithEnvironment("Workstream__GitHub__ClientId", Setting("WORKSTREAM_GITHUB_CLIENT_ID", ""))
-    .WithEnvironment("Workstream__GitHub__ClientSecret", Setting("WORKSTREAM_GITHUB_CLIENT_SECRET", ""))
-    .WithEnvironment("Workstream__GitHub__PrivateKey", Setting("WORKSTREAM_GITHUB_PRIVATE_KEY", ""))
-    .WithEnvironment("Workstream__GitHub__WebhookSecret", Setting("WORKSTREAM_GITHUB_WEBHOOK_SECRET", ""))
+    // Sign in with GitHub: a GitHub OAuth client of the developer's own whose callback is this API's
+    // /sqlos/auth/oidc/callback (infra/README.md, "Sign in with GitHub"). Without both, the sign-in page
+    // shows no GitHub button and desktops get no GitHub token.
+    .WithEnvironment("SqlOS__Oidc__GitHub__ClientId", Setting("WORKSTREAM_GITHUB_OAUTH_CLIENT_ID", ""))
+    .WithEnvironment("SqlOS__Oidc__GitHub__ClientSecret", Setting("WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET", ""))
     .WithUrl(apiOrigin, "API")
     .WithUrl($"{apiOrigin}/sqlos", "SqlOS")
     .WithUrl($"{apiOrigin}/openapi/v1.json", "OpenAPI")
