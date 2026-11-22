@@ -1,0 +1,14 @@
+[Unit]
+Description=Workstream desktop: make room on the disk to hibernate into
+# Beside the desktop, not before it, and after the disk has grown: the room is as large as the machine's
+# memory. It does nothing on a machine Azure cannot hibernate (hibernate.sh).
+After=local-fs.target workstream-grow-disk.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/workstream/image/hibernate.sh prepare
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

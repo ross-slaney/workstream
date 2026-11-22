@@ -133,12 +133,26 @@ public sealed class DesktopOptions
         /// deployed with (infra/main.bicep). A machine made from it starts as it is, with nothing to provision.
         /// </summary>
         public string ImageId { get; set; } = "";
+        /// <summary>
+        /// Each size's machine. Azure hibernates the generation before this one (<c>Standard_D4as_v6</c> and its
+        /// siblings: the same cores, memory and price) and not this one, so a deployment that hibernates names
+        /// those here (infra/api.bicep).
+        /// </summary>
         public Dictionary<string, string> Sizes { get; set; } = new()
         {
             [DesktopSizes.Small] = "Standard_D2as_v7",
             [DesktopSizes.Standard] = "Standard_D4as_v7",
             [DesktopSizes.Large] = "Standard_D8as_v7",
         };
+        /// <summary>
+        /// Stopping a desktop hibernates it: Azure has the machine write its memory to its own disk before it is
+        /// released, and starting it again brings back every program as it was. Off unless a deployment turns it
+        /// on, because three things have to be true together: <see cref="Sizes"/> name machines Azure can
+        /// hibernate, the image is one whose gallery definition says it can (infra/gallery.bicep), and the
+        /// machines are made without Trusted Launch, which Azure refuses on a Linux machine that hibernates.
+        /// A machine that cannot hibernate, or that Azure will not hibernate when asked, is stopped as before.
+        /// </summary>
+        public bool Hibernate { get; set; }
         /// <summary>
         /// Each size's disk, in GiB: at least the image's 64. A large desktop is for a whole project's stack (its
         /// containers, packages and builds), so it has twice the room. A machine grows its file system to its disk
@@ -349,11 +363,6 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                     },
                 // The only two things a desktop is told. It reads the rest from the API with the key (desktop/agent/agent.mjs).
                 ["userData"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(spec.Told)),
-                ["securityProfile"] = new JsonObject
-                {
-                    ["securityType"] = "TrustedLaunch",
-                    ["uefiSettings"] = new JsonObject { ["secureBootEnabled"] = true, ["vTpmEnabled"] = true },
-                },
                 ["networkProfile"] = new JsonObject
                 {
                     ["networkApiVersion"] = "2022-11-01",
@@ -375,6 +384,22 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 },
             },
         };
+        var properties = body["properties"]!.AsObject();
+        if (Azure.Hibernate)
+        {
+            // Azure refuses Trusted Launch on a Linux machine that hibernates, so these machines are made without
+            // it. A machine preparing a saved setup is never started again, and its disk is copied for other
+            // machines: it is not one that hibernates, so no memory of it is ever on a disk a task starts from.
+            if (Hibernates(spec)) properties["additionalCapabilities"] = new JsonObject { ["hibernationEnabled"] = true };
+        }
+        else
+        {
+            properties["securityProfile"] = new JsonObject
+            {
+                ["securityType"] = "TrustedLaunch",
+                ["uefiSettings"] = new JsonObject { ["secureBootEnabled"] = true, ["vTpmEnabled"] = true },
+            };
+        }
         if (spec.Save is not null) await DiskFromSaveAsync(spec, ct);
         try
         {
@@ -389,6 +414,9 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         return new DesktopPlace(spec.Name, await AddressAsync(spec.Name, ct));
     }
 
+    /// <summary>Whether this machine is made to hibernate when it is stopped: every one but a machine preparing a saved setup, where the deployment hibernates.</summary>
+    bool Hibernates(DesktopSpec spec) => Azure.Hibernate && spec.Purpose != MachinePurpose.Prepare;
+
     /// <summary>A disk made from a saved setup, for the machine that is about to take it. It carries the save's security type with it.</summary>
     async Task DiskFromSaveAsync(DesktopSpec spec, CancellationToken ct)
     {
@@ -402,6 +430,8 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 ["creationData"] = new JsonObject { ["createOption"] = "Copy", ["sourceResourceId"] = IdOf(Snapshot(spec.Save!)) },
             },
         };
+        // A disk from the image is one that can hold a hibernated machine because the image says so; a disk made here says it itself.
+        if (Hibernates(spec)) disk["properties"]!["supportsHibernation"] = true;
         (await SendAsync(HttpMethod.Put, $"{DiskOf(spec.Name)}?api-version={DiskApi}", disk, ct)).Dispose();
         await MadeAsync($"{DiskOf(spec.Name)}?api-version={DiskApi}", $"The disk for the machine {spec.Name}", ct);
     }
@@ -456,9 +486,40 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
 
     public async Task StopAsync(string host, CancellationToken ct)
     {
+        if (Azure.Hibernate && await HibernateAsync(host, ct)) return;
         (await SendAsync(HttpMethod.Post, $"{Machine(host)}/deallocate?api-version={ComputeApi}", null, ct, missingIsDone: true)).Dispose();
-        await UntilAsync(host, machine => machine is null || Has(machine["properties"]?["instanceView"]?["statuses"]?.AsArray() ?? [], "PowerState/deallocated"), "stop", ct);
+        await UntilAsync(host, Released, "stop", ct);
     }
+
+    /// <summary>Azure has released the machine, or it is gone. A hibernated machine is released too: its memory is on its disk.</summary>
+    static bool Released(JsonNode? machine) => machine is null || Has(machine["properties"]?["instanceView"]?["statuses"]?.AsArray() ?? [], "PowerState/deallocated");
+
+    /// <summary>
+    /// Stop the machine by hibernating it: Azure asks the machine to write its memory to its disk and then
+    /// releases it, as a stop does, and the next start resumes it. False when the machine has to be stopped the
+    /// plain way instead: it was not made to hibernate (one from before the deployment hibernated, or one
+    /// preparing a saved setup), Azure refused, or the machine did not manage it in <see cref="HibernateWithin"/>.
+    /// </summary>
+    async Task<bool> HibernateAsync(string host, CancellationToken ct)
+    {
+        var machine = await ReadAsync(host, ct);
+        if (Released(machine)) return true;
+        if (machine!["properties"]?["additionalCapabilities"]?["hibernationEnabled"]?.GetValue<bool>() != true) return false;
+        try
+        {
+            (await SendAsync(HttpMethod.Post, $"{Machine(host)}/deallocate?hibernate=true&api-version={ComputeApi}", null, ct, missingIsDone: true)).Dispose();
+            await UntilAsync(host, Released, "hibernate", ct, HibernateWithin);
+            return true;
+        }
+        catch (Exception error) when (error is InvalidOperationException or TimeoutException)
+        {
+            log.LogWarning("The machine {Machine} did not hibernate, and is stopped without its memory instead: {Why}", host, error.Message);
+            return false;
+        }
+    }
+
+    /// <summary>How long a machine is given to hibernate before it is stopped the plain way.</summary>
+    static readonly TimeSpan HibernateWithin = TimeSpan.FromMinutes(5);
 
     public async Task DeleteAsync(string host, CancellationToken ct)
     {
@@ -538,9 +599,10 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     }
 
     /// <summary>Ask about the machine every few seconds until it is as wanted. A question Azure refuses is asked again.</summary>
-    async Task UntilAsync(string machine, Func<JsonNode?, bool> done, string what, CancellationToken ct)
+    async Task UntilAsync(string machine, Func<JsonNode?, bool> done, string what, CancellationToken ct, TimeSpan? within = null)
     {
-        var deadline = DateTimeOffset.UtcNow.AddMinutes(20);
+        var limit = within ?? TimeSpan.FromMinutes(20);
+        var deadline = DateTimeOffset.UtcNow + limit;
         while (DateTimeOffset.UtcNow < deadline)
         {
             await Task.Delay(TimeSpan.FromSeconds(3), ct);
@@ -555,7 +617,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 // Asked too often, or the connection dropped: the next question answers.
             }
         }
-        throw new TimeoutException($"The machine {machine} did not {what} in 20 minutes.");
+        throw new TimeoutException($"The machine {machine} did not {what} in {limit.TotalMinutes:0} minutes.");
     }
 
     /// <summary>
