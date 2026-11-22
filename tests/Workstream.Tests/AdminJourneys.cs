@@ -31,13 +31,9 @@ public sealed class AdminJourneys
         // A day in half hours, ending now with this desktop counted.
         Assert.AreEqual(49, overview.Running.Count);
         Assert.IsTrue(overview.Running[^1].Running >= 1);
-        // What the desktops cost: the machines' time by what they ran for, and a disk for every machine there is.
-        var tasksTime = overview.Machines.ThisMonth.Single(x => x.Purpose == MachinePurpose.Task);
+        // What the desktops cost: the machines' time by what they ran for and at which size, at that size's price.
+        var tasksTime = overview.Machines.ThisMonth.Single(x => x.Purpose == MachinePurpose.Task && x.Size == DesktopSizes.Standard);
         Assert.IsTrue(tasksTime.Hours >= 0 && tasksTime.Usd >= 0);
-        Assert.IsTrue(overview.Machines.Disks >= 1);
-        // Each disk at its size's price: $4.80 for a small or standard desktop's 64 GiB, $9.60 for a large one's 128 (other journeys run beside this one).
-        Assert.IsTrue(overview.Machines.DisksMonthlyUsd >= overview.Machines.Disks * 4.80m && overview.Machines.DisksMonthlyUsd <= overview.Machines.Disks * 9.60m);
-        Assert.AreEqual(0m, overview.Machines.DisksMonthlyUsd % 4.80m);
         // How long starts take, from what was written down as this one happened: it was a new machine, and it got as far as its agent.
         var fromImage = overview.Starts.Single(x => x.Source == StartSource.Image);
         Assert.IsTrue(fromImage.Starts >= 1);

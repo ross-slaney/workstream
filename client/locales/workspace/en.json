@@ -21,8 +21,10 @@
     "starting": "Starting",
     "ready": "Ready",
     "working": "Working",
-    "stopping": "Stopping",
-    "stopped": "Stopped",
+    "stopping": "Pausing",
+    "stopped": "Paused",
+    "archiving": "Archiving",
+    "archived": "Archived",
     "failed": "Failed",
     "deleting": "Deleting"
   },
@@ -44,7 +46,8 @@
     "rename": "Rename",
     "renameTitle": "Rename the task",
     "titleLabel": "Title",
-    "stop": "Stop the desktop",
+    "pause": "Pause the desktop",
+    "resume": "Resume the desktop",
     "start": "Start the desktop",
     "delete": "Delete the task",
     "deleteTitle": "Delete this task?",
@@ -63,14 +66,27 @@
       },
       "elapsed": "{seconds} s"
     },
-    "stopping": {
-      "title": "Stopping the desktop",
+    "pausing": {
+      "title": "Pausing the desktop",
       "body": "The machine is being released. Its files are kept."
     },
-    "stopped": {
-      "title": "The desktop is stopped",
-      "body": "Its files are kept. Start it to continue where the task left off.",
-      "cta": "Start the desktop"
+    "paused": {
+      "title": "The desktop is paused",
+      "click": "Its machine is released and its files are kept. Click here or send a message, and it resumes in about half a minute.",
+      "message": "Its machine is released and its files are kept. Send a message, and it resumes in about half a minute.",
+      "none": "Its machine is released and its files are kept. Someone who can write to its agent or use its desktop can resume it.",
+      "cta": "Resume"
+    },
+    "archiving": {
+      "title": "Archiving the desktop",
+      "body": "It has been paused for a long time, so its disk is being saved and its machine deleted. Nothing is lost. You can bring it back in a minute."
+    },
+    "archived": {
+      "title": "The desktop is archived",
+      "click": "It was paused for a long time, so its disk was saved and its machine deleted. Nothing is lost. Click here or send a message, and it comes back in about a minute.",
+      "message": "It was paused for a long time, so its disk was saved and its machine deleted. Nothing is lost. Send a message, and it comes back in about a minute.",
+      "none": "It was paused for a long time, so its disk was saved and its machine deleted. Nothing is lost. Someone who can write to its agent or use its desktop can bring it back.",
+      "cta": "Bring it back"
     },
     "failed": {
       "title": "The desktop did not start",
@@ -92,9 +108,13 @@
     "agent": "Agent",
     "atDesktop": "From the desktop",
     "waitingForDesktop": "The agent will read this when the desktop is ready.",
-    "desktopStopped": "The desktop is stopped. Start it and the agent reads this.",
     "notSent": "Not sent. Try again.",
-    "agentStarting": "The agent is starting. It reads what you asked for in a moment."
+    "agentStarting": "The agent is starting. It reads what you asked for in a moment.",
+    "desktopPausing": "The desktop is being paused. The agent reads a message you send now when the desktop is resumed.",
+    "desktopPaused": "The desktop is paused. Send a message and it resumes; the agent reads it when it is up.",
+    "desktopArchiving": "The desktop is being archived. Send this in a minute, and it comes back.",
+    "desktopArchived": "The desktop is archived. Send a message and it comes back; the agent reads it when it is up.",
+    "desktopFailed": "The desktop did not start. Start it again and the agent reads this."
   },
   "newTask": {
     "title": "New task",
@@ -155,7 +175,6 @@
     "revoke": "Take back",
     "withdraw": "Withdraw",
     "watchOnly": "This task is shared with you to watch. Ask whoever shared it if you need to write to the agent.",
-    "stoppedBody": "Its files are kept. Someone on the task's team can start it again.",
     "badge": {
       "watcher": "Shared to watch",
       "prompter": "Shared with you",

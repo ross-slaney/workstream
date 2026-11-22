@@ -12,6 +12,8 @@
     "check": "npm run typecheck && npm run test"
   },
   "dependencies": {
+    "@agenetix/docs": "^1.4.0",
+    "@bacons/mdx": "^1.0.3",
     "@novnc/novnc": "1.4.0",
     "@sqlos/headless": "11.4.1",
     "clsx": "^2.1.1",
@@ -23,6 +25,7 @@
     "expo-server": "~58.0.6",
     "expo-status-bar": "~58.0.4",
     "express": "^5.3.0",
+    "gray-matter": "^4.0.3",
     "i18next": "^27.1.1",
     "i18next-icu": "^2.7.0",
     "intl-messageformat": "^12.1.5",
@@ -40,6 +43,7 @@
     "react-native-svg": "15.16.0",
     "react-native-web": "^0.21.4",
     "react-native-worklets": "0.13.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^3.4.19"
   },

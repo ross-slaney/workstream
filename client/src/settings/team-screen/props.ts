@@ -2,10 +2,11 @@ import type { Online } from "@/lib/online";
 import type { GitHub, GitHubRepository, PendingInvitation, Team, TeamPerson } from "@/lib/workstream/api";
 
 /**
- * A team: its name, who is on it, inviting someone, and its GitHub connection. Everyone sees the people and
- * the connection with the repositories it reaches; an administrator can also rename the team, invite, change
- * who administers it, remove someone, and connect or disconnect GitHub. Anyone can leave. Below, the
- * person's own switch for the emails about tasks.
+ * A team: its name, who is on it, inviting someone, when its desktops are paused and archived, and its GitHub
+ * connection. Everyone sees the people, the two times, and the connection with the repositories it reaches;
+ * an administrator can also rename the team, invite, change who administers it, remove someone, change the
+ * two times, and connect or disconnect GitHub. Anyone can leave. Below, the person's own switch for the emails
+ * about tasks.
  */
 export type TeamScreenProps = {
   team: Team | null;
@@ -29,6 +30,8 @@ export type TeamScreenProps = {
   error: string | null;
   onRetry: () => void;
   onRename: (name: string) => void;
+  /** Change when the team's desktops are paused (minutes without use) and archived (days paused). */
+  onDesktopTimes: (pauseAfterMinutes: number, archiveAfterDays: number) => void;
   onInvite: (email: string, admin: boolean) => void;
   onDismissInvited: () => void;
   onWithdraw: (invitationId: string) => void;

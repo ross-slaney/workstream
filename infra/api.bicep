@@ -48,8 +48,13 @@ param githubPrivateKey string = ''
 @description('Optional: the app\'s webhook secret. Without it the webhook is not taken.')
 @secure()
 param githubWebhookSecret string = ''
+@description('Sign in with GitHub (api/Workstream.cs SeedGitHubSignIn): the id of the GitHub OAuth client people sign in with, and its secret. Both, or the sign-in page shows no GitHub button.')
+param gitHubSignInClientId string = ''
+@secure()
+param gitHubSignInClientSecret string = ''
 
 var models = !empty(modelEndpoint) && !empty(modelKey)
+var gitHubSignIn = !empty(gitHubSignInClientId) && !empty(gitHubSignInClientSecret)
 var gitHubApp = !empty(github.?appId ?? '') && !empty(github.?appSlug ?? '') && !empty(github.?clientId ?? '') && !empty(githubClientSecret) && !empty(githubPrivateKey)
 var gitHubWebhook = gitHubApp && !empty(githubWebhookSecret)
 var email = !empty(communication)
@@ -72,7 +77,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
       secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [], gitHubApp ? [
         { name: 'github-client-secret', value: githubClientSecret }
         { name: 'github-private-key', value: githubPrivateKey }
-      ] : [], gitHubWebhook ? [{ name: 'github-webhook-secret', value: githubWebhookSecret }] : [])
+      ] : [], gitHubWebhook ? [{ name: 'github-webhook-secret', value: githubWebhookSecret }] : [], gitHubSignIn ? [{ name: 'github-sign-in-client-secret', value: gitHubSignInClientSecret }] : [])
       registries: [{ server: registryHost, identity: identityId }]
       ingress: {
         external: true
@@ -132,6 +137,9 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'Workstream__GitHub__PrivateKey', secretRef: 'github-private-key' }
         ] : [], gitHubWebhook ? [
           { name: 'Workstream__GitHub__WebhookSecret', secretRef: 'github-webhook-secret' }
+        ] : [], gitHubSignIn ? [
+          { name: 'SqlOS__Oidc__GitHub__ClientId', value: gitHubSignInClientId }
+          { name: 'SqlOS__Oidc__GitHub__ClientSecret', secretRef: 'github-sign-in-client-secret' }
         ] : [])
         probes: [
           { type: 'Startup', httpGet: { path: '/health', port: 8080 }, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 90 }

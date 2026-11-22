@@ -13,18 +13,31 @@ export type Me = { userId: string; name: string; email: string | null; systemAdm
 /** The person's own settings: `taskEmails` is whether they are emailed when a task they started or wrote in is finished or needs them. */
 export type MySettings = { taskEmails: boolean };
 
-export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number };
+/** `pauseAfterMinutes`: a desktop nobody has used for that long is paused. `archiveAfterDays`: a desktop paused for that long is archived. */
+export type Team = { id: string; name: string; admin: boolean; modelAllowanceUsd: number; maxRunningDesktops: number; pauseAfterMinutes: number; archiveAfterDays: number };
 
 export type TeamPerson = { userId: string; name: string; email: string | null; admin: boolean; joinedAt: string };
 
 /** `link` comes only with the answer to making it; `emailed` says whether Workstream sent it to them as well. */
 export type PendingInvitation = { id: string; email: string; admin: boolean; expiresAt: string; link: string | null; emailed: boolean };
 
+/** The hours a team's desktops of one size (`small`, `standard`, `large`) ran this month. */
+export type SizeHours = { size: string; hours: number };
+
+/**
+ * The storage of one kind a team kept this month: `disk` (desktops' disks, at their full size), `archive`
+ * (archived tasks) or `setup` (environments' saved setups), both at what is on them. `gb` is kept now;
+ * `gbMonths` is the month so far, a gigabyte kept for the whole month being one.
+ */
+export type StorageUse = { kind: string; gb: number; gbMonths: number };
+
+/** What a team used this month, in the units a bill would use. A size or a kind it did not use is not listed. */
 export type TeamUsage = {
   since: string;
   modelSpentUsd: number;
   modelAllowanceUsd: number;
-  desktopHours: number;
+  desktopHours: SizeHours[];
+  storage: StorageUse[];
   runningDesktops: number;
   maxRunningDesktops: number;
 };
@@ -103,7 +116,12 @@ export type WriteEnvironment = {
   variables: VariableChange[];
 };
 
-export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "failed" | "deleting";
+/**
+ * Where a task's desktop is. `stopping` and `stopped` are what people read as pausing and paused: the machine
+ * is released and its disk kept. `archived`: the disk is kept as a copy and the machine is deleted; starting
+ * makes a new machine from the copy.
+ */
+export type DesktopState = "starting" | "ready" | "stopping" | "stopped" | "archiving" | "archived" | "failed" | "deleting";
 
 /**
  * How far a starting desktop has come: its machine is being made or turned on, the machine is on and starting
@@ -169,15 +187,18 @@ export type TeamNumbers = {
   desktopHours: number;
 };
 
-/** What machines cost this month for one purpose: `task` (tasks' desktops), `spare` or `prepare` (machines preparing an environment's setup). */
-export type MachineCost = { purpose: string; hours: number; usd: number };
+/** What machines of one size cost this month for one purpose: `task` (tasks' desktops), `spare` or `prepare` (machines preparing an environment's setup). */
+export type MachineCost = { purpose: string; size: string; hours: number; usd: number };
+
+/** What storage of one kind (`disk`, `archive`, `setup`) cost this month over every team: how many are kept now and their gigabytes, the month's GB-months, and their cost. */
+export type StorageCost = { kind: string; kept: number; gb: number; gbMonths: number; usd: number };
 
 export type SpareNow = { teamId: string; teamName: string; size: string; state: string; since: string };
 
-/** The machines' time this month by purpose, the disks and the saved setups kept now at what they cost a month, and the spares running now. */
-export type MachineCosts = { thisMonth: MachineCost[]; disks: number; disksMonthlyUsd: number; saves: number; savesMonthlyUsd: number; spares: SpareNow[] };
+/** The machines' time this month by purpose and size, the storage kept by kind, and the spares running now. */
+export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; spares: SpareNow[] };
 
-/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`): how many, and the middle one's seconds to a screen and to the agent. */
+/** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`, `archive`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
 
 export type AdminOverview = {
@@ -206,6 +227,8 @@ export const workstream = {
   team: (teamId: string) => apiJson<Team>(`/api/teams/${id(teamId)}`),
   createTeam: (name: string) => apiSend<Team>("POST", "/api/teams", { name }),
   renameTeam: (teamId: string, name: string) => apiSend<Team>("PUT", `/api/teams/${id(teamId)}`, { name }),
+  setDesktopTimes: (teamId: string, pauseAfterMinutes: number, archiveAfterDays: number) =>
+    apiSend<Team>("PUT", `/api/teams/${id(teamId)}/desktop-times`, { pauseAfterMinutes, archiveAfterDays }),
   usage: (teamId: string) => apiJson<TeamUsage>(`/api/teams/${id(teamId)}/usage`),
 
   people: (teamId: string) => apiJson<TeamPerson[]>(`/api/teams/${id(teamId)}/people`),

@@ -32,6 +32,8 @@ public sealed class FakeDesktops : IDesktopHost
         if (Refuse.ContainsKey(spec.DesktopId)) throw new InvalidOperationException("No capacity.");
         // As Azure: a disk is made from a saved setup only while the setup is there.
         if (spec.Save is not null && !Saves.ContainsKey(spec.Save)) throw new InvalidOperationException($"The saved setup {spec.Save} is not there.");
+        // The same for an archive: a machine comes back only from one the host still holds.
+        if (spec.Archive is not null && !Archives.ContainsKey(spec.Archive)) throw new InvalidOperationException($"The archive {spec.Archive} is not there.");
         Made[spec.Name] = spec;
         Running[spec.Name] = true;
         return Task.FromResult(new DesktopPlace(spec.Name, Display.Address));
@@ -87,6 +89,31 @@ public sealed class FakeDesktops : IDesktopHost
 
     public Task<IReadOnlyList<HostedMachine>> ListSavesAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<HostedMachine>>(Saves.Select(save => new HostedMachine(save.Key, save.Value.At)).ToList());
+
+    /// <summary>The archives the host holds, by name, with the machine each was copied from and when.</summary>
+    public ConcurrentDictionary<string, (string Machine, DateTimeOffset At)> Archives { get; } = new();
+    /// <summary>Machines whose disk cannot be copied to an archive: the host refuses, as Azure does on a bad hour.</summary>
+    public ConcurrentDictionary<string, bool> RefuseArchive { get; } = new();
+    /// <summary>What the played host says every archive holds, in bytes.</summary>
+    public const long ArchiveBytes = 64L * 1024 * 1024 * 1024;
+
+    public Task<long?> ArchiveAsync(string host, string name, CancellationToken ct)
+    {
+        if (RefuseArchive.ContainsKey(host)) throw new InvalidOperationException("The disk could not be copied.");
+        if (!Made.ContainsKey(host)) throw new InvalidOperationException($"The machine {host} is gone.");
+        if (Running.GetValueOrDefault(host)) throw new InvalidOperationException("Only a stopped machine's disk can be archived.");
+        Archives[name] = (host, DateTimeOffset.UtcNow);
+        return Task.FromResult<long?>(ArchiveBytes);
+    }
+
+    public Task DeleteArchiveAsync(string name, CancellationToken ct)
+    {
+        Archives.TryRemove(name, out _);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<HostedMachine>> ListArchivesAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<HostedMachine>>(Archives.Select(archive => new HostedMachine(archive.Key, archive.Value.At)).ToList());
 
     /// <summary>What the machine for this desktop (a task's id, or a spare's) was made with.</summary>
     public DesktopSpec For(string desktopId) => Made.Values.Single(spec => spec.DesktopId == desktopId);

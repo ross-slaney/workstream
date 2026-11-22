@@ -12,8 +12,11 @@ using static Workstream.Api.WorkstreamAuthorization;
 
 namespace Workstream.Api;
 
-/// <summary>A team, with whether the caller administers it and what it may use.</summary>
-public sealed record TeamDto(string Id, string Name, bool Admin, decimal ModelAllowanceUsd, int MaxRunningDesktops);
+/// <summary>
+/// A team, with whether the caller administers it, what it may use, and when its desktops are paused (minutes
+/// without use) and archived (days paused).
+/// </summary>
+public sealed record TeamDto(string Id, string Name, bool Admin, decimal ModelAllowanceUsd, int MaxRunningDesktops, int PauseAfterMinutes, int ArchiveAfterDays);
 
 public sealed record WriteTeam(string Name);
 
@@ -39,6 +42,9 @@ public sealed record AddEnvironment(
 
 public sealed record SetLimits(decimal ModelAllowanceUsd, int MaxRunningDesktops);
 
+/// <summary>When a team's desktops are paused, in minutes without use, and archived, in days paused.</summary>
+public sealed record SetDesktopTimes(int PauseAfterMinutes, int ArchiveAfterDays);
+
 public static partial class WorkstreamApi
 {
     static void MapTeams(RouteGroupBuilder api)
@@ -47,6 +53,7 @@ public static partial class WorkstreamApi
         api.MapPost("/teams", CreateTeam).WithName("create_team").WithTags("Teams").Produces<TeamDto>(201);
         api.MapGet("/teams/{teamId}", GetTeam).WithName("get_team").WithTags("Teams").Produces<TeamDto>();
         api.MapPut("/teams/{teamId}", RenameTeam).WithName("rename_team").WithTags("Teams").Produces<TeamDto>().ProducesProblem(403);
+        api.MapPut("/teams/{teamId}/desktop-times", SetTeamDesktopTimes).WithName("set_team_desktop_times").WithTags("Teams").Produces<TeamDto>().ProducesProblem(400).ProducesProblem(403);
         api.MapGet("/teams/{teamId}/usage", GetUsage).WithName("get_team_usage").WithTags("Teams").Produces<TeamUsage>();
 
         api.MapGet("/teams/{teamId}/people", ListPeople).WithName("list_people").WithTags("People").Produces<IReadOnlyList<TeamPerson>>();
@@ -75,7 +82,8 @@ public static partial class WorkstreamApi
     }
 
     static async Task<TeamDto> ToDtoAsync(Team team, string name, Caller caller, ISqlOSFgaAuthService fga) =>
-        new(team.Id, name, await fga.Allows(caller.PrincipalId, Permissions.TeamManageMembers, team.ResourceId), team.ModelAllowanceUsd, team.MaxRunningDesktops);
+        new(team.Id, name, await fga.Allows(caller.PrincipalId, Permissions.TeamManageMembers, team.ResourceId), team.ModelAllowanceUsd, team.MaxRunningDesktops,
+            team.PauseAfterMinutes, team.ArchiveAfterDays);
 
     static async Task<IResult> ListTeams(string? cursor, int? pageSize, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
     {
@@ -113,6 +121,12 @@ public static partial class WorkstreamApi
     {
         var caller = CallerOf(http);
         return await TeamResultAsync(await Operations.RenameTeamAsync(caller, teamId, body.Name, db, fga, admin, ct), caller, db, fga, ct);
+    }
+
+    static async Task<IResult> SetTeamDesktopTimes(string teamId, SetDesktopTimes body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, CancellationToken ct)
+    {
+        var caller = CallerOf(http);
+        return await TeamResultAsync(await Operations.SetDesktopTimesAsync(caller, teamId, body.PauseAfterMinutes, body.ArchiveAfterDays, db, fga, ct), caller, db, fga, ct);
     }
 
     static async Task<IResult> GetUsage(string teamId, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, TimeProvider clock, CancellationToken ct)

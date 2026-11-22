@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Workstream.Api;
@@ -179,7 +180,7 @@ public sealed class TaskJourneys
         await ada.PostAsync($"/api/teams/{team.Id}/tasks", new StartTask(Guid.NewGuid().ToString("D"), environment, null, "A third.", Guid.NewGuid().ToString("D")))
             .IsAsync(HttpStatusCode.PaymentRequired, "limit_reached");
 
-        // Stopping one makes room, and the stopped one cannot start while the room is taken again.
+        // Pausing one makes room, and the paused one cannot start while the room is taken again.
         await ada.PostAsync($"/api/tasks/{first.Id}/stop").IsAsync(HttpStatusCode.OK);
         await Stack.Jobs.StopAsync(first.Id, CancellationToken.None);
         await StartAsync(ada, team.Id, environment, "A third.");
@@ -304,7 +305,7 @@ public sealed class TaskJourneys
     }
 
     [TestMethod]
-    public async Task The_sweep_stops_an_idle_desktop_fails_one_that_never_arrived_and_removes_strays()
+    public async Task The_sweep_pauses_an_unused_desktop_fails_one_that_never_arrived_and_removes_strays()
     {
         var (ada, team, environment) = await TeamAsync();
         var idle = await StartAsync(ada, team.Id, environment, "Left alone.");
@@ -319,9 +320,15 @@ public sealed class TaskJourneys
         await Stack.Desktops.CreateAsync(new DesktopSpec("ws-new-00000000000", Guid.NewGuid().ToString("D"), team.Id, "standard", "", ""), CancellationToken.None);
         Stack.Desktops.MadeAt["ws-new-00000000000"] = DateTimeOffset.UtcNow.AddMinutes(-1);
 
-        // The same sweep with no patience: idle at once, late at once.
+        // Nobody has used the first for longer than its team's half hour (PauseJourneys has what counts as use).
+        using (var scope = Stack.Services.CreateScope())
+        {
+            var longAgo = DateTimeOffset.UtcNow.AddMinutes(-31);
+            await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Tasks.Where(x => x.Id == idle.Id).ExecuteUpdateAsync(x => x.SetProperty(task => task.ActiveAt, longAgo));
+        }
+        // The same sweep with no patience for a start: late at once.
         var impatient = new DesktopJobs(
-            Stack.Services.GetRequiredService<IServiceScopeFactory>(), Stack.Desktops, new DesktopOptions { Host = "none", IdleMinutes = 0, StartTimeoutMinutes = 0 },
+            Stack.Services.GetRequiredService<IServiceScopeFactory>(), Stack.Desktops, new DesktopOptions { Host = "none", StartTimeoutMinutes = 0 },
             TimeProvider.System, Stack.Services.GetRequiredService<ILogger<DesktopJobs>>());
         await Task.Delay(TimeSpan.FromMilliseconds(50));
         await impatient.SweepAsync(CancellationToken.None);

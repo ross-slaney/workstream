@@ -1,7 +1,8 @@
-# Only what Dockerfile copies: the exported bundle and the server adapter. The source is exported outside
+# Only what Dockerfile copies: the exported bundle, the server adapter and the docs pages. The source is exported outside
 # Docker (scripts/export-web.sh), never from a developer's .env.
 *
 !dist/
+!content/
 !server/package.json
 !server/package-lock.json
 !server.js

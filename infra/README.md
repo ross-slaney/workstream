@@ -1,6 +1,6 @@
 # Infrastructure
 
-Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with two exceptions written down below: the Foundry resource and its model deployments, and Workstream's GitHub App.
+Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with three exceptions written down below: the Foundry resource and its model deployments, Workstream's GitHub App, and the GitHub OAuth client people sign in with.
 
 ## What is deployed
 
@@ -56,6 +56,15 @@ For GitHub, the same environment takes six more, all made when the GitHub App is
 | `GH_APP_WEBHOOK_SECRET` | secret | Optional. The app's webhook secret. |
 
 Without the first five, teams see that GitHub is not set up, and everything else works.
+
+For signing in with GitHub, the same environment takes two more, made when the OAuth client is (see "Sign in with GitHub" below):
+
+| Name | Kind | What |
+| --- | --- | --- |
+| `GH_OAUTH_CLIENT_ID` | variable | The OAuth client's Client ID. |
+| `GH_OAUTH_CLIENT_SECRET` | secret | A client secret of the OAuth client. |
+
+Without both, the sign-in page shows no GitHub button and people sign in by emailed code, as before.
 
 ## Releasing
 
@@ -161,6 +170,41 @@ An app sends people back to one callback address, so staging needs an app of its
 
 A new client secret or private key is added on the app's page beside the old one; set the GitHub secret to the new value, publish a release, then delete the old one on GitHub. Tokens already handed to desktops last out their hour.
 
+## Sign in with GitHub
+
+People can sign in with GitHub beside the emailed code. It is SqlOS's GitHub connection, seeded by the API at start from two settings (`SqlOS:Oidc:GitHub:ClientId` and `SqlOS:Oidc:GitHub:ClientSecret`; `api/Workstream.cs`, `SeedGitHubSignIn`). It needs a GitHub OAuth client, which GitHub calls an "OAuth App". This is not Workstream's GitHub App above: that one reaches repositories, this one only says who a person is. It is the third thing made by hand, because GitHub has no way to make one without a person filling its form.
+
+### Making the OAuth client for production
+
+1. Open https://github.com/organizations/agenetix/settings/applications/new (the organization's **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App**).
+2. **Application name**: `Workstream`. People see it on GitHub's page when they sign in.
+3. **Homepage URL**: `https://workstream-web.happyhill-808cd2a4.westus3.azurecontainerapps.io`
+4. **Authorization callback URL**: `https://workstream-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/sqlos/auth/oidc/callback`. It is SqlOS's address on the API, not the web app's, and it must match exactly.
+5. Leave **Enable Device Flow** off. **Register application**.
+6. Copy the **Client ID**. **Generate a new client secret** and copy it; GitHub shows it once.
+7. Put the two values on the `production` environment:
+
+```bash
+gh variable set GH_OAUTH_CLIENT_ID --env production --body "<client id>"
+gh secret set GH_OAUTH_CLIENT_SECRET --env production   # paste the secret when asked
+```
+
+8. Publish the next release. Its deploy passes them on (`.github/actions/deploy`, `infra/api.bicep`), and the sign-in page then shows **Continue with GitHub**.
+
+The client asks GitHub for a person's profile and email addresses (`read:user`, `user:email`) and nothing else. A person needs a verified primary email address on GitHub; an address that already has a Workstream account signs in to that account.
+
+To check it once deployed: sign out, press **Continue with GitHub**, approve on GitHub, and you are in your workspace. Do it once with a GitHub account whose address already has a Workstream account, and once with one that has none, which gets a team of its own.
+
+To turn it off after it has been on, taking the two values away is not enough: SqlOS keeps a connection it was once given, with its button, until the connection is disabled. That is its row in SqlOS's `SqlOSAuthOidcConnections` table, `IsEnabled` (see "Database access"); development has SqlOS's own dashboard for it at `/sqlos`.
+
+### Staging and development
+
+A GitHub OAuth client sends people back to one callback address, so each place needs a client of its own. Staging: the same steps with `Workstream staging` as its name, `https://workstream-staging-web.happyhill-808cd2a4.westus3.azurecontainerapps.io` as its homepage and `https://workstream-staging-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/sqlos/auth/oidc/callback` as its callback, and the same two names on the `staging` environment. A laptop: homepage `http://localhost:8091`, callback `http://localhost:5280/sqlos/auth/oidc/callback`, and `WORKSTREAM_GITHUB_OAUTH_CLIENT_ID` and `WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET` in `.env` (`.env.example`). The two are set together or not at all: the API refuses to start with only one.
+
+### Rotating
+
+Generate a new client secret on the OAuth client's page beside the old one, set `GH_OAUTH_CLIENT_SECRET` to it, publish a release, then delete the old one on GitHub. Nobody is signed out: sessions are SqlOS's own.
+
 ## Database access
 
 The SQL server's one administrator is the Entra group `workstream-sql-admins`. The runtime identity is in it; a person who needs to read or fix data is added to it:
@@ -193,7 +237,8 @@ The prices are Azure's list prices in West US 3, kept in one place (`DesktopOpti
 | | |
 | --- | --- |
 | A task's desktop, running | $0.091 (Small), $0.182 (Standard) or $0.364 (Large) an hour |
-| A desktop's disk, running or stopped, until its task is deleted | $4.80 a month (Standard SSD, 64 GB: Small and Standard) or $9.60 (128 GB: Large) |
+| A desktop's disk, running or paused, until it is archived or its task is deleted | $4.80 a month (Standard SSD, 64 GB: Small and Standard) or $9.60 (128 GB: Large) |
+| An archived desktop's archive, in place of its disk | $0.05 a month for each GB that was on the disk (a full snapshot on standard storage, billed on the used size) |
 | A spare, while someone is in a team's workspace | the same hourly price as a desktop of its size |
 | A machine preparing an environment's setup | the same hourly price as a desktop of its size, until its disk is saved |
 | An environment's saved setup | $0.05 a month for each GB on it (a full snapshot on standard storage, billed on the used size) |

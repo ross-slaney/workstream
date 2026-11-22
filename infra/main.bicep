@@ -48,6 +48,10 @@ param githubClientSecret string = ''
 param githubPrivateKey string = ''
 @secure()
 param githubWebhookSecret string = ''
+@description('Sign in with GitHub: the Client ID of the GitHub OAuth client people sign in with, the GitHub variable GH_OAUTH_CLIENT_ID, and its secret, the secret GH_OAUTH_CLIENT_SECRET (infra/README.md, "Sign in with GitHub"). The client is made by hand, once; without both the sign-in page shows no GitHub button.')
+param gitHubSignInClientId string = ''
+@secure()
+param gitHubSignInClientSecret string = ''
 
 var production = empty(stage)
 var shared = 'workstream'
@@ -151,6 +155,8 @@ module api 'api.bicep' = {
     githubClientSecret: githubClientSecret
     githubPrivateKey: githubPrivateKey
     githubWebhookSecret: githubWebhookSecret
+    gitHubSignInClientId: gitHubSignInClientId
+    gitHubSignInClientSecret: gitHubSignInClientSecret
   }
 }
 

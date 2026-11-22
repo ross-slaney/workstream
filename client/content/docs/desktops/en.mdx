@@ -1,0 +1,62 @@
+---
+title: "Desktops"
+description: "What is installed on a Workstream desktop, the three sizes, and how long a desktop takes to start."
+order: 2
+updated: 2026-11-21
+---
+
+A desktop is a Debian Linux virtual machine with the XFCE graphical desktop. Each task has its own. The person on the desktop can use `sudo` without a password and can run Docker, and so can the agent.
+
+## Apps
+
+An environment chooses which apps get a button on the desktop's panel.
+
+| App | What it is | On by default |
+| --- | --- | --- |
+| Chrome | The web browser (Chromium). The agent uses it where you can watch. | Yes |
+| VS Code | The code editor. Files the agent changes open here. | Yes |
+| Terminal | A command line. | Yes |
+| Files | The file manager. | Yes |
+| Writer | Documents (LibreOffice). | No |
+| Calc | Spreadsheets (LibreOffice). | No |
+| Impress | Slides (LibreOffice). | No |
+
+## Developer tools
+
+These are installed on every desktop, whatever the environment:
+
+- git, Git LFS and the GitHub CLI (`gh`)
+- Node.js 22
+- Python 3 with pip and venv
+- The .NET 10 SDK
+- Docker Engine with Compose and Buildx
+- A C and C++ toolchain (`build-essential`)
+- Java 17 and the Android SDK
+- `sqlcmd`, for SQL Server in a container
+- The system libraries Playwright's browsers need. The browsers themselves are the project's own version, installed with `npx playwright install`.
+
+Anything else a project needs goes in the environment's [setup script](/docs/environments#setup-script).
+
+Two things do not run on a desktop today. The Android emulator does not start on the machines the three sizes use, though Android builds work on all of them. iPhone and iPad builds and the iOS simulator need macOS, which a Linux desktop cannot run.
+
+## Sizes
+
+An environment chooses the size of its desktops.
+
+| Size | Processor | Memory | Disk |
+| --- | --- | --- | --- |
+| Small | 2 cores | 8 GB | 64 GB |
+| Standard | 4 cores | 16 GB | 64 GB |
+| Large | 8 cores | 32 GB | 128 GB |
+
+A project that runs a database, an API and a web bundler at the same time wants Large.
+
+## How long a start takes
+
+A new desktop's screen is in your browser about half a minute after you start the task. Getting the machine is the slow part, between fifteen seconds and a minute. The screen appears a few seconds before the agent says anything, and while you wait the task shows which step it is on: getting a computer, turning it on, starting the agent.
+
+After that the agent prepares the desktop where you can watch: it clones the environment's repository and runs its setup script in a terminal window. For a project with a long setup this is the longest part of a start, which is what a [saved setup](/docs/environments#saved-setup) removes.
+
+## The network
+
+A desktop has no public address. It reaches the internet through an outbound gateway, so it can clone repositories, install packages and open web pages, and nothing on the internet can connect to it. It cannot reach another desktop. [Security](/docs/security) has the rest.
