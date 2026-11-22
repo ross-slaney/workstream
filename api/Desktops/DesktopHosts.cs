@@ -585,9 +585,10 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     }
 
     /// <summary>
-    /// How long a machine is given to hibernate before it is stopped the plain way. Azure itself waits ten
-    /// minutes for the machine and then calls the request failed, which ends the wait here sooner; a stop asked
-    /// for before that only waits behind it. Writing memory took about ten seconds for each gigabyte in use.
+    /// How long a machine is given to hibernate before it is stopped the plain way. Azure itself waited ten
+    /// minutes for a machine that did not hibernate before it gave up, and a stop asked for before that only
+    /// waited behind it, so this is a little longer. Writing memory took about seven seconds for each
+    /// gigabyte in use.
     /// </summary>
     static readonly TimeSpan HibernateWithin = TimeSpan.FromMinutes(12);
 

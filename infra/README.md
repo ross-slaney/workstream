@@ -113,21 +113,21 @@ Machines made the way the API makes them, without Trusted Launch, with a desktop
 
 | | Standard (`D4as_v6`, 16 GB) | Large (`D8as_v6`, 32 GB) |
 | --- | --- | --- |
-| Pause: until Azure has released the machine | HIBERNATE_STD | HIBERNATE_LARGE |
-| Resume: until the display answers | RESUME_DISPLAY_STD | RESUME_DISPLAY_LARGE |
-| Resume: until the agent has exchanged with the API again | RESUME_EXCHANGE_STD | RESUME_EXCHANGE_LARGE |
-| The same machine started after a plain pause, for comparison | COLD_STD | |
+| Pause: until Azure has released the machine | 27 to 38, middle 28 (5 times) | 37 to 41, middle 39 (3 times) |
+| Resume: until the display answers | 27 to 42, middle 33 (6 times) | 33 to 35, middle 34 (3 times) |
+| Resume: until the agent has exchanged with the API again | 25 to 39, middle 31 | 32 to 34, middle 34 |
+| The same machine started after a plain pause, for comparison | 22 to the display, 23 to the exchange (once), with nothing running | |
 
 Every resume brought back the same boot, the same processes (the session, the agent, Chromium and its pages, VS Code, the node server, the counter, the container) and a working network, with the clock right to the second. The agent's exchange recovered by itself each time.
 
-HEAVY_LINE
+Those desktops had about 1.7 GB in use. With a program holding 10 GB more on the Large one, half of it the kind that does not compress, the pause took 97 and 90 seconds and the resume 109 and 103 seconds to the display: about 7 seconds more for each gigabyte in use, each way. A real project's stack (a database in a container, a bundler, a browser) holds several gigabytes, so its desktop resumes in a minute or two rather than half a minute.
 
-A new machine is no slower on v6 than on v7: five each from the release image, alternating, showed their display after 22 to 25 seconds on v6 (middle 23) and 24 to 52 on v7 (middle 40), which is Azure's own spread that hour and not the size. NEWHIB_LINE
+A new machine is no slower on v6 than on v7: five each from the release image, alternating, showed their display after 22 to 25 seconds on v6 (middle 23) and 24 to 52 on v7 (middle 40), which is Azure's own spread that hour and not the size. Five more made to hibernate, from an image baked with these scripts on a builder without Trusted Launch, showed theirs after 24 to 28 seconds (middle 25): the room for memory is made beside the desktop, not before it.
 
 Two things to know before relying on it:
 
 - **A resume is slower to a screen than a plain start, and slower the more memory is in use.** What programs hold is read back from a disk that gives 60 MB a second. The kernel is told to write what programs hold and let go of cached files first; left to shrink the image as far as it could, it pushed programs' memory to swap, and the desktop hardly answered for a minute and a half after it was back.
-- **A machine that does not hibernate is stopped the plain way, ten minutes late.** Azure waits ten minutes for the machine, leaves it running and calls the request failed; a plain stop asked for in the meantime was taken and carried out only then. The API waits that out and then deallocates, and the desktop comes back as from any pause. It happened in testing while `hibernate.sh` still went through `systemctl hibernate`, which refused twice: for a minute after a resume, and on the boot in which the swap file was made again. It tells the kernel directly now.
+- **A machine that does not hibernate is stopped the plain way, ten minutes late.** Azure waited ten minutes for the machine and left it running; a plain stop asked for in the meantime was taken and carried out only then. The API waits that out and then deallocates, and the desktop comes back as from any pause. It happened in testing while `hibernate.sh` still went through `systemctl hibernate`, which refused twice: for a minute after a resume, and on the boot in which the swap file was made again. It tells the kernel directly now.
 
 ### Turning it on
 
