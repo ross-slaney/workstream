@@ -134,6 +134,20 @@ if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   chmod +x "$ROOT/image/grow-disk.sh"
   install -m 0644 "$ROOT/image/workstream-grow-disk.service" /etc/systemd/system/workstream-grow-disk.service
   systemctl enable workstream-grow-disk.service
+  # A desktop Azure can hibernate (api/Desktops/DesktopHosts.cs, Hibernate) writes its memory to its own disk
+  # when it is stopped, and is back as it was when it is started. Azure asks through the machine's Hyper-V
+  # tools; the kernel passes the request on as an event, and nothing in Debian answers it. So: room for the
+  # memory, made at boot; the rule that answers the request (run as a unit of its own, because a rule's
+  # program may not turn swap on); and the swap turned off again once the machine is back. On a machine Azure
+  # was not asked to make hibernate, all three do nothing (image/hibernate.sh).
+  chmod +x "$ROOT/image/hibernate.sh"
+  install -m 0644 "$ROOT/image/workstream-hibernate.service" /etc/systemd/system/workstream-hibernate.service
+  systemctl enable workstream-hibernate.service
+  cat > /etc/udev/rules.d/90-workstream-hibernate.rules <<'RULE'
+SUBSYSTEM=="vmbus", ACTION=="change", DRIVER=="hv_utils", ENV{EVENT}=="hibernate", RUN+="/usr/bin/systemd-run --no-block /opt/workstream/image/hibernate.sh now"
+RULE
+  printf '#!/bin/sh\n[ "$1" = post ] && exec /opt/workstream/image/hibernate.sh after\nexit 0\n' > /usr/lib/systemd/system-sleep/workstream-hibernate
+  chmod +x /usr/lib/systemd/system-sleep/workstream-hibernate
   # A project's stack watches many files (Metro, dotnet watch, VS Code) and keeps many open.
   cat > /etc/sysctl.d/90-workstream.conf <<'CONF'
 fs.inotify.max_user_watches = 1048576
