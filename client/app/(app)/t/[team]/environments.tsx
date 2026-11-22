@@ -10,7 +10,7 @@ import { valueOf } from "@/lib/online";
 import { newId } from "@/lib/utils";
 import { workstream, type Environment, type GitHubRepository, type SavedRepositoryFile, type WriteEnvironment } from "@/lib/workstream/api";
 import { EnvironmentsScreen, type EnvironmentDraft, type RepositoryReading } from "@/src/settings/environments-screen";
-import { changesFileSettings, fillFromFile, gitHubName } from "@/src/settings/environments-screen/repository";
+import { changesFileSettings, fillFromFile, gitHubName, hasFileSettings, nameOf } from "@/src/settings/environments-screen/repository";
 
 const blank = (apps: string[]): EnvironmentDraft => ({
   name: "", apps, size: "standard", repositoryUrl: "", repositoryBranch: "", setupScript: "", instructions: "", variables: [], fromFile: false,
@@ -139,7 +139,10 @@ export default function EnvironmentsRoute() {
   const fullNameOf = (draft: EnvironmentDraft) => gitHubName(draft.repositoryUrl);
   // The offer stands for a saved environment on a GitHub repository whose settings are not its file's, and stays to show what it made.
   const fileRepository = editing?.id ? gitHubName(shown?.repositoryUrl ?? editing.draft.repositoryUrl) : null;
-  const offerFile = Boolean(editing?.id && fileRepository && signedIn && (savedFile || !(shown?.fromFile ?? editing?.draft.fromFile)));
+  const defaultApps = catalog.filter((app) => app.default).map((app) => app.id);
+  const offerFile = Boolean(
+    editing?.id && fileRepository && signedIn && (savedFile || (!(shown?.fromFile ?? editing?.draft.fromFile) && hasFileSettings(editing.draft, defaultApps))),
+  );
 
   return (
     <>
@@ -163,7 +166,8 @@ export default function EnvironmentsRoute() {
               change((draft) => ({ ...draft, repositoryUrl: "", repositoryBranch: "", fromFile: false }));
               return;
             }
-            change((draft) => ({ ...draft, repositoryUrl: repository.url, repositoryBranch: repository.defaultBranch }));
+            // A new environment is named for its repository until the person names it.
+            change((draft) => ({ ...draft, name: draft.name.trim() ? draft.name : nameOf(repository.fullName), repositoryUrl: repository.url, repositoryBranch: repository.defaultBranch }));
             readBranches(repository.fullName);
             void look(repository, repository.defaultBranch);
           },
@@ -215,7 +219,7 @@ export default function EnvironmentsRoute() {
           void action.run(async () => {
             const saved = editing.id ? await workstream.changeEnvironment(editing.id, bodyOf(editing.draft)) : await workstream.addEnvironment(teamId, newId(), bodyOf(editing.draft));
             // An environment on a GitHub repository that is not the file's: the dialog stays, to offer saving it there.
-            if (gitHubName(saved.repositoryUrl ?? "") && !saved.fromFile && signedIn) {
+            if (gitHubName(saved.repositoryUrl ?? "") && !saved.fromFile && signedIn && hasFileSettings(editing.draft, defaultApps)) {
               environments.refresh();
               setSavedFile(null);
               saveFile.clearError();

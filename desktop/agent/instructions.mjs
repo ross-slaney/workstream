@@ -2,20 +2,23 @@
 // read and tested without starting the agent.
 
 /**
- * How project work ends, when the desktop has a repository: on a branch of its own and a pull request, never
- * on the default branch. git and gh sign in to GitHub by themselves (github.mjs, shims/gh).
+ * How project work ends, on any repository: on a branch of its own and a pull request, never on the default
+ * branch. git and gh sign in to GitHub by themselves (github.mjs, shims/gh), with or without a repository in
+ * the environment, so a task about another repository can clone it.
  */
 export const projectWork = (repository) =>
+  `
+${
   repository
-    ? `
-The project is the repository ${repository.url}${repository.branch ? `, on its branch ${repository.branch}` : ""}, cloned into your working folder. Finish project work as a branch and a pull request:
+    ? `The project is the repository ${repository.url}${repository.branch ? `, on its branch ${repository.branch}` : ""}, cloned into your working folder.`
+    : "No repository is cloned on this desktop. git and gh reach GitHub as the person who started this task: when the task is about a repository, clone it into your working folder with `gh repo clone owner/name`."
+} Finish work on any repository as a branch and a pull request:
 
 - Make a new branch for the work before you commit, named for what it does.
 - Commit there, push the branch, and open a pull request with \`gh pr create\`, saying what changed and why. Give the person its address when you finish.
 - Never push to the default branch or to the branch you started from, and never force-push a branch you did not make.
 - git and gh sign in to GitHub by themselves, as the person who started this task. If they cannot, they print a line starting with "Workstream:" that says why: tell the person that line. If pushing is refused, say so and leave the work committed on its branch; do not look for another way in.
-`.trim()
-    : "";
+`.trim();
 
 /**
  * How to work on a real project here: the repository's own rules and skills, what is installed, and patience

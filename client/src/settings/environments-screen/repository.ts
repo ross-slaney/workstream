@@ -41,6 +41,21 @@ export function fillFromFile(draft: EnvironmentDraft, file: WorkstreamFileSettin
   };
 }
 
+/** The environment's name from a repository's: `acme/web-app` gives `web-app`. */
+export function nameOf(fullName: string) {
+  return fullName.slice(fullName.indexOf("/") + 1);
+}
+
+/**
+ * Whether the draft says anything a workstream.yml would hold beyond what a new environment has anyway: a
+ * size other than Standard, other apps, a setup script, variables or instructions. A file of only defaults
+ * says nothing, so it is not offered.
+ */
+export function hasFileSettings(draft: EnvironmentDraft, defaultApps: string[]) {
+  const apps = [...draft.apps].sort().join(",") !== [...defaultApps].sort().join(",");
+  return draft.size !== "standard" || apps || draft.setupScript.trim() !== "" || draft.instructions.trim() !== "" || draft.variables.some((variable) => variable.name.trim());
+}
+
 /**
  * Whether a change to the draft changed what workstream.yml decides: its size, apps, setup script or
  * instructions. A draft that did no longer follows the file, since each task's start would put it back.

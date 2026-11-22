@@ -125,7 +125,13 @@ test("a desktop with a repository is told to finish on a branch and a pull reque
   assert.match(told, /https:\/\/github\.com\/acme\/app, on its branch develop/);
   assert.match(told, /gh pr create/);
   assert.match(told, /Never push to the default branch/);
-  assert.equal(projectWork(null), "");
+});
+
+test("a desktop without a repository is told it can clone one as the person, and to finish the same way", () => {
+  const told = projectWork(null);
+  assert.match(told, /No repository is cloned on this desktop/);
+  assert.match(told, /gh repo clone owner\/name/);
+  assert.match(told, /Never push to the default branch/);
 });
 
 test("commits are by the person who started the task, as the API says, and by nobody when it says nothing", async () => {

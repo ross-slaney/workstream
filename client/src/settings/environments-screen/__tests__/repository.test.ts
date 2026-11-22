@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GitHubRepository } from "@/lib/workstream/api";
 import type { EnvironmentDraft } from "../props";
-import { changesFileSettings, fillFromFile, gitHubName, matchingRepositories, sameRepository } from "../repository";
+import { changesFileSettings, fillFromFile, gitHubName, hasFileSettings, nameOf, matchingRepositories, sameRepository } from "../repository";
 
 describe("a repository picked from GitHub and one typed", () => {
   it("are the same however the address ends", () => {
@@ -59,5 +59,18 @@ describe("filling the form from the repository", () => {
     expect(changesFileSettings(draft, { ...draft, size: "large" })).toBe(true);
     expect(changesFileSettings(draft, { ...draft, apps: ["chrome", "vscode"] })).toBe(true);
     expect(changesFileSettings(draft, { ...draft, setupScript: "make" })).toBe(true);
+  });
+
+  it("names an environment for its repository", () => {
+    expect(nameOf("acme/web-app")).toBe("web-app");
+  });
+
+  it("offers a workstream.yml only when the draft holds more than a new environment's defaults", () => {
+    const plain = { ...draft, size: "standard" as const, apps: ["chrome", "vscode"], setupScript: "", instructions: "", variables: [] };
+    expect(hasFileSettings(plain, ["vscode", "chrome"])).toBe(false);
+    expect(hasFileSettings({ ...plain, setupScript: "npm ci" }, ["chrome", "vscode"])).toBe(true);
+    expect(hasFileSettings({ ...plain, size: "large" }, ["chrome", "vscode"])).toBe(true);
+    expect(hasFileSettings({ ...plain, apps: ["chrome"] }, ["chrome", "vscode"])).toBe(true);
+    expect(hasFileSettings({ ...plain, variables: [{ name: "API_KEY", value: "", saved: false }] }, ["chrome", "vscode"])).toBe(true);
   });
 });
