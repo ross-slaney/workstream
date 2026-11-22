@@ -49,34 +49,21 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   rm -rf /home/work/.workstream/* /home/work/.cache/sessions /tmp/.X1-lock /tmp/.X11-unix/X1
 
   # What a desktop cannot do without.
-  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof > /dev/null
+  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof nft > /dev/null
   test -d /opt/workstream/agent/node_modules/@anthropic-ai/claude-agent-sdk
   systemctl is-enabled workstream-desktop.service workstream-grow-disk.service > /dev/null
   sudo -u work -H dotnet dev-certs https --check
-  # The Android emulator starts as the desktop's person: a phone of its own runs on the processor's
-  # virtualization (QEMU holds /dev/kvm) and is still running 20 seconds later. It is started from the
-  # person's home: from a folder they cannot read, the emulator stops at once ("QEMU main loop exits
-  # abnormally"). The phone and what the run wrote are removed, so a desktop's Phone has never booted.
-  test -d /home/work/.android/avd/Phone.avd
-  sudo -u work -H bash -lc '
-    set -euo pipefail
-    cd ~
-    emulator -accel-check
-    echo no | avdmanager create avd --force -n Check -k "system-images;android-36;google_apis;x86_64" -d pixel_7 > /dev/null
-    emulator -avd Check -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > /tmp/emulator-check.log 2>&1 &
-    started=no
-    for _ in $(seq 60); do
-      qemu=$(pgrep -u work "^qemu-system" | head -1 || true)
-      if [ -n "$qemu" ] && ls -l "/proc/$qemu/fd" 2> /dev/null | grep -q /dev/kvm; then started=yes; break; fi
-      sleep 1
-    done
-    [ "$started" = yes ] && sleep 20 && kill -0 "$qemu" || { tail -20 /tmp/emulator-check.log; exit 1; }
-    pkill -u work "^qemu-system"; sleep 3
-    avdmanager delete avd -n Check > /dev/null
-    rm -f /tmp/emulator-check.log
-    rm -rf ~/.android/avd/running
-    find ~/.android -mindepth 1 -maxdepth 1 ! -name avd -exec rm -rf {} +
-  '
+  # The Android emulator boots as the desktop's person, and adb sees it (check-emulator.sh).
+  bash /opt/workstream/image/check-emulator.sh
+  # host.docker.internal is this machine, from a container and from itself (check-host-name.sh). What a
+  # desktop gets at boot is put in place by hand here, on a builder that has not started again since it was
+  # configured; Docker, started by the check, is stopped again.
+  sysctl -q --system
+  systemctl restart systemd-resolved
+  systemctl start workstream-host-name.service
+  bash /opt/workstream/image/check-host-name.sh
+  systemctl stop docker.service
+  systemctl is-enabled workstream-host-name.service > /dev/null
   test -f /home/work/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 } > "$log" 2>&1
 

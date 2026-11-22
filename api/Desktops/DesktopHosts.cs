@@ -654,6 +654,9 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
             "run", "-d", "--name", spec.Name, "--hostname", "desktop", "--shm-size", "1g",
             "--label", "workstream.desktop=" + spec.DesktopId, "--label", "workstream.purpose=" + spec.Purpose,
             "-p", $"127.0.0.1::{options.DisplayPort}",
+            // The desktop reaches the API on this computer by this name (apphost/AppHost.cs). Docker Desktop
+            // gives it to every container; Docker Engine on Linux gives it only when asked, like this.
+            "--add-host", "host.docker.internal:host-gateway",
             "-e", "WORKSTREAM_API=" + spec.ApiUrl, "-e", "WORKSTREAM_KEY=" + spec.Key,
             spec.Save is null ? options.Docker.Image : SaveImage(spec.Save),
         ], ct);

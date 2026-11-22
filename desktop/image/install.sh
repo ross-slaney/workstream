@@ -52,7 +52,8 @@ apt-get update
 apt-get install -y --no-install-recommends code gh
 apt-get clean
 if [ -z "$SLIM" ]; then
-  apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  # nftables and the system's resolver are what make host.docker.internal this desktop, from its containers (image/configure.sh).
+  apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin nftables systemd-resolved
   # The .NET SDK, from Microsoft's installer, which serves both processor types. Aspire (9 and later) is a
   # NuGet package of the project that uses it, so there is no workload to install.
   curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /usr/share/dotnet
