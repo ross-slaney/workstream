@@ -29,7 +29,7 @@ docker build -t workstream-desktop:local desktop
 dotnet run --project apphost
 ```
 
-The web app is at http://localhost:8091 and the API at http://localhost:5280. Create an account at `/sign-in?view=signup` with any email and a password; locally nobody needs an inbox. The system administrator is `admin@workstream.test` with the password in `.env.example`, and reaches `/admin`.
+The web app is at http://localhost:8091 and the API at http://localhost:5280. Create an account at `/sign-in?view=signup` with any email and a password; locally nobody needs an inbox. The form also shows Continue with GitHub once `.env` has a GitHub OAuth client of your own (`WORKSTREAM_GITHUB_OAUTH_CLIENT_ID` and `WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET`, see `.env.example`). The system administrator is `admin@workstream.test` with the password in `.env.example`, and reaches `/admin`.
 
 Locally a desktop is a Docker container made from `desktop/Dockerfile`, which runs the same two scripts the Azure image is baked with. The first build takes several minutes and about 3 GB.
 
@@ -64,7 +64,7 @@ To try a running stack from outside, the way a browser would, including the desk
 node scripts/try-stack.mjs --api http://localhost:5280 --web http://localhost:8091
 ```
 
-It works against the local stack and against staging, which sign in with a password. Production signs in by emailed code.
+It works against the local stack and against staging, which sign in with a password. Production signs in by emailed code, or with GitHub where its OAuth client is set ([infra/README.md](infra/README.md), "Sign in with GitHub").
 
 ## Ship it
 
