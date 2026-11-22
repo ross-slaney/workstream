@@ -275,7 +275,7 @@ function SetupNote({ setup, running }: { setup: TaskSetup; running: boolean }) {
   if (!running && !ended) return null;
   if (ended && putAway === setup.startedAt) return null;
   return (
-    <div role={ended ? "alert" : "status"} className={cn("flex flex-col gap-1.5 border-t px-3 py-2 text-[12.5px]", ended ? "border-destructive/30 bg-destructive/5" : "border-border")}>
+    <div role={ended ? "alert" : "status"} className={cn("flex flex-col gap-1.5 border-t px-3 py-2 text-[12.5px]", ended ? "border-destructive/40 bg-destructive/10" : "border-border")}>
       <div className="flex items-center gap-2">
         {running ? <Spinner label={t("setup.running")} className="size-3" /> : null}
         <span className={cn("min-w-0 flex-1 leading-snug", ended ? "font-medium text-destructive" : "text-muted-foreground")}>
