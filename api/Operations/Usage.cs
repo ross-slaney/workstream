@@ -8,8 +8,23 @@ using static Workstream.Api.WorkstreamAuthorization;
 
 namespace Workstream.Api;
 
-/// <summary>What a team used this calendar month (UTC), beside what it may use.</summary>
-public sealed record TeamUsage(DateTimeOffset Since, decimal ModelSpentUsd, decimal ModelAllowanceUsd, double DesktopHours, int RunningDesktops, int MaxRunningDesktops);
+/// <summary>The hours a team's desktops of one size ran this month. Each size is a line of its own, because each has its own rate.</summary>
+public sealed record SizeHours(string Size, double Hours);
+
+/// <summary>
+/// The storage of one kind (<see cref="StorageKind"/>) a team kept this month: the gigabytes kept now, and the
+/// month so far in GB-months, which is gigabytes times the share of a month they were kept.
+/// </summary>
+public sealed record StorageUse(string Kind, decimal Gb, double GbMonths);
+
+/// <summary>
+/// What a team used this calendar month (UTC), beside what it may use, in the units a bill would use: dollars
+/// of models against the allowance, desktop hours by size, and storage in GB-months by kind. A size or a kind
+/// the team did not use this month is not listed.
+/// </summary>
+public sealed record TeamUsage(
+    DateTimeOffset Since, decimal ModelSpentUsd, decimal ModelAllowanceUsd,
+    IReadOnlyList<SizeHours> DesktopHours, IReadOnlyList<StorageUse> Storage, int RunningDesktops, int MaxRunningDesktops);
 
 /// <summary>How many desktops were running at a moment.</summary>
 public sealed record RunningPoint(DateTimeOffset At, int Running);
@@ -18,8 +33,17 @@ public sealed record RunningDesktop(string TaskId, string Title, string TeamId, 
 
 public sealed record TeamNumbers(string Id, string Name, int People, int Tasks, int RunningDesktops, int MaxRunningDesktops, decimal ModelSpentUsd, decimal ModelAllowanceUsd, double DesktopHours);
 
-/// <summary>What machines cost this month for one purpose (a task's desktop, a spare): the hours they ran, and those hours at each size's price.</summary>
-public sealed record MachineCost(string Purpose, double Hours, decimal Usd);
+/// <summary>
+/// What machines of one size cost this month for one purpose (a task's desktop, a spare, a machine preparing an
+/// environment): the hours they ran, and those hours at the size's price.
+/// </summary>
+public sealed record MachineCost(string Purpose, string Size, double Hours, decimal Usd);
+
+/// <summary>
+/// What storage of one kind (<see cref="StorageKind"/>) cost this month over every team, from the recorded
+/// rows: how many are kept now and their gigabytes, the month so far in GB-months, and those at the kind's price.
+/// </summary>
+public sealed record StorageCost(string Kind, int Kept, decimal Gb, double GbMonths, decimal Usd);
 
 /// <summary>A spare that is running now.</summary>
 public sealed record SpareNow(string TeamId, string TeamName, string Size, string State, DateTimeOffset Since);
@@ -32,12 +56,10 @@ public sealed record SpareNow(string TeamId, string TeamName, string Size, strin
 public sealed record StartTimes(string Source, int Starts, double? ScreenSeconds, double? AgentSeconds);
 
 /// <summary>
-/// What the desktops cost Workstream. The machines' time this month by purpose (a task's desktop, a spare, a
-/// machine preparing an environment); the disks kept now, one per machine whether it runs or not, at what that
-/// many cost a month; the environments' saved setups kept now, at what they cost a month for what is on them;
-/// and the spares running now.
+/// What the desktops cost Workstream this month: the machines' time by purpose and size, the storage kept by
+/// kind, and the spares running now.
 /// </summary>
-public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, int Disks, decimal DisksMonthlyUsd, int Saves, decimal SavesMonthlyUsd, IReadOnlyList<SpareNow> Spares);
+public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, IReadOnlyList<StorageCost> Storage, IReadOnlyList<SpareNow> Spares);
 
 /// <summary>The system administrator's page: what is running now, the last day's curve, each team's month, what the desktops cost and how long they take to start.</summary>
 public sealed record AdminOverview(
@@ -72,11 +94,32 @@ public static partial class Operations
         var since = MonthStart(now);
         // The team's own use: its tasks' desktops. A spare kept for the team is Workstream's cost, not the team's.
         var runs = await db.DesktopRuns.AsNoTracking().Where(x => x.TeamId == teamId && x.Purpose == MachinePurpose.Task && (x.EndedAt == null || x.EndedAt >= since))
-            .Select(x => new { x.StartedAt, x.EndedAt }).ToListAsync(ct);
+            .Select(x => new { x.Size, x.StartedAt, x.EndedAt }).ToListAsync(ct);
+        var hours = runs.GroupBy(x => x.Size).OrderBy(x => SizeOrder(x.Key)).ThenBy(x => x.Key)
+            .Select(size => new SizeHours(size.Key, Math.Round(HoursOf(size.Select(x => (x.StartedAt, x.EndedAt)), since, now), 2))).ToList();
+        var kept = await db.StorageRuns.AsNoTracking().Where(x => x.TeamId == teamId && (x.EndedAt == null || x.EndedAt >= since))
+            .Select(x => new { x.Kind, x.Gb, x.StartedAt, x.EndedAt }).ToListAsync(ct);
+        var storage = kept.GroupBy(x => x.Kind).OrderBy(x => KindOrder(x.Key)).ThenBy(x => x.Key)
+            .Select(kind => new StorageUse(
+                kind.Key, kind.Where(x => x.EndedAt == null).Sum(x => x.Gb),
+                Math.Round(StorageRun.GbMonths(kind.Select(x => (x.Gb, x.StartedAt, x.EndedAt)), since, now), 3))).ToList();
         return Outcome<TeamUsage>.Ok(new TeamUsage(
-            since, await ModelSpentAsync(db, teamId, since, ct), team.ModelAllowanceUsd,
-            Math.Round(HoursOf(runs.Select(x => (x.StartedAt, x.EndedAt)), since, now), 2),
+            since, await ModelSpentAsync(db, teamId, since, ct), team.ModelAllowanceUsd, hours, storage,
             await RunningDesktopsAsync(db, teamId, ct), team.MaxRunningDesktops));
+    }
+
+    /// <summary>Sizes from the smallest up, and kinds in the order the product lists them; anything unknown goes last.</summary>
+    static int SizeOrder(string size) => PlaceIn(DesktopSizes.Keys, size);
+
+    static int KindOrder(string kind) => PlaceIn(StorageKind.All, kind);
+
+    static int PlaceIn(IReadOnlyList<string> order, string key)
+    {
+        for (var at = 0; at < order.Count; at++)
+        {
+            if (order[at] == key) return at;
+        }
+        return int.MaxValue;
     }
 
     /// <summary>
@@ -116,22 +159,21 @@ public static partial class Operations
             running.Count(x => x.TeamId == team.Id), team.MaxRunningDesktops, spent.GetValueOrDefault(team.Id), team.ModelAllowanceUsd,
             Math.Round(HoursOf(runs.Where(x => x.TeamId == team.Id).Select(x => (x.StartedAt, x.EndedAt)), since, now), 2))).ToList();
 
-        // What the machines cost: every run's hours this month, by what it ran for, at its size's hourly price.
-        var costs = everyRun.GroupBy(x => x.Purpose).Select(purpose => new MachineCost(
-                purpose.Key,
-                Math.Round(HoursOf(purpose.Select(x => (x.StartedAt, x.EndedAt)), since, now), 2),
-                Math.Round(purpose.GroupBy(x => x.Size).Sum(size => (decimal)HoursOf(size.Select(x => (x.StartedAt, x.EndedAt)), since, now) * desktops.Prices.HourOf(size.Key)), 2)))
-            .OrderBy(x => x.Purpose == MachinePurpose.Task ? 0 : 1).ThenBy(x => x.Purpose).ToList();
-        // Every machine has a disk, running or stopped, until its task is deleted or its spare is removed.
+        // What the machines cost: every run's hours this month, by what it ran for and at which size, at the size's hourly price.
+        var costs = everyRun.GroupBy(x => (x.Purpose, x.Size))
+            .Select(line => (line.Key.Purpose, line.Key.Size, Hours: HoursOf(line.Select(x => (x.StartedAt, x.EndedAt)), since, now)))
+            .Select(line => new MachineCost(line.Purpose, line.Size, Math.Round(line.Hours, 2), Math.Round((decimal)line.Hours * desktops.Prices.HourOf(line.Size), 2)))
+            .OrderBy(x => x.Purpose == MachinePurpose.Task ? 0 : 1).ThenBy(x => x.Purpose).ThenBy(x => SizeOrder(x.Size)).ThenBy(x => x.Size).ToList();
+        // What storage cost: the rows the job keeps of what every team keeps, in GB-months, at each kind's price.
+        var kept = await db.StorageRuns.AsNoTracking().Where(x => x.EndedAt == null || x.EndedAt >= since)
+            .Select(x => new { x.Kind, x.Gb, x.StartedAt, x.EndedAt }).ToListAsync(ct);
+        var storage = kept.GroupBy(x => x.Kind).OrderBy(x => KindOrder(x.Key)).ThenBy(x => x.Key).Select(kind =>
+        {
+            var gbMonths = StorageRun.GbMonths(kind.Select(x => (x.Gb, x.StartedAt, x.EndedAt)), since, now);
+            var open = kind.Where(x => x.EndedAt == null).ToList();
+            return new StorageCost(kind.Key, open.Count, open.Sum(x => x.Gb), Math.Round(gbMonths, 3), Math.Round((decimal)gbMonths * desktops.Prices.GbMonthOf(kind.Key), 2));
+        }).ToList();
         var spares = await db.Spares.AsNoTracking().OrderBy(x => x.CreatedAt).ToListAsync(ct);
-        var taskDisks = await db.Tasks.AsNoTracking().Where(x => x.Host != null).GroupBy(x => x.Size)
-            .Select(g => new { Size = g.Key, Count = g.Count() }).ToListAsync(ct);
-        var disks = taskDisks.Sum(x => x.Count) + spares.Count(x => x.Host is not null);
-        // A disk costs what its size's disk costs (a large desktop's is twice the room).
-        var disksMonthlyUsd = taskDisks.Sum(x => x.Count * desktops.Prices.DiskOf(x.Size))
-            + spares.Where(x => x.Host is not null).Sum(x => desktops.Prices.DiskOf(x.Size));
-        // An environment keeps one save at most, billed for what is on it.
-        var saves = await db.Setups.AsNoTracking().Where(x => x.Save != null).Select(x => x.SaveBytes).ToListAsync(ct);
 
         // How long a start takes, from what the runs wrote down as it happened.
         var weekAgo = now.AddDays(-7);
@@ -154,7 +196,7 @@ public static partial class Operations
             points,
             [.. running.Select(x => new RunningDesktop(x.Id, x.Title, x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.AgentWorking, x.StateChangedAt))],
             numbers,
-            new MachineCosts(costs, disks, disksMonthlyUsd, saves.Count, saves.Sum(desktops.Prices.SaveMonthlyOf),
+            new MachineCosts(costs, storage,
                 [.. spares.Select(x => new SpareNow(x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.CreatedAt))]),
             starts));
     }
