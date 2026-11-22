@@ -6,11 +6,15 @@
 #   scripts/desktop-image-version.sh           the newest release's image (a stage with no image of its own)
 #   scripts/desktop-image-version.sh 0.2.1     the newest that is not newer than 0.2.1 (a release)
 #
+# DEFINITION names the gallery's definition to look in: `machine`, or `machine-hibernate` for a deployment
+# whose desktops hibernate (infra/gallery.bicep). Each has its own versions.
+#
 # Versions 0.0.x are staging's own bakes (.github/workflows/staging.yml) and are never chosen here.
 # Prints nothing, and fails, when the gallery has no such version.
 set -euo pipefail
 most="${1:-}"
-versions=$(az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine \
+definition="${DEFINITION:-machine}"
+versions=$(az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition "$definition" \
   --query "[?provisioningState=='Succeeded'].name" -o tsv | grep -v '^0\.0\.' | sort -V || true)
 chosen=""
 for version in $versions; do

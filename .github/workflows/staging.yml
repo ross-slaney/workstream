@@ -20,6 +20,10 @@ on:
         description: Bake the desktops' image from this ref too (for a change under desktop/); otherwise staging uses the newest release's
         type: boolean
         default: false
+      hibernate:
+        description: Desktops hibernate when they are stopped (infra/README.md, "Hibernation"). Needs desktop-image too, unless a release already bakes hibernating images
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,6 +34,8 @@ concurrency:
 
 env:
   NAME: workstream-staging
+  # The gallery's definition staging's desktops are made from (infra/gallery.bicep).
+  DEFINITION: ${{ inputs.hibernate && 'machine-hibernate' || 'machine' }}
 
 jobs:
   # Staging's desktops come from the newest release's image, or from an image of its own baked from the ref
@@ -61,13 +67,14 @@ jobs:
           version: ${{ env.OWN }}
           sha: ${{ steps.commit.outputs.sha }}
           token: ${{ github.token }}
+          definition: ${{ env.DEFINITION }}
       - name: Keep only this one of staging's own
         if: inputs.desktop-image
         run: |
           set -euo pipefail
-          az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine \
+          az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition "$DEFINITION" \
             --query "[?starts_with(name, '0.0.') && name != '$OWN'].name" -o tsv \
-            | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition machine --gallery-image-version {}
+            | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition "$DEFINITION" --gallery-image-version {}
       - name: The image staging makes its desktops from
         id: image
         env:
@@ -101,6 +108,7 @@ jobs:
           sha: ${{ steps.commit.outputs.sha }}
           tag: staging-${{ steps.commit.outputs.sha }}
           desktop-image-version: ${{ needs.desktop-image.outputs.version }}
+          desktops-hibernate: ${{ inputs.hibernate }}
           # The administrator here is a made-up address with a password (the secret ADMINISTRATOR_PASSWORD).
           administrator-email: ${{ vars.ADMINISTRATOR_EMAIL || 'admin@workstream.test' }}
           administrator-password: ${{ secrets.ADMINISTRATOR_PASSWORD }}
@@ -141,10 +149,12 @@ jobs:
           for group in "$NAME-desktops" "$NAME"; do
             if [ "$(az group exists -n "$group")" = true ]; then az group delete -n "$group" --yes; fi
           done
-          # The images staging baked for itself.
-          az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine \
-            --query "[?starts_with(name, '0.0.')].name" -o tsv 2>/dev/null \
-            | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition machine --gallery-image-version {}
+          # The images staging baked for itself, in either definition.
+          for definition in machine machine-hibernate; do
+            az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition "$definition" \
+              --query "[?starts_with(name, '0.0.')].name" -o tsv 2>/dev/null \
+              | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition "$definition" --gallery-image-version {}
+          done
           # The database's administrators group lives in Entra, outside any resource group.
           az ad group delete --group "$NAME-sql-admins" 2>/dev/null || true
           echo "### Staging removed" >> "$GITHUB_STEP_SUMMARY"

@@ -19,6 +19,9 @@ inputs:
   desktop-image-version:
     description: The version of the desktops' image this deployment makes its desktops from (scripts/desktop-image-version.sh). In the gallery already.
     required: true
+  desktops-hibernate:
+    description: Whether this deployment's desktops hibernate when they are stopped (infra/main.bicep `desktopsHibernate`). The image version is then one of the gallery's machine-hibernate definition.
+    default: 'false'
   administrator-email:
     description: The one address that reaches /admin; empty leaves nobody as administrator.
     default: ''
@@ -144,6 +147,7 @@ runs:
         MODEL_ENDPOINT: ${{ inputs.model-endpoint }}
         MODEL_KEY: ${{ inputs.model-key }}
         DESKTOP_IMAGE_VERSION: ${{ inputs.desktop-image-version }}
+        DESKTOPS_HIBERNATE: ${{ inputs.desktops-hibernate }}
         GH_APP_ID: ${{ inputs.github-app-id }}
         GH_APP_SLUG: ${{ inputs.github-app-slug }}
         GH_APP_CLIENT_ID: ${{ inputs.github-client-id }}
@@ -161,6 +165,7 @@ runs:
             -p location=westus3 stage="$STAGE" image="$IMAGE" webImage="$WEB_IMAGE" sourceSha="$SHA" releaseTag="$RELEASE_TAG" \
                administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
                modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" desktopImageVersion="$DESKTOP_IMAGE_VERSION" \
+               desktopsHibernate="$DESKTOPS_HIBERNATE" \
                githubAppId="$GH_APP_ID" githubAppSlug="$GH_APP_SLUG" githubClientId="$GH_APP_CLIENT_ID" githubClientSecret="$GH_APP_CLIENT_SECRET" \
                githubPrivateKey="$GH_APP_PRIVATE_KEY_B64" githubWebhookSecret="$GH_APP_WEBHOOK_SECRET" && break
           [ "$attempt" = 1 ] || exit 1

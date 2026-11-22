@@ -32,6 +32,8 @@ param sparesAtOnce int = 0
 param spareHoursADay int = 6
 @description('The image version a desktop is made from: the one this deployment was made with.')
 param desktopImageId string
+@description('Whether a desktop hibernates when it is stopped (api/Desktops/DesktopHosts.cs, AzureOptions.Hibernate). Azure hibernates the Dasv6 sizes and not the Dasv7 ones the API otherwise uses, at the same cores, memory and price, so the sizes change with it.')
+param desktopsHibernate bool = false
 @description('The agents\' models (api/Model/ModelGateway.cs): the Foundry resource\'s Anthropic endpoint; empty leaves agents without one.')
 param modelEndpoint string = ''
 @secure()
@@ -109,7 +111,12 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'Workstream__Desktops__Spares__Enabled', value: sparesAtOnce > 0 ? 'true' : 'false' }
           { name: 'Workstream__Desktops__Spares__Max', value: string(sparesAtOnce) }
           { name: 'Workstream__Desktops__Spares__HoursPerDay', value: string(spareHoursADay) }
-        ], email ? [
+        ], desktopsHibernate ? [
+          { name: 'Workstream__Desktops__Azure__Hibernate', value: 'true' }
+          { name: 'Workstream__Desktops__Azure__Sizes__small', value: 'Standard_D2as_v6' }
+          { name: 'Workstream__Desktops__Azure__Sizes__standard', value: 'Standard_D4as_v6' }
+          { name: 'Workstream__Desktops__Azure__Sizes__large', value: 'Standard_D8as_v6' }
+        ] : [], email ? [
           { name: 'SqlOS__EmailOtp__AzureCommunicationServicesConnectionString', secretRef: 'acs' }
           { name: 'SqlOS__EmailOtp__FromAddress', value: communication.sender }
         ] : [], administrator ? [

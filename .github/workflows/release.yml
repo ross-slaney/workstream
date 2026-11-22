@@ -29,6 +29,12 @@ permissions:
 env:
   GROUP: workstream
   LOCATION: westus3
+  # The gallery's definition production's desktops are made from (infra/gallery.bicep): `machine`, or
+  # `machine-hibernate` for desktops that hibernate when they are stopped. The one switch for that: the image
+  # is baked into this definition, and the API is deployed to make its desktops from it, on the sizes Azure
+  # can hibernate and without Trusted Launch (infra/main.bicep `desktopsHibernate`; infra/README.md,
+  # "Hibernation"). The first release after a change bakes, because the other definition has no version yet.
+  DEFINITION: machine
 
 jobs:
   resolve:
@@ -118,7 +124,7 @@ jobs:
           ASKED: ${{ inputs.desktop-image }}
         run: |
           set -euo pipefail
-          have=$(az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition machine --query "[].name" -o tsv 2>/dev/null | grep -v '^0\.0\.' || true)
+          have=$(az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition "$DEFINITION" --query "[].name" -o tsv 2>/dev/null | grep -v '^0\.0\.' || true)
           if grep -qx "$VERSION" <<<"$have"; then
             echo "Image $VERSION is already in the gallery."; echo "bake=false" >> "$GITHUB_OUTPUT"
           elif [ -z "$have" ] || [ "$CHANGED" = true ] || [ "$ASKED" = true ]; then
@@ -132,14 +138,15 @@ jobs:
           version: ${{ needs.resolve.outputs.version }}
           sha: ${{ needs.resolve.outputs.sha }}
           token: ${{ github.token }}
+          definition: ${{ env.DEFINITION }}
           location: ${{ env.LOCATION }}
       - name: Keep the three newest
         if: steps.decide.outputs.bake == 'true'
         run: |
           set -euo pipefail
-          az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition machine \
+          az sig image-version list -g "$GROUP" --gallery-name workstream --gallery-image-definition "$DEFINITION" \
             --query "sort_by([?!starts_with(name, '0.0.')], &publishingProfile.publishedDate)[].name" -o tsv | head -n -3 \
-            | xargs -r -I{} az sig image-version delete -g "$GROUP" --gallery-name workstream --gallery-image-definition machine --gallery-image-version {}
+            | xargs -r -I{} az sig image-version delete -g "$GROUP" --gallery-name workstream --gallery-image-definition "$DEFINITION" --gallery-image-version {}
       - name: The image this release makes its desktops from
         id: image
         run: |
@@ -174,6 +181,7 @@ jobs:
           tag: ${{ needs.resolve.outputs.tag }}
           release-tag: ${{ needs.resolve.outputs.tag }}
           desktop-image-version: ${{ needs.desktop-image.outputs.version }}
+          desktops-hibernate: ${{ env.DEFINITION == 'machine-hibernate' }}
           administrator-email: ${{ vars.ADMINISTRATOR_EMAIL }}
           # The agents' models (infra/README.md "Models").
           model-endpoint: ${{ vars.MODEL_ENDPOINT }}
