@@ -188,7 +188,7 @@ public sealed class SpareJourneys
         var run = await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().DesktopRuns.AsNoTracking().SingleAsync(x => x.TaskId == spare.Id);
         Assert.AreEqual(MachinePurpose.Spare, run.Purpose);
         Assert.IsNotNull(run.EndedAt);
-        Assert.AreEqual(0d, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).DesktopHours);
+        Assert.AreEqual(0, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).DesktopHours.Count);
     }
 
     [TestMethod]
