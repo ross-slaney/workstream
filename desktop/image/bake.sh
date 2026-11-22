@@ -69,7 +69,8 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   command -v filefrag mkswap swapon > /dev/null
   systemctl is-enabled workstream-hibernate.service > /dev/null
   test -f /etc/udev/rules.d/90-workstream-hibernate.rules
-  lsinitramfs "/boot/initrd.img-$(uname -r)" | grep -q scripts/init-premount/workstream-resume-here
+  # grep reads the whole list: with -q it stops at the match, lsinitramfs gets a broken pipe and pipefail fails the check.
+  lsinitramfs "/boot/initrd.img-$(uname -r)" | grep scripts/init-premount/workstream-resume-here > /dev/null
   test -f /home/work/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 } > "$log" 2>&1
 
