@@ -11,7 +11,8 @@ namespace Workstream.Tests;
 
 /// <summary>
 /// The Azure host against real Azure, with no deployed API: one machine made, asked about, stopped, started
-/// again and deleted, by <see cref="AzureDesktopHost"/> itself, in a resource group made for trying things.
+/// again, archived, brought back from its archive and deleted, by <see cref="AzureDesktopHost"/> itself, in a
+/// resource group made for trying things.
 /// It runs only when it is told where, and is skipped otherwise:
 ///
 /// <code>
@@ -25,10 +26,15 @@ namespace Workstream.Tests;
 /// It signs in as <c>az login</c> does, in the subnet's subscription; the location is West US 3 unless
 /// <c>WORKSTREAM_LIVE_AZURE_LOCATION</c> names another. The machine has no public address, so its display is
 /// not asked from here. It costs a few cents and leaves nothing behind: the machine is deleted whether or not
-/// a step failed.
+/// a step failed, and so is its archive.
+///
+/// The machine is told an API nothing answers at, unless <c>WORKSTREAM_LIVE_AZURE_API</c> names one its
+/// network reaches (a stand-in that logs the agent's exchanges, say). <c>WORKSTREAM_LIVE_AZURE_HOLD</c> is a
+/// number of seconds to leave the machine brought back from its archive running before it is deleted, for
+/// someone inside its network to look at it.
 ///
 /// Each step is one line in <see cref="Steps"/>, timed and written to the test's output; a step for another
-/// call on the host (archiving a stopped machine, restoring it) goes in the same list.
+/// call on the host goes in the same list.
 /// </summary>
 [TestClass]
 public sealed class AzureDesktopHostLive
@@ -39,7 +45,7 @@ public sealed class AzureDesktopHostLive
 
     [TestMethod]
     [Timeout(30 * 60 * 1000)]
-    public async Task A_machine_is_made_stopped_started_again_and_deleted()
+    public async Task A_machine_is_made_stopped_started_again_archived_brought_back_and_deleted()
     {
         var group = Told("GROUP");
         if (group is null) Assert.Inconclusive("Not told where: set WORKSTREAM_LIVE_AZURE_GROUP, _SUBNET and _IMAGE to run this against Azure.");
@@ -64,11 +70,12 @@ public sealed class AzureDesktopHostLive
         var host = new AzureDesktopHost(http, credential, options, logs.CreateLogger<AzureDesktopHost>());
 
         var id = Guid.NewGuid().ToString();
-        var spec = new DesktopSpec(DesktopHosting.NameFor(id), id, "live-check", DesktopSizes.Standard, "http://127.0.0.1:9", "live-check");
+        var spec = new DesktopSpec(DesktopHosting.NameFor(id), id, "live-check", DesktopSizes.Standard, Told("API") ?? "http://127.0.0.1:9", "live-check");
+        var archive = DesktopHosting.NewArchiveNameFor(id);
         TestContext.WriteLine($"{spec.Name}: {options.Azure.Sizes[DesktopSizes.Standard]} in {group}, hibernate {options.Azure.Hibernate}.");
         try
         {
-            foreach (var (what, step) in Steps(host, spec, options, credential, http))
+            foreach (var (what, step) in Steps(host, spec, archive, options, credential, http))
             {
                 var watch = Stopwatch.StartNew();
                 await step();
@@ -78,12 +85,14 @@ public sealed class AzureDesktopHostLive
         finally
         {
             await host.DeleteAsync(spec.Name, CancellationToken.None);
+            await host.DeleteArchiveAsync(archive, CancellationToken.None);
         }
         Assert.IsFalse((await host.ListAsync(CancellationToken.None)).Any(machine => machine.Name == spec.Name), "The machine is still there after it was deleted.");
+        Assert.IsFalse((await host.ListArchivesAsync(CancellationToken.None)).Any(kept => kept.Name == archive), "The archive is still there after it was deleted.");
     }
 
     /// <summary>What is done to the machine, in order. A step that fails ends the run, and the machine is deleted.</summary>
-    static IEnumerable<(string What, Func<Task> Step)> Steps(AzureDesktopHost host, DesktopSpec spec, DesktopOptions options, TokenCredential credential, HttpClient http)
+    static IEnumerable<(string What, Func<Task> Step)> Steps(AzureDesktopHost host, DesktopSpec spec, string archive, DesktopOptions options, TokenCredential credential, HttpClient http)
     {
         var ct = CancellationToken.None;
         yield return ("made: Azure took the request and the machine has an address", async () =>
@@ -108,6 +117,26 @@ public sealed class AzureDesktopHostLive
         yield return ("stopped again: nothing to do", () => host.StopAsync(spec.Name, ct));
         yield return ("started again: Azure took the request", async () => Assert.AreEqual(spec.Name, (await host.StartAsync(spec.Name, ct)).Host));
         yield return ("on again", () => OnAsync(host, spec.Name));
+
+        // Archived as the sweep does it (DesktopJobs.ArchiveAsync): stopped, its disk copied, then the machine and
+        // its disk deleted. Where the deployment hibernates, the copy holds the machine's memory.
+        yield return ("stopped, to be archived", async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(45), ct);
+            await host.StopAsync(spec.Name, ct);
+        });
+        yield return ("archived: its disk copied", async () =>
+        {
+            var bytes = await host.ArchiveAsync(spec.Name, archive, ct);
+            Assert.IsTrue(bytes > 0, "Azure did not say how large the archive is.");
+            Assert.IsTrue((await host.ListArchivesAsync(ct)).Any(kept => kept.Name == archive));
+        });
+        yield return ("its machine and disk deleted", () => host.DeleteAsync(spec.Name, ct));
+        // Brought back as a start does it (DesktopJobs.StartAsync): a new machine of the same name, on a disk made from the archive.
+        yield return ("brought back: Azure took the request for a machine on a copy of the archive", async () =>
+            Assert.AreEqual(spec.Name, (await host.CreateAsync(spec with { Archive = archive }, ct)).Host));
+        yield return ("on, from the archive", () => OnAsync(host, spec.Name));
+        if (int.TryParse(Told("HOLD"), out var hold) && hold > 0) yield return ($"left running {hold} seconds to be looked at", () => Task.Delay(TimeSpan.FromSeconds(hold), ct));
     }
 
     /// <summary>Ask the host every two seconds, as the job does, until the machine is on.</summary>

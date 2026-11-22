@@ -16,6 +16,8 @@
 set -u
 file=/hibernate.swap
 settings=/etc/default/grub.d/98-workstream-hibernate.cfg
+# The kernel's swappiness as it was, kept while the machine hibernates.
+was=/run/workstream-swappiness
 
 # Whether Azure made this machine with hibernation on.
 offered() { journalctl -k -b --no-pager 2>/dev/null | grep -F 'ACPI: PM: (supports' | grep -q ' S4'; }
@@ -49,14 +51,25 @@ now() {
   offered || exit 0
   grep -q "workstream.machine=$(cat /sys/class/dmi/id/product_uuid)" "$settings" 2>/dev/null || prepare
   swapon "$file" 2>/dev/null
-  # Only what programs hold is written, not the files the kernel is keeping in memory to save reading them
-  # again: a smaller image is written sooner and, what matters, read back sooner when the desktop is started.
-  echo 0 > /sys/power/image_size
-  systemctl hibernate
+  # What is written is what programs hold, with a quarter over, and not all the files the kernel keeps in
+  # memory to save reading them again: a smaller image is written sooner and read back sooner. The kernel makes
+  # room by letting go of those files first (swappiness 0): memory it pushed out to swap instead would have to
+  # be read back a page at a time after the desktop is started, which measured a minute and a half of a
+  # desktop that hardly answers.
+  cat /proc/sys/vm/swappiness > "$was"
+  echo 0 > /proc/sys/vm/swappiness
+  awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { available = $2 } END { printf "%d\n", (total - available) * 1024 * 1.25 + 268435456 }' /proc/meminfo > /sys/power/image_size
+  # A desktop asked to hibernate a moment after it was started is still finishing the last time: asked again until it takes it.
+  for _ in $(seq 30); do
+    systemctl hibernate && return
+    sleep 2
+  done
+  after
 }
 
 after() {
   swapoff "$file" 2>/dev/null
+  [ -f "$was" ] && cat "$was" > /proc/sys/vm/swappiness && rm -f "$was"
   exit 0
 }
 
