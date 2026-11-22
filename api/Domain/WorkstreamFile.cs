@@ -182,7 +182,7 @@ public static class WorkstreamFile
     /// <summary>YamlDotNet's message without its own position, which the line already says.</summary>
     static string Plain(YamlException error)
     {
-        var message = error.InnerException?.Message ?? error.Message;
+        var message = error.Message;
         var at = message.IndexOf("): ", StringComparison.Ordinal);
         return (at >= 0 && message.StartsWith("(Line", StringComparison.Ordinal) ? message[(at + 3)..] : message).Trim();
     }

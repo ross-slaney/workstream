@@ -48,7 +48,12 @@ public sealed class FakeGitHub : HttpMessageHandler
     public ConcurrentQueue<string> Asked { get; } = new();
 
     /// <summary>A new GitHub account, and the token GitHub gave it.</summary>
-    public string NewAccount() => "gho_" + Guid.NewGuid().ToString("N");
+    public string NewAccount()
+    {
+        var token = "gho_" + Guid.NewGuid().ToString("N");
+        accounts[token] = [];
+        return token;
+    }
 
     /// <summary>A new repository of its own that the token's account reaches.</summary>
     public Repository Give(string token, string? name = null, bool canPush = true)
@@ -69,15 +74,16 @@ public sealed class FakeGitHub : HttpMessageHandler
         if (uri.GetLeftPart(UriPartial.Authority) != Api) return Status(HttpStatusCode.NotFound);
         var path = Uri.UnescapeDataString(uri.AbsolutePath);
         Asked.Enqueue($"{request.Method} {path}");
-        var query = QueryHelpers.ParseQuery(uri.Query);
+        var parsed = QueryHelpers.ParseQuery(uri.Query);
+        string? Query(string name) => parsed.TryGetValue(name, out var value) ? value.ToString() : null;
         var bearer = request.Headers.Authorization?.Scheme == "Bearer" ? request.Headers.Authorization.Parameter : null;
         if (bearer is null || !accounts.TryGetValue(bearer, out var reachable)) return Status(HttpStatusCode.Unauthorized, "Bad credentials");
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
 
         if (request.Method == HttpMethod.Get && path == "/user/repos")
         {
-            var page = int.Parse(query["page"].FirstOrDefault() ?? "1");
-            var perPage = int.Parse(query["per_page"].FirstOrDefault() ?? "30");
+            var page = int.Parse(Query("page") ?? "1");
+            var perPage = int.Parse(Query("per_page") ?? "30");
             var list = reachable.OrderByDescending(x => x.PushedAt).Skip((page - 1) * perPage).Take(perPage);
             return Json(list.Select(Describe));
         }
@@ -91,7 +97,7 @@ public sealed class FakeGitHub : HttpMessageHandler
         if (request.Method == HttpMethod.Get && rest == "") return Json(Describe(repository));
         if (request.Method == HttpMethod.Get && rest == "branches")
         {
-            var page = int.Parse(query["page"].FirstOrDefault() ?? "1");
+            var page = int.Parse(Query("page") ?? "1");
             return Json(page == 1 ? repository.Branches.Keys.Order().Select(name => new { name }) : []);
         }
         if (request.Method == HttpMethod.Get && rest.StartsWith("git/ref/heads/", StringComparison.Ordinal))
@@ -112,7 +118,7 @@ public sealed class FakeGitHub : HttpMessageHandler
             var file = rest["contents/".Length..];
             if (request.Method == HttpMethod.Get)
             {
-                var branch = query["ref"].FirstOrDefault() ?? repository.DefaultBranch;
+                var branch = Query("ref") ?? repository.DefaultBranch;
                 if (!repository.Branches.TryGetValue(branch, out var files) || !files.TryGetValue(file, out var text)) return Status(HttpStatusCode.NotFound);
                 return Json(new { type = "file", encoding = "base64", content = Convert.ToBase64String(Encoding.UTF8.GetBytes(text)), sha = Sha(text), path = file });
             }

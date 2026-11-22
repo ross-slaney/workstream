@@ -58,7 +58,7 @@ public static partial class RepositoryAnalysis
         var candidates = new List<(string Path, int Rank)>();
         foreach (var (path, size) in tree)
         {
-            if (Skipped.Any(skip => path.StartsWith(skip, StringComparison.Ordinal) || path.Contains("/" + skip, StringComparison.Ordinal))) continue;
+            if (IsSkipped(path)) continue;
             var name = path[(path.LastIndexOf('/') + 1)..];
             var depth = path.Count(c => c == '/');
             int? rank =
@@ -77,6 +77,9 @@ public static partial class RepositoryAnalysis
         return [.. candidates.OrderBy(x => x.Rank).ThenBy(x => x.Path, StringComparer.Ordinal).Take(MaxFiles).Select(x => x.Path)];
     }
 
+    /// <summary>Whether a path is in a folder of what a project vendors or builds, which says nothing about how to set it up.</summary>
+    static bool IsSkipped(string path) => Skipped.Any(skip => path.StartsWith(skip, StringComparison.Ordinal) || path.Contains("/" + skip, StringComparison.Ordinal));
+
     /// <summary>A file's text as it is sent: a lockfile's first lines, anything else up to its cap.</summary>
     public static AnalysisFile Cut(string path, string text)
     {
@@ -92,6 +95,7 @@ public static partial class RepositoryAnalysis
     public static JsonObject Request(string model, string repository, string branch, IReadOnlyList<string> tree, bool treeCut, IReadOnlyList<AnalysisFile> files)
     {
         var prompt = new StringBuilder();
+        tree = [.. tree.Where(path => !IsSkipped(path))];
         prompt.Append($"Repository: {repository}, branch {branch}.\n\n");
         prompt.Append("Its files").Append(treeCut || tree.Count > MaxTreeLines ? " (not all of them)" : "").Append(":\n");
         foreach (var path in tree.Take(MaxTreeLines)) prompt.Append(path).Append('\n');
