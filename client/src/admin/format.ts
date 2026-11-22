@@ -8,7 +8,7 @@ export const hours = (value: number) => `${(Math.round(value * 10) / 10).toLocal
 export const gigabytes = (value: number) => `${(Math.round(value * 10) / 10).toLocaleString("en-US")} GB`;
 
 /** GB-months: gigabytes times the share of a month they were kept. To a hundredth, since a few minutes of a disk is already some. */
-export const gbMonths = (value: number) => (Math.round(value * 100) / 100).toLocaleString("en-US");
+export const gbMonths = (value: number) => value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Seconds a start took; a dash when none got that far. */
 export const seconds = (value: number | null) => (value === null ? "–" : `${(Math.round(value * 10) / 10).toLocaleString("en-US")} s`);

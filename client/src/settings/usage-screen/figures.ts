@@ -7,7 +7,7 @@ export const hoursShown = (hours: number) => Math.round(hours * 10) / 10;
 export const gbShown = (gb: number) => Math.round(gb * 10) / 10;
 
 /**
- * GB-months to a tenth, or to a hundredth while they are under ten, so a disk kept for a day (about two
- * GB-months) or a small save does not read as nothing.
+ * GB-months to a tenth, or to a hundredth while there is less than one, so a disk kept for a few minutes or
+ * a small save does not read as nothing.
  */
-export const gbMonthsShown = (gbMonths: number) => (gbMonths < 10 ? Math.round(gbMonths * 100) / 100 : Math.round(gbMonths * 10) / 10);
+export const gbMonthsShown = (gbMonths: number) => (gbMonths < 1 ? Math.round(gbMonths * 100) / 100 : Math.round(gbMonths * 10) / 10);

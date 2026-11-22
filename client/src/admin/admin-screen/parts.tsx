@@ -102,14 +102,14 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
               <td className={cell}>
                 {PURPOSE[line.purpose] ?? line.purpose}, <span className="text-muted-foreground">{line.size}</span>
               </td>
-              <td className={`${cell} text-right tabular-nums`}>{hours(line.hours)}</td>
-              <td className={`${cell} text-right tabular-nums`}>{dollars(line.usd)}</td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{hours(line.hours)}</td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{dollars(line.usd)}</td>
             </tr>
           ))}
           <tr>
             <td className={`${cell} font-medium`}>All machines</td>
             <td className={cell} />
-            <td className={`${cell} text-right font-medium tabular-nums`}>{dollars(machinesTotal)}</td>
+            <td className={`${cell} whitespace-nowrap text-right font-medium tabular-nums`}>{dollars(machinesTotal)}</td>
           </tr>
         </tbody>
       </table>
@@ -125,19 +125,19 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
         <tbody className="divide-y divide-border">
           {storage.map((line) => (
             <tr key={line.kind}>
-              <td className={cell}>{KIND[line.kind] ?? line.kind}</td>
-              <td className={`${cell} text-right tabular-nums`}>
-                {gigabytes(line.gb)} <span className="text-muted-foreground">in {line.kept}</span>
+              <td className={cell}>
+                {KIND[line.kind] ?? line.kind}, <span className="text-muted-foreground">{line.kept} kept</span>
               </td>
-              <td className={`${cell} text-right tabular-nums`}>{gbMonths(line.gbMonths)}</td>
-              <td className={`${cell} text-right tabular-nums`}>{dollars(line.usd)}</td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{gigabytes(line.gb)}</td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{gbMonths(line.gbMonths)}</td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{dollars(line.usd)}</td>
             </tr>
           ))}
           <tr>
             <td className={`${cell} font-medium`}>{storage.length === 0 ? "Nothing is kept" : "All storage"}</td>
             <td className={cell} />
             <td className={cell} />
-            <td className={`${cell} text-right font-medium tabular-nums`}>{dollars(storageTotal)}</td>
+            <td className={`${cell} whitespace-nowrap text-right font-medium tabular-nums`}>{dollars(storageTotal)}</td>
           </tr>
         </tbody>
       </table>

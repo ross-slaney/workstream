@@ -178,9 +178,9 @@
         "setup": "Each environment's saved setup, which its tasks start from. Counted at what is on it."
       },
       "gb": "{amount} GB",
-      "gbMonths": "{amount, plural, one {# GB-month} other {# GB-months}}",
+      "gbMonths": "{amount, plural, one {# GB‑month} other {# GB‑months}}",
       "empty": "Nothing has been kept this month.",
-      "body": "A GB-month is one gigabyte kept for a whole month, so 64 GB kept for half a month is 32 GB-months. What is kept is counted every 15 minutes."
+      "body": "A GB‑month is one gigabyte kept for a whole month, so 64 GB kept for half a month is 32 GB‑months. What is kept is counted every 15 minutes."
     }
   },
   "github": {

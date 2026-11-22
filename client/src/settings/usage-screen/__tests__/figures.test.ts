@@ -9,10 +9,10 @@ describe("what the Usage page shows", () => {
     expect(gbShown(12.537)).toBe(12.5);
   });
 
-  it("keeps a hundredth of a GB-month while there are few, so a day's disk is not nothing", () => {
+  it("keeps a hundredth of a GB-month while there is less than one, so a few minutes of a disk is not nothing", () => {
     expect(gbMonthsShown(0.022)).toBe(0.02);
-    expect(gbMonthsShown(2.104)).toBe(2.1);
-    expect(gbMonthsShown(9.996)).toBe(10);
+    expect(gbMonthsShown(0.996)).toBe(1);
+    expect(gbMonthsShown(4.62)).toBe(4.6);
     expect(gbMonthsShown(41.26)).toBe(41.3);
   });
 });
