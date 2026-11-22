@@ -1,5 +1,6 @@
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
-import { leaveForProvider } from "@/lib/auth";
+import { useEffect } from "react";
+import { forgetSignIn, leaveForProvider } from "@/lib/auth";
 import { getAuthServerUrl, getRedirectUri, getSqlOsClientId } from "@/lib/config";
 import type { DeviceScreenMode, DeviceScreenProps } from "@/src/auth/device-screen";
 import { useSignInSteps } from "./use-sign-in";
@@ -30,6 +31,8 @@ export function useDeviceSignIn(requestId: string | undefined, providerFailed?: 
     credentials: "include",
   });
   const { flow, status, view, viewModel, error } = auth;
+  // Whatever was kept for a trip to GitHub from this page has done its work once the page is on screen again.
+  useEffect(() => forgetSignIn(), []);
   // Always the device step: SqlOS answers it with the approval itself when this browser is already signed in.
   const read = () => (requestId ? flow.resume(`?request=${encodeURIComponent(requestId)}&view=device`) : Promise.resolve());
 

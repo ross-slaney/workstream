@@ -35,13 +35,16 @@ export default function SignInRoute() {
   const intent = params.view === "signup" ? "signup" : "login";
   const after = ownPath(params.returnTo);
   const cameBack = Boolean(params.request) || params.failed === "provider";
-  if (status === "authenticated") return <Redirect href={after} />;
+  const signedIn = status === "authenticated";
   return (
     <>
       <Head>
         <title>{t("meta.signInTitle")}</title>
       </Head>
-      {status === "loading" ? <div className="h-full bg-canvas" /> : cameBack ? <CameBack intent={intent} after={after} /> : <SignIn intent={intent} after={after} />}
+      {status === "loading" ? <div className="h-full bg-canvas" />
+        : cameBack ? <CameBack intent={intent} after={after} signedIn={signedIn} />
+        : signedIn ? <Redirect href={after} />
+        : <SignIn intent={intent} after={after} />}
     </>
   );
 }
@@ -50,10 +53,14 @@ function SignIn({ intent, after, providerFailed }: { intent: "login" | "signup";
   return <SignInScreen {...useSignIn(intent, after, undefined, providerFailed)} />;
 }
 
-/** Back from a provider, not signed in. The page they left from says so: this one, or the command line's. */
-function CameBack({ intent, after }: { intent: "login" | "signup"; after: string }) {
+/**
+ * Back from a provider, not signed in by it. The page they left from says so: this one, or the command line's,
+ * which a person signed in to the web app may well have come from.
+ */
+function CameBack({ intent, after, signedIn }: { intent: "login" | "signup"; after: string; signedIn: boolean }) {
   // Read in the browser only: this renders once the session has been read there.
   const [left] = useState(() => readSignIn());
   if (left && left.codeVerifier === null && left.returnTo.startsWith("/device?")) return <Redirect href={`${left.returnTo}&failed=provider`} />;
+  if (signedIn) return <Redirect href={after} />;
   return <SignIn intent={intent} after={after} providerFailed />;
 }
