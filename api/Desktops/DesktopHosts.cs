@@ -425,15 +425,17 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 },
             },
         };
+        // Azure refuses Trusted Launch on a Linux machine that hibernates, so a machine has one or the other.
+        // From the image it is the deployment's choice. From a saved setup or an archive it is the disk's: a
+        // disk keeps the security type it was made with, and Azure takes it only on a machine of the same
+        // kind, so a desktop archived before the deployment hibernated comes back as it was, and the other
+        // way round.
+        var trusted = source is null ? !Azure.Hibernate : await TrustedAsync(source, ct);
+        // A machine preparing a saved setup is never started again, and its disk is copied for other machines:
+        // it is not one that hibernates, so no memory of it is ever on a disk a task starts from.
+        var hibernates = Azure.Hibernate && !trusted && spec.Purpose != MachinePurpose.Prepare;
         var properties = body["properties"]!.AsObject();
-        if (Azure.Hibernate)
-        {
-            // Azure refuses Trusted Launch on a Linux machine that hibernates, so these machines are made without
-            // it. A machine preparing a saved setup is never started again, and its disk is copied for other
-            // machines: it is not one that hibernates, so no memory of it is ever on a disk a task starts from.
-            if (Hibernates(spec)) properties["additionalCapabilities"] = new JsonObject { ["hibernationEnabled"] = true };
-        }
-        else
+        if (trusted)
         {
             properties["securityProfile"] = new JsonObject
             {
@@ -441,7 +443,8 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 ["uefiSettings"] = new JsonObject { ["secureBootEnabled"] = true, ["vTpmEnabled"] = true },
             };
         }
-        if (source is not null) await DiskFromSaveAsync(spec, source, ct);
+        if (hibernates) properties["additionalCapabilities"] = new JsonObject { ["hibernationEnabled"] = true };
+        if (source is not null) await DiskFromSaveAsync(spec, source, hibernates, ct);
         try
         {
             (await SendAsync(HttpMethod.Put, $"{Machine(spec.Name)}?api-version={ComputeApi}", body, ct)).Dispose();
@@ -455,15 +458,19 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         return new DesktopPlace(spec.Name, await AddressAsync(spec.Name, ct));
     }
 
-    /// <summary>Whether this machine is made to hibernate when it is stopped: every one but a machine preparing a saved setup, where the deployment hibernates.</summary>
-    bool Hibernates(DesktopSpec spec) => Azure.Hibernate && spec.Purpose != MachinePurpose.Prepare;
+    /// <summary>Whether a saved setup or an archive is of a disk made with Trusted Launch, which the disk made from it then has too.</summary>
+    async Task<bool> TrustedAsync(string snapshot, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get, $"{Snapshot(snapshot)}?api-version={DiskApi}", null, ct);
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["properties"]?["securityProfile"]?["securityType"]?.GetValue<string>() == "TrustedLaunch";
+    }
 
     /// <summary>
     /// A disk made from a saved setup or an archive, for the machine that is about to take it. It carries the
     /// snapshot's security type with it, and is the snapshot's size, which for an archive is the size the
     /// task's disk was.
     /// </summary>
-    async Task DiskFromSaveAsync(DesktopSpec spec, string snapshot, CancellationToken ct)
+    async Task DiskFromSaveAsync(DesktopSpec spec, string snapshot, bool hibernates, CancellationToken ct)
     {
         var disk = new JsonObject
         {
@@ -476,7 +483,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
             },
         };
         // A disk from the image is one that can hold a hibernated machine because the image says so; a disk made here says it itself.
-        if (Hibernates(spec)) disk["properties"]!["supportsHibernation"] = true;
+        if (hibernates) disk["properties"]!["supportsHibernation"] = true;
         (await SendAsync(HttpMethod.Put, $"{DiskOf(spec.Name)}?api-version={DiskApi}", disk, ct)).Dispose();
         await MadeAsync($"{DiskOf(spec.Name)}?api-version={DiskApi}", $"The disk for the machine {spec.Name}", ct);
     }

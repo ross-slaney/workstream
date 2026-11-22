@@ -24,6 +24,8 @@ public sealed class FakeAzure : HttpMessageHandler
 
     public ConcurrentDictionary<string, PlayedMachine> Machines { get; } = new();
     public ConcurrentDictionary<string, JsonObject> Disks { get; } = new();
+    /// <summary>Saved setups and archives Azure holds, by name, and whether each is of a disk made with Trusted Launch.</summary>
+    public ConcurrentDictionary<string, bool> Snapshots { get; } = new();
     /// <summary>Every request, as <c>METHOD path?query</c> without the API's version.</summary>
     public ConcurrentQueue<string> Asked { get; } = new();
     /// <summary>Azure refuses to hibernate at once, with these words.</summary>
@@ -55,6 +57,13 @@ public sealed class FakeAzure : HttpMessageHandler
             if (request.Method == HttpMethod.Put) Disks[name] = body!;
             if (request.Method == HttpMethod.Delete) return Disks.TryRemove(name, out _) ? Json(new JsonObject()) : Missing();
             return Disks.TryGetValue(name, out var disk) ? Json(new JsonObject { ["properties"] = new JsonObject { ["provisioningState"] = "Succeeded" }, ["made"] = disk.DeepClone() }) : Missing();
+        }
+        if (kind == "snapshots")
+        {
+            if (!Snapshots.TryGetValue(name, out var trusted)) return Missing();
+            var properties = new JsonObject { ["provisioningState"] = "Succeeded" };
+            if (trusted) properties["securityProfile"] = new JsonObject { ["securityType"] = "TrustedLaunch" };
+            return Json(new JsonObject { ["name"] = name, ["properties"] = properties });
         }
         if (kind == "networkInterfaces")
         {
@@ -99,14 +108,14 @@ public sealed class FakeAzure : HttpMessageHandler
 
         var statuses = new JsonArray(new JsonObject { ["code"] = "PowerState/" + machine.Power });
         if (machine.Hibernated) statuses.Add(new JsonObject { ["code"] = "HibernationState/Hibernated" });
-        var properties = machine.Body["properties"]!.DeepClone().AsObject();
-        properties["provisioningState"] = machine.Provisioning;
-        properties["instanceView"] = new JsonObject { ["statuses"] = statuses };
-        properties["networkProfile"] = new JsonObject
+        var described = machine.Body["properties"]!.DeepClone().AsObject();
+        described["provisioningState"] = machine.Provisioning;
+        described["instanceView"] = new JsonObject { ["statuses"] = statuses };
+        described["networkProfile"] = new JsonObject
         {
             ["networkInterfaces"] = new JsonArray(new JsonObject { ["id"] = $"/subscriptions/played/resourceGroups/played/providers/Microsoft.Network/networkInterfaces/{name}-nic" }),
         };
-        return Json(new JsonObject { ["name"] = name, ["properties"] = properties });
+        return Json(new JsonObject { ["name"] = name, ["properties"] = described });
     }
 
     static HttpResponseMessage Json(JsonNode node) => new(HttpStatusCode.OK) { Content = new StringContent(node.ToJsonString(), Encoding.UTF8, "application/json") };

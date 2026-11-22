@@ -8,7 +8,7 @@ Everything in Azure is declared here and deployed by `.github/workflows/release.
 
 | Group | What | File |
 | --- | --- | --- |
-| `workstream` | Container registry, Log Analytics, the private network with its NAT gateway, the container apps environment inside that network, Communication Services for email, the gallery that holds the desktops' image | `foundation.bicep` |
+| `workstream` | Container registry, Log Analytics, the private network with its NAT gateway, the container apps environment inside that network, Communication Services for email, the gallery that holds the desktops' image (`gallery.bicep`: the definition `machine`, and `machine-hibernate` for desktops that hibernate) | `foundation.bicep` |
 | `workstream` | The runtime identity, the SQL server and database | `data.bicep` |
 | `workstream` | The API and the web app | `api.bicep`, `web.bicep` |
 | `workstream-desktops` | One virtual machine per task, with its disk and network interface. The API makes and removes them; Bicep declares only the API's right to. | `desktops.bicep` |
@@ -71,7 +71,7 @@ Without both, the sign-in page shows no GitHub button and people sign in by emai
 Publishing the GitHub release `vX.Y.Z` runs `release.yml` (the `release` skill does the whole thing):
 
 1. **Resolve.** The tag must be `v` + `client/app.json`'s version, on `main`, and published.
-2. **Desktops' image.** When `desktop/` changed since the previous release, or the gallery is empty, the job makes a Debian 13 machine in a group of its own, runs `desktop/image/bake.sh` on it, captures it into the gallery as version `X.Y.Z` (about half an hour), keeps the three newest versions and deletes the builder. Otherwise it does nothing. Either way it says which version this release makes its desktops from: its own, or the newest before it.
+2. **Desktops' image.** When `desktop/` changed since the previous release, or the gallery's definition is empty, the job makes a Debian 13 machine in a group of its own (`image-builder.bicep`), runs `desktop/image/bake.sh` on it, captures it into the gallery as version `X.Y.Z` (about half an hour), keeps the three newest versions and deletes the builder. Otherwise it does nothing. Either way it says which version this release makes its desktops from: its own, or the newest before it.
 3. **Web + API.** On a fresh installation the job first deploys `foundation.bicep` by itself, because the images need the registry and the web image needs the API's address. It builds both images, deploys `main.bicep` with the image version from the step before, and checks that both origins serve the exact commit.
 
 The image comes first because the API and the image are released together: a deployment makes its desktops from one image version, the one it was deployed with, and never from whatever is newest. So the API never meets a desktop newer than itself, and deploying an older release again gets that release's image, as long as it is one of the three kept. Running and stopped desktops keep the disk they have.
@@ -93,6 +93,51 @@ gh workflow run staging.yml -f action=remove
 Staging makes its desktops from the newest release's image. With `desktop-image=true` it bakes one of its own from the ref first, as version `0.0.N` in the same gallery; no release ever chooses a `0.0` version, only the newest is kept, and removing staging deletes it.
 
 The run's summary gives its two addresses. Its administrator is `admin@workstream.test` with the password in the `staging` environment's `ADMINISTRATOR_PASSWORD` secret. Remove it when you are done: while it exists it costs what its two apps and its database cost, and its desktops count against the same cores.
+
+## Hibernation
+
+Built, measured, and off. A paused desktop loses every program; a hibernated one writes its memory to its disk first, and resuming brings everything back as it was (`docs/architecture.md`, "Hibernating a paused desktop"). Whether to turn it on is a decision about Trusted Launch, below.
+
+### What Azure needs, as it was found
+
+Tried in West US 3 on 2026-11-21, in a scratch group since deleted:
+
+- **A size that hibernates.** `az vm list-skus` says `HibernationSupported` for `Standard_D2as_v6`, `D4as_v6` and `D8as_v6` and not for the Dasv7 sizes desktops use today. The v6 sizes have the same cores and memory, and the same list price to the tenth of a cent ($0.0908, $0.182 and $0.363 an hour). `/dev/kvm` is there on them, with hibernation on too. The `standardDav6Family` limit is 40 cores, raised from 10 the way "Limits to know" says.
+- **No Trusted Launch.** Azure refuses: "Trusted launch is not supported for Linux VM with Hibernation capability", with Secure Boot on or off and with the virtual TPM on or off. (Under Secure Boot the Debian kernel also locks hibernation out by itself.) A machine's security type cannot be changed afterwards, in either direction. So a desktop that hibernates is made with neither Secure Boot nor a virtual TPM.
+- **An image definition that says so.** A machine with hibernation is made only from a gallery definition with the feature `IsHibernateSupported`. It cannot be added to a definition that exists (the update is refused), so there is a second one, `machine-hibernate`. A disk built with Trusted Launch cannot go into it, and one built without cannot go into `machine`, so its versions are baked on a builder without Trusted Launch (`image-builder.bicep`, `trustedLaunch=false`).
+- **The machine itself.** Nothing of Azure's: no extension and no agent. `desktop/image/hibernate.sh` makes a swap file as large as the machine's memory at first boot (a third of a second, beside the desktop; 8, 16 or 32 GB of the disk by size), answers Azure's request, and lets only the machine that hibernated wake up from its disk. On a machine made without hibernation it does nothing, so every image has it.
+
+### What was measured
+
+Machines made the way the API makes them, without Trusted Launch, with a desktop session, the agent exchanging with a stand-in API, Chromium with a page open, VS Code, a node server, a counter and a Docker container running. Seconds, from the request to Azure.
+
+| | Standard (`D4as_v6`, 16 GB) | Large (`D8as_v6`, 32 GB) |
+| --- | --- | --- |
+| Pause: until Azure has released the machine | HIBERNATE_STD | HIBERNATE_LARGE |
+| Resume: until the display answers | RESUME_DISPLAY_STD | RESUME_DISPLAY_LARGE |
+| Resume: until the agent has exchanged with the API again | RESUME_EXCHANGE_STD | RESUME_EXCHANGE_LARGE |
+| The same machine started after a plain pause, for comparison | COLD_STD | |
+
+Every resume brought back the same boot, the same processes (the session, the agent, Chromium and its pages, VS Code, the node server, the counter, the container) and a working network, with the clock right to the second. The agent's exchange recovered by itself each time.
+
+HEAVY_LINE
+
+A new machine is no slower on v6 than on v7: five each from the release image, alternating, showed their display after 22 to 25 seconds on v6 (middle 23) and 24 to 52 on v7 (middle 40), which is Azure's own spread that hour and not the size. NEWHIB_LINE
+
+Two things to know before relying on it:
+
+- **A resume is slower to a screen than a plain start, and slower the more memory is in use.** What programs hold is read back from a disk that gives 60 MB a second. The kernel is told to write what programs hold and let go of cached files first; left to shrink the image as far as it could, it pushed programs' memory to swap, and the desktop hardly answered for a minute and a half after it was back.
+- **A machine that does not hibernate is stopped the plain way, late.** The API gives a machine five minutes and then deallocates it; Azure took that request and carried it out only when its own ten-minute wait for the machine ended. The desktop then comes back as from any pause. This happened once in testing, when a desktop was asked to hibernate a minute after it had resumed and was still swapping; `hibernate.sh` now asks the machine again for a minute.
+
+### Turning it on
+
+One line: `DEFINITION: machine-hibernate` in `release.yml`. The next release bakes the image into that definition, because it is empty, on a builder without Trusted Launch, and deploys the API with `desktopsHibernate=true` (`main.bicep`): `Workstream:Desktops:Azure:Hibernate`, the three v6 sizes, and the image from that definition. Staging first: `gh workflow run staging.yml -f action=deploy -f ref=main -f desktop-image=true -f hibernate=true`.
+
+Desktops that exist keep the machine they have, with Trusted Launch on a v7 size, and are paused the plain way; a desktop brought back from an archive made before the change cannot be made at all, because a disk with Trusted Launch cannot be a hibernating machine's, so archive nothing across the change or delete those tasks first. Saved setups are made again by themselves: a save is for one image version. Turning it off again is the same line back, and the same holds the other way round.
+
+What is given up is Trusted Launch on desktops: Secure Boot, which stops a desktop booting a kernel or boot loader that is not signed, and the virtual TPM. A desktop is already untrusted, its person has root, it holds one key that reaches its own task, and it has no way to another machine (`docs/architecture.md`, "What a desktop can and cannot do"); Trusted Launch protects a desktop's own boot from what runs on it, and nothing else from the desktop. That is the owner's call, which is why this is off.
+
+To check the host against Azure without deploying anything, `tests/Workstream.Tests/AzureDesktopHostLive.cs` makes, pauses, resumes, archives, brings back and deletes one machine in a resource group you name.
 
 ## Models
 
@@ -253,7 +298,7 @@ A pool of stopped machines was measured and not built: Azure takes as long to st
 
 - **A provider.** A container apps environment inside a virtual network needs the `Microsoft.ContainerService` resource provider registered on the subscription. Without it the environment sits in `Waiting` and never finishes. `release.yml` registers it before a fresh installation's first deployment.
 
-- **Cores.** A new subscription has 10 cores in a region: two Standard desktops use 8, and baking an image uses 4 while it runs. This subscription has 40 in West US 3 (the regional limit and the `StandardDasv7Family` limit), which Azure granted at once and without charge: `az quota update --resource-name cores --scope /subscriptions/<id>/providers/Microsoft.Compute/locations/westus3 --limit-object value=40 --resource-type dedicated`, and the same for `standardDasv7Family`.
+- **Cores.** A new subscription has 10 cores in a region: two Standard desktops use 8, and baking an image uses 4 while it runs. This subscription has 40 in West US 3 (the regional limit and the `StandardDasv7Family` limit), which Azure granted at once and without charge: `az quota update --resource-name cores --scope /subscriptions/<id>/providers/Microsoft.Compute/locations/westus3 --limit-object value=40 --resource-type dedicated`, and the same for `standardDasv7Family` and, for the sizes that hibernate, `standardDav6Family`.
 - **How long Azure takes.** Making a machine, or starting a stopped one, takes Azure between 15 seconds and a minute before the machine begins to boot, and it varies by the hour. Nothing in this repository shortens that; a machine then shows its screen about 4 seconds after it begins to boot.
 - **Azure's limit on questions.** Azure answers about 15 questions about operations in 25 seconds, across the whole subscription. The API never waits on an operation: it asks about the machine itself, which is counted per machine (`api/Desktops/DesktopHosts.cs`).
 - **Email.** The domain Azure manages sends a few dozen emails an hour and may land in spam. A domain of our own replaces it.

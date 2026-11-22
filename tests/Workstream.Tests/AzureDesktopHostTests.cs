@@ -97,14 +97,47 @@ public sealed class AzureDesktopHostTests
     public async Task A_machine_from_a_saved_setup_gets_a_disk_that_can_hold_its_memory()
     {
         var (host, azure) = Played(hibernate: true);
+        azure.Snapshots["save-1"] = false;
 
         await host.CreateAsync(Spec(save: "save-1"), default);
         Assert.IsTrue(azure.Disks[Name + "-os"]["properties"]!["supportsHibernation"]!.GetValue<bool>());
         Assert.IsTrue(Made(azure)["additionalCapabilities"]!["hibernationEnabled"]!.GetValue<bool>());
+        Assert.IsNull(Made(azure)["securityProfile"]);
 
         var (plain, plainAzure) = Played(hibernate: false);
+        plainAzure.Snapshots["save-1"] = true;
         await plain.CreateAsync(Spec(save: "save-1"), default);
         Assert.IsNull(plainAzure.Disks[Name + "-os"]["properties"]!["supportsHibernation"]);
+        Assert.AreEqual("TrustedLaunch", Made(plainAzure)["securityProfile"]!["securityType"]!.GetValue<string>());
+    }
+
+    [TestMethod]
+    public async Task A_desktop_archived_with_Trusted_Launch_comes_back_with_it_and_does_not_hibernate()
+    {
+        // Archived before the deployment hibernated: its disk has Trusted Launch, and Azure takes such a disk
+        // only on a machine that has it too, which is one Azure will not hibernate.
+        var (host, azure) = Played(hibernate: true);
+        azure.Snapshots["wsa-1"] = true;
+
+        await host.CreateAsync(Spec() with { Archive = "wsa-1" }, default);
+        Assert.AreEqual("TrustedLaunch", Made(azure)["securityProfile"]!["securityType"]!.GetValue<string>());
+        Assert.IsNull(Made(azure)["additionalCapabilities"]);
+        Assert.IsNull(azure.Disks[Name + "-os"]["properties"]!["supportsHibernation"]);
+
+        await host.StopAsync(Name, default);
+        CollectionAssert.AreEqual(new[] { "deallocate" }, Posts(azure));
+    }
+
+    [TestMethod]
+    public async Task A_desktop_archived_without_Trusted_Launch_comes_back_without_it_where_nothing_hibernates()
+    {
+        // The other way round: hibernation was turned off again, and the archive is of a disk made without Trusted Launch.
+        var (host, azure) = Played(hibernate: false);
+        azure.Snapshots["wsa-1"] = false;
+
+        await host.CreateAsync(Spec() with { Archive = "wsa-1" }, default);
+        Assert.IsNull(Made(azure)["securityProfile"]);
+        Assert.IsNull(Made(azure)["additionalCapabilities"]);
     }
 
     [TestMethod]
