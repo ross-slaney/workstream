@@ -4,7 +4,7 @@ import { TextField } from "@/components/kit/field";
 import { ErrorNote, Spinner } from "@/components/kit/status";
 import { useT } from "@/lib/i18n";
 import { Mark } from "@/src/landing/landing-page";
-import type { SignInScreenProps } from "./props";
+import type { SignInProvider, SignInScreenProps } from "./props";
 
 /** The words above the form for the step on screen. */
 function useHeading(p: SignInScreenProps) {
@@ -94,6 +94,7 @@ export function SignInForm(p: SignInScreenProps) {
       )}
       <ErrorNote message={p.error} />
       <Button type="submit" tone="primary" label={submit} busy={p.busy} />
+      <Providers providers={p.providers} disabled={p.busy} onProvider={p.onProvider} />
       {p.mode === "verify" ? (
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
           <LinkButton onClick={p.onResend}>{t("verify.resend")}</LinkButton>
@@ -103,6 +104,40 @@ export function SignInForm(p: SignInScreenProps) {
         <LinkButton onClick={p.onSwitchMode}>{p.mode === "signup" ? t("signUp.switch") : p.invitation ? t("invite.switchNew") : t("signIn.switch")}</LinkButton>
       )}
     </form>
+  );
+}
+
+/** The other ways in, under the form's own button: a line, "or", and a button for each provider. Nothing where there are none. */
+function Providers({ providers, disabled, onProvider }: { providers: SignInProvider[]; disabled: boolean; onProvider: (id: string) => void }) {
+  const t = useT("auth");
+  if (providers.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3 text-[13px] text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        <span>{t("provider.or")}</span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      {providers.map((provider) => (
+        <Button
+          key={provider.id}
+          tone="outline"
+          label={t("provider.continue", { provider: provider.name })}
+          icon={provider.kind === "github" ? <GitHubMark /> : undefined}
+          disabled={disabled}
+          onClick={() => onProvider(provider.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** GitHub's mark, in the color of the words beside it. */
+function GitHubMark() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-[18px] shrink-0" fill="currentColor">
+      <path d="M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 4.64 3.01 8.58 7.18 9.97.52.1.71-.23.71-.5v-1.86c-2.92.64-3.54-1.24-3.54-1.24-.48-1.22-1.17-1.54-1.17-1.54-.96-.65.07-.64.07-.64 1.06.07 1.62 1.09 1.62 1.09.94 1.61 2.46 1.14 3.06.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.19 0-1.15.41-2.08 1.08-2.82-.11-.27-.47-1.34.1-2.78 0 0 .89-.28 2.9 1.08A10.1 10.1 0 0 1 12 6.68c.9 0 1.79.12 2.63.36 2.01-1.36 2.9-1.08 2.9-1.08.57 1.44.21 2.51.1 2.78.67.74 1.08 1.67 1.08 2.82 0 4.03-2.45 4.92-4.79 5.18.38.33.72.97.72 1.96v2.77c0 .28.19.61.72.5A10.51 10.51 0 0 0 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z" />
+    </svg>
   );
 }
 

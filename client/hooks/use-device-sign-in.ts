@@ -1,4 +1,5 @@
 import { useHeadlessAuth } from "@sqlos/headless/react-native";
+import { leaveForProvider } from "@/lib/auth";
 import { getAuthServerUrl, getRedirectUri, getSqlOsClientId } from "@/lib/config";
 import type { DeviceScreenMode, DeviceScreenProps } from "@/src/auth/device-screen";
 import { useSignInSteps } from "./use-sign-in";
@@ -11,12 +12,17 @@ import { useSignInSteps } from "./use-sign-in";
  * page shows the code the terminal printed and what the command line may do, and the person allows it or not.
  * The command line's next poll gets a session of the person's own (docs/core-model.md, "The command line").
  *
+ * Signing in with GitHub here is the same button as on the sign-in page, inside the command line's request:
+ * SqlOS takes the browser back from GitHub signed in and hands it to this page again, at the approval. If
+ * GitHub did not sign the person in, SqlOS hands the browser to the sign-in page, which sends it back here
+ * (app/sign-in.tsx) with `failed`, and the form says so.
+ *
  * Approving needs SqlOS's own session in this browser, a cookie on the API's address that the sign-in steps
  * set, so this flow, unlike the app's sign-in, sends credentials. Nothing here touches the app's session: the
  * command line's tokens go to the command line, never to this page.
  */
 
-export function useDeviceSignIn(requestId: string | undefined): DeviceScreenProps {
+export function useDeviceSignIn(requestId: string | undefined, providerFailed?: boolean): DeviceScreenProps {
   const auth = useHeadlessAuth({
     issuer: getAuthServerUrl(),
     clientId: getSqlOsClientId(),
@@ -28,7 +34,10 @@ export function useDeviceSignIn(requestId: string | undefined): DeviceScreenProp
   const read = () => (requestId ? flow.resume(`?request=${encodeURIComponent(requestId)}&view=device`) : Promise.resolve());
 
   const signIn = useSignInSteps(auth, "login", {
+    providerFailed,
     begin: read,
+    // This page has no code of its own to exchange: it only needs finding again if GitHub does not sign the person in.
+    leave: (url) => leaveForProvider(url, { state: null, codeVerifier: null, returnTo: `/device?request=${encodeURIComponent(requestId ?? "")}` }),
     // Signed in: SqlOS points at its approval step. The page reads the request again and shows it.
     finish: async () => {
       // Still at the sign-in step means SqlOS kept no session in this browser: say sign-in did not work.
