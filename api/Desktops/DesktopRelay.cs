@@ -21,6 +21,11 @@ namespace Workstream.Api.Desktops;
 /// mouse and keyboard: what the browser sends is read message by message (<see cref="RfbClientFilter"/>), and
 /// for someone who may only watch, what would act on the desktop is dropped. Both are checked again every
 /// minute for as long as the stream stays open, so an ended or changed share takes effect within one.
+///
+/// An open stream is not use of the desktop: a pane left open in a browser tab keeps nothing running. What is
+/// use is a key or pointer event that reaches the display, which the filter notices and this relay writes down
+/// on the task, at most once a minute (<see cref="UseAsync"/>). The sweep pauses a desktop nobody has used for
+/// as long as its team allows (<see cref="DesktopJobs.SweepAsync"/>).
 /// </summary>
 public static class DesktopRelay
 {
@@ -28,6 +33,10 @@ public static class DesktopRelay
     const string TokenProtocol = "bearer.";
     const string StreamProtocol = "binary";
     static readonly TimeSpan CheckEvery = TimeSpan.FromSeconds(60);
+    /// <summary>How often an open stream is asked whether a person's input came through it.</summary>
+    static readonly TimeSpan AskForInputEvery = TimeSpan.FromSeconds(1);
+    /// <summary>The least time between two writes that the desktop is in use, from one stream.</summary>
+    public static readonly TimeSpan WriteUseEvery = TimeSpan.FromSeconds(60);
 
     public static async Task HandleAsync(HttpContext http, string id)
     {
@@ -57,7 +66,7 @@ public static class DesktopRelay
         }
 
         var scopes = services.GetRequiredService<IServiceScopeFactory>();
-        var (status, address, drive) = await AdmitAsync(scopes, token.UserId, token.SessionId, id, touch: true, http.RequestAborted);
+        var (status, address, drive) = await AdmitAsync(scopes, token.UserId, token.SessionId, id, http.RequestAborted);
         if (address is null)
         {
             http.Response.StatusCode = status;
@@ -90,7 +99,8 @@ public static class DesktopRelay
         var first = await Task.WhenAny(
             ToDesktopAsync(browser, display, filter, open.Token),
             ToBrowserAsync(display, browser, open.Token),
-            WatchAsync(scopes, token.UserId, token.SessionId, id, filter, open.Token));
+            WatchAsync(scopes, token.UserId, token.SessionId, id, filter, open.Token),
+            UseAsync(scopes, id, filter, open.Token));
         open.Cancel();
         if (browser.State is WebSocketState.Open or WebSocketState.CloseReceived)
         {
@@ -110,9 +120,10 @@ public static class DesktopRelay
     /// Whether this person may have this desktop on screen now, where it is, and whether they may use its
     /// mouse and keyboard. Their session must be live, they must hold <c>TASK_VIEW</c> on the task, and its
     /// display must be answering, which it is a few seconds before its agent first exchanges. Each check that
-    /// passes also records that the desktop is in use, which is what keeps the sweep from stopping it, and that this person has it on screen.
+    /// passes records that this person has it on screen, so they are not emailed about what they are watching.
+    /// It does not record that the desktop is in use: having it on screen is not using it.
     /// </summary>
-    static async Task<(int Status, string? Address, bool Drive)> AdmitAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, bool touch, CancellationToken ct)
+    static async Task<(int Status, string? Address, bool Drive)> AdmitAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
@@ -122,43 +133,61 @@ public static class DesktopRelay
         {
             return (StatusCodes.Status401Unauthorized, null, false);
         }
-        var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct);
+        var task = await db.Tasks.AsNoTracking().SingleOrDefaultAsync(x => x.Id == taskId, ct);
         if (task is null || task.State == DesktopState.Deleting || !await fga.Allows(userId, Permissions.TaskView, task.ResourceId)) return (StatusCodes.Status404NotFound, null, false);
         if (!task.CanBeWatched) return (StatusCodes.Status409Conflict, null, false);
         var drive = await fga.Allows(userId, Permissions.TaskDrive, task.ResourceId);
-        if (touch)
+        var at = DateTimeOffset.UtcNow;
+        var watcher = await db.TaskWatchers.SingleOrDefaultAsync(x => x.TaskId == task.Id && x.UserId == userId, ct);
+        if (watcher is null) db.TaskWatchers.Add(TaskWatcher.Of(task, userId, at));
+        else watcher.Seen(at);
+        try
         {
-            var at = DateTimeOffset.UtcNow;
-            task.Active(at);
             await db.SaveChangesAsync(ct);
-            // And that this person has it on screen, so they are not emailed about what they are watching.
-            var watcher = await db.TaskWatchers.SingleOrDefaultAsync(x => x.TaskId == task.Id && x.UserId == userId, ct);
-            if (watcher is null) db.TaskWatchers.Add(TaskWatcher.Of(task, userId, at));
-            else watcher.Seen(at);
-            try
-            {
-                await db.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException)
-            {
-                // Their other stream, opened at the same moment, wrote it first: it says the same.
-            }
+        }
+        catch (DbUpdateException)
+        {
+            // Their other stream, opened at the same moment, wrote it first: it says the same.
         }
         return (StatusCodes.Status200OK, task.Address, drive);
     }
 
     /// <summary>
-    /// Ends, and so closes the stream, when the person may no longer watch; keeps the mouse and keyboard to
-    /// whoever may still use them.
+    /// Ends, and so closes the stream, when the person may no longer watch or the desktop is no longer there
+    /// to watch; keeps the mouse and keyboard to whoever may still use them.
     /// </summary>
     static async Task WatchAsync(IServiceScopeFactory scopes, string userId, string sessionId, string taskId, RfbClientFilter filter, CancellationToken ct)
     {
         while (true)
         {
             await Task.Delay(CheckEvery, ct);
-            var (_, address, drive) = await AdmitAsync(scopes, userId, sessionId, taskId, touch: true, ct);
+            var (_, address, drive) = await AdmitAsync(scopes, userId, sessionId, taskId, ct);
             if (address is null) return;
             filter.Drive = drive;
+        }
+    }
+
+    /// <summary>
+    /// Writes down that the desktop is in use when a person's key or pointer event has reached it through this
+    /// stream: at once for the first, and then at most once every <see cref="WriteUseEvery"/> while they go on.
+    /// Never ends by itself.
+    /// </summary>
+    static async Task UseAsync(IServiceScopeFactory scopes, string taskId, RfbClientFilter filter, CancellationToken ct)
+    {
+        while (true)
+        {
+            await Task.Delay(AskForInputEvery, ct);
+            if (!filter.TakeInput()) continue;
+            await using (var scope = scopes.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+                if (await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct) is { CanBeWatched: true } task)
+                {
+                    task.Active(DateTimeOffset.UtcNow);
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+            await Task.Delay(WriteUseEvery - AskForInputEvery, ct);
         }
     }
 

@@ -62,7 +62,8 @@ internal static class IdentityProvisioning
             if (team is null)
             {
                 var now = DateTimeOffset.UtcNow;
-                team = Team.For(organization.Id, WorkstreamDbContext.DefaultModelAllowanceUsd, WorkstreamDbContext.DefaultMaxRunningDesktops, now);
+                team = Team.For(organization.Id, WorkstreamDbContext.DefaultModelAllowanceUsd, WorkstreamDbContext.DefaultMaxRunningDesktops, now,
+                    WorkstreamDbContext.DefaultPauseAfterMinutes, WorkstreamDbContext.DefaultArchiveAfterDays);
                 db.Add(team);
                 var group = AddGroup(db, team.Id, organization.Name, "team", team.Id, organization.IsActive);
                 Grant(db, group.SubjectId, team.ResourceId, Roles.TeamMember);

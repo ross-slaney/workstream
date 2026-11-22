@@ -2,17 +2,28 @@ using SqlOS.Fga.Interfaces;
 
 namespace Workstream.Api.Domain;
 
-/// <summary>Where a task's desktop is in its life. The machine is billed while it is starting, ready or stopping.</summary>
+/// <summary>
+/// Where a task's desktop is in its life. The machine is billed while it is starting, ready or stopping.
+/// People read <see cref="Stopping"/> and <see cref="Stopped"/> as pausing and paused: the names here are the
+/// ones the rows already hold.
+/// </summary>
 public enum DesktopState
 {
     /// <summary>The machine is being made or started, or has not yet exchanged with the API.</summary>
     Starting,
     /// <summary>The desktop is up and its agent is exchanging with the API.</summary>
     Ready,
-    /// <summary>Asked to stop; the machine is being released.</summary>
+    /// <summary>Asked to pause; the machine is being released.</summary>
     Stopping,
-    /// <summary>The machine is released. Its disk is kept, so starting brings the same desktop back.</summary>
+    /// <summary>Paused: the machine is released. Its disk is kept, so starting brings the same desktop back.</summary>
     Stopped,
+    /// <summary>Paused for as long as its team allows; its disk is being copied to an archive.</summary>
+    Archiving,
+    /// <summary>
+    /// Archived: the disk is kept as a copy (<see cref="WorkTask.Archive"/>) and the machine and its disk are
+    /// deleted. Starting makes a new machine from the copy.
+    /// </summary>
+    Archived,
     /// <summary>Starting or stopping failed; <see cref="WorkTask.Failure"/> says why.</summary>
     Failed,
     /// <summary>Asked to be deleted; the machine, the conversation and the node are being removed.</summary>
@@ -72,7 +83,10 @@ public sealed class WorkTask : ISqlOSResourceEntity
 
     /// <summary>When the desktop last exchanged with the API.</summary>
     public DateTimeOffset? SeenAt { get; private set; }
-    /// <summary>When a person last had the desktop on screen, or anyone last wrote in the conversation.</summary>
+    /// <summary>
+    /// When the desktop was last used: a person's mouse or keyboard reached it, someone wrote in the
+    /// conversation, or its agent was working. Having it on screen is not use.
+    /// </summary>
     public DateTimeOffset ActiveAt { get; private set; }
     /// <summary>Whether the agent is in the middle of something, as the desktop last said.</summary>
     public bool AgentWorking { get; private set; }
@@ -80,6 +94,16 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public int Interrupts { get; private set; }
     /// <summary>When the task last emailed people that it was finished or needed them. Null until it first did.</summary>
     public DateTimeOffset? EmailedAt { get; private set; }
+
+    /// <summary>How much is on the desktop's disk, in bytes, as its agent last said. Null until it has.</summary>
+    public long? DiskBytes { get; private set; }
+    /// <summary>
+    /// The archive's name at the desktop host: the copy of the disk an archived desktop comes back from. Null
+    /// when there is none. It is kept until the machine made from it has shown its screen.
+    /// </summary>
+    public string? Archive { get; private set; }
+    /// <summary>How much the archive holds, in bytes: what was on the disk when it was copied.</summary>
+    public long? ArchiveBytes { get; private set; }
 
     /// <summary>Whether the machine is in use and counts toward the team's limit.</summary>
     public bool IsRunning => State is DesktopState.Starting or DesktopState.Ready or DesktopState.Stopping;
@@ -145,6 +169,13 @@ public sealed class WorkTask : ISqlOSResourceEntity
         DisplayAt = now;
     }
 
+    /// <summary>The machine is gone from the host: a new one that could not be started was removed. The next start makes another.</summary>
+    public void MachineRemoved()
+    {
+        Host = null;
+        Address = null;
+    }
+
     /// <summary>The host said the machine is on.</summary>
     public void MachineOn(DateTimeOffset now)
     {
@@ -163,10 +194,13 @@ public sealed class WorkTask : ISqlOSResourceEntity
     /// The desktop exchanged with the API: it is up, and this is what its agent is doing. Answers whether this
     /// exchange is the one that made a starting desktop ready.
     /// </summary>
-    public bool DesktopSeen(bool agentWorking, DateTimeOffset now)
+    public bool DesktopSeen(bool agentWorking, DateTimeOffset now, long? diskBytes = null)
     {
         SeenAt = now;
+        // An agent at work is the desktop in use, and so is the moment it finishes: the idle time counts from there.
+        if (agentWorking || AgentWorking) ActiveAt = now;
         AgentWorking = agentWorking;
+        if (diskBytes is > 0) DiskBytes = diskBytes;
         if (State != DesktopState.Starting) return false;
         Become(DesktopState.Ready, now);
         return true;
@@ -187,9 +221,10 @@ public sealed class WorkTask : ISqlOSResourceEntity
     /// <summary>The task emailed people about a turn.</summary>
     public void Emailed(DateTimeOffset now) => EmailedAt = now;
 
+    /// <summary>Pause the desktop: a person asked, or it has gone unused for as long as its team allows.</summary>
     public void Stop(DateTimeOffset now)
     {
-        if (State is not (DesktopState.Starting or DesktopState.Ready)) throw new DomainRuleException("Only a running desktop can be stopped.");
+        if (State is not (DesktopState.Starting or DesktopState.Ready)) throw new DomainRuleException("Only a running desktop can be paused.");
         AgentWorking = false;
         Become(DesktopState.Stopping, now);
     }
@@ -202,9 +237,66 @@ public sealed class WorkTask : ISqlOSResourceEntity
         Become(DesktopState.Stopped, now);
     }
 
+    /// <summary>
+    /// Whether the desktop has gone unused for longer than <paramref name="after"/>: nobody's mouse or keyboard,
+    /// no message, and no agent at work. A desktop that is only on someone's screen is unused.
+    /// </summary>
+    public bool IsIdle(DateTimeOffset now, TimeSpan after) => State == DesktopState.Ready && now - ActiveAt > after;
+
+    /// <summary>Whether the desktop is paused, with a machine, and has been for longer than <paramref name="after"/>: its disk is then archived.</summary>
+    public bool IsDueForArchive(DateTimeOffset now, TimeSpan after) => State == DesktopState.Stopped && Host is not null && now - StateChangedAt > after;
+
+    /// <summary>
+    /// The disk is being copied to an archive. When the desktop was paused is kept (<see cref="StateChangedAt"/>),
+    /// so a copy that could not be made is tried again at the next sweep.
+    /// </summary>
+    public void Archiving()
+    {
+        if (State != DesktopState.Stopped || Host is null) throw new DomainRuleException("Only a paused desktop can be archived.");
+        State = DesktopState.Archiving;
+    }
+
+    /// <summary>The copy could not be made: the desktop is paused as it was, with its machine and disk.</summary>
+    public void NotArchived()
+    {
+        if (State == DesktopState.Archiving) State = DesktopState.Stopped;
+    }
+
+    /// <summary>
+    /// The disk is copied to <paramref name="archive"/>: the machine and its disk are no longer the task's, and
+    /// are deleted. The archive holds what was on the disk, which the desktop's agent said; the host's own
+    /// figure (<paramref name="hostBytes"/>) stands in for a desktop that never did.
+    /// </summary>
+    public void Archived(string archive, long? hostBytes, DateTimeOffset now)
+    {
+        if (State != DesktopState.Archiving) throw new DomainRuleException("Only a desktop being archived can become archived.");
+        Archive = archive;
+        ArchiveBytes = DiskBytes ?? hostBytes;
+        Host = null;
+        Address = null;
+        Become(DesktopState.Archived, now);
+    }
+
+    /// <summary>The machine made from the archive has shown its screen: the archive is no longer needed.</summary>
+    public string? Restored()
+    {
+        if (Host is null || State is not (DesktopState.Starting or DesktopState.Ready)) return null;
+        var archive = Archive;
+        Archive = null;
+        ArchiveBytes = null;
+        return archive;
+    }
+
+    /// <summary>Whether starting the desktop brings back one that was paused or archived, which whoever uses the task may do.</summary>
+    public bool CanResume => State is DesktopState.Stopped or DesktopState.Archived;
+
+    /// <summary>What the next start begins from: the task's own paused machine, its archive, or a new machine.</summary>
+    public string StartsFrom => Host is not null ? StartSource.Stopped : Archive is not null ? StartSource.Archive : StartSource.Image;
+
     public void StartAgain(DateTimeOffset now)
     {
-        if (State is not (DesktopState.Stopped or DesktopState.Failed)) throw new DomainRuleException("Only a stopped desktop can be started.");
+        if (State == DesktopState.Archiving) throw new DomainRuleException("The desktop is being archived. Try again in a minute.");
+        if (State is not (DesktopState.Stopped or DesktopState.Archived or DesktopState.Failed)) throw new DomainRuleException("Only a paused desktop can be started.");
         ActiveAt = now;
         Address = null;
         OnAt = null;
@@ -226,7 +318,7 @@ public sealed class WorkTask : ISqlOSResourceEntity
         Become(DesktopState.Deleting, now);
     }
 
-    /// <summary>A person has the desktop on screen, or someone wrote in the conversation: it is in use.</summary>
+    /// <summary>A person's mouse or keyboard reached the desktop, or someone wrote in the conversation: it is in use.</summary>
     public void Active(DateTimeOffset now) => ActiveAt = now;
 
     /// <summary>A person asked the agent to stop what it is doing.</summary>
@@ -332,8 +424,10 @@ public static class StartSource
     public const string Spare = "spare";
     /// <summary>A new machine, made from the environment's saved setup.</summary>
     public const string Save = "save";
-    /// <summary>The task's own machine, stopped earlier.</summary>
+    /// <summary>The task's own machine, paused earlier.</summary>
     public const string Stopped = "stopped";
+    /// <summary>A new machine, made from the task's archive.</summary>
+    public const string Archive = "archive";
 }
 
 /// <summary>

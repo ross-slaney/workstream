@@ -31,6 +31,9 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
     internal static decimal DefaultModelAllowanceUsd { get; set; } = 20m;
     internal static int DefaultMaxRunningDesktops { get; set; } = 2;
+    /// <summary>When a new team's unused desktops are paused and its paused ones archived, from configuration (Workstream:Desktops). The team's administrators change them.</summary>
+    internal static int DefaultPauseAfterMinutes { get; set; } = Team.DefaultPauseAfterMinutes;
+    internal static int DefaultArchiveAfterDays { get; set; } = Team.DefaultArchiveAfterDays;
 
     protected override void OnApplicationModelCreating(ModelBuilder model)
     {
@@ -46,6 +49,9 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             team.Property(x => x.Id).HasMaxLength(100);
             team.Property(x => x.ResourceId).HasMaxLength(128);
             team.Property(x => x.ModelAllowanceUsd).HasPrecision(18, 2);
+            // Teams from before a team chose these get what every team had: half an hour, and a week.
+            team.Property(x => x.PauseAfterMinutes).HasDefaultValue(Team.DefaultPauseAfterMinutes);
+            team.Property(x => x.ArchiveAfterDays).HasDefaultValue(Team.DefaultArchiveAfterDays);
         });
 
         model.Entity<WorkEnvironment>(environment =>
@@ -86,6 +92,9 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             task.Property(x => x.Size).HasMaxLength(20);
             task.Property(x => x.Host).HasMaxLength(100);
             task.Property(x => x.Address).HasMaxLength(100);
+            task.Property(x => x.Archive).HasMaxLength(100);
+            task.Ignore(x => x.CanResume);
+            task.Ignore(x => x.StartsFrom);
             task.Ignore(x => x.IsRunning);
             task.Ignore(x => x.Step);
             task.Ignore(x => x.CanBeWatched);
@@ -250,6 +259,9 @@ public static class WorkstreamSchema
         var teams = app.Configuration.GetSection("Workstream:Teams");
         WorkstreamDbContext.DefaultModelAllowanceUsd = teams.GetValue<decimal?>("ModelAllowanceUsd") ?? WorkstreamDbContext.DefaultModelAllowanceUsd;
         WorkstreamDbContext.DefaultMaxRunningDesktops = teams.GetValue<int?>("MaxRunningDesktops") ?? WorkstreamDbContext.DefaultMaxRunningDesktops;
+        var desktops = app.Services.GetRequiredService<Desktops.DesktopOptions>();
+        WorkstreamDbContext.DefaultPauseAfterMinutes = desktops.IdleMinutes;
+        WorkstreamDbContext.DefaultArchiveAfterDays = desktops.ArchiveDays;
         return app.Services.ApplyDatabaseSchemaAsync<WorkstreamDbContext>(options => options.ManagedSchemas.Add("dbo"));
     }
 }
