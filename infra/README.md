@@ -127,7 +127,7 @@ A new machine is no slower on v6 than on v7: five each from the release image, a
 Two things to know before relying on it:
 
 - **A resume is slower to a screen than a plain start, and slower the more memory is in use.** What programs hold is read back from a disk that gives 60 MB a second. The kernel is told to write what programs hold and let go of cached files first; left to shrink the image as far as it could, it pushed programs' memory to swap, and the desktop hardly answered for a minute and a half after it was back.
-- **A machine that does not hibernate is stopped the plain way, late.** The API gives a machine five minutes and then deallocates it; Azure took that request and carried it out only when its own ten-minute wait for the machine ended. The desktop then comes back as from any pause. This happened once in testing, when a desktop was asked to hibernate a minute after it had resumed and was still swapping; `hibernate.sh` now asks the machine again for a minute.
+- **A machine that does not hibernate is stopped the plain way, ten minutes late.** Azure waits ten minutes for the machine, leaves it running and calls the request failed; a plain stop asked for in the meantime was taken and carried out only then. The API waits that out and then deallocates, and the desktop comes back as from any pause. It happened in testing while `hibernate.sh` still went through `systemctl hibernate`, which refused twice: for a minute after a resume, and on the boot in which the swap file was made again. It tells the kernel directly now.
 
 ### Turning it on
 

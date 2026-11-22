@@ -584,8 +584,12 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         }
     }
 
-    /// <summary>How long a machine is given to hibernate before it is stopped the plain way.</summary>
-    static readonly TimeSpan HibernateWithin = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// How long a machine is given to hibernate before it is stopped the plain way. Azure itself waits ten
+    /// minutes for the machine and then calls the request failed, which ends the wait here sooner; a stop asked
+    /// for before that only waits behind it. Writing memory took about ten seconds for each gigabyte in use.
+    /// </summary>
+    static readonly TimeSpan HibernateWithin = TimeSpan.FromMinutes(12);
 
     public async Task DeleteAsync(string host, CancellationToken ct)
     {
