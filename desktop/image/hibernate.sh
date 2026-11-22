@@ -47,6 +47,9 @@ now() {
   offered || exit 0
   [ -f "$file" ] || prepare
   swapon "$file" 2>/dev/null
+  # Only what programs hold is written, not the files the kernel is keeping in memory to save reading them
+  # again: a smaller image is written sooner and, what matters, read back sooner when the desktop is started.
+  echo 0 > /sys/power/image_size
   systemctl hibernate
 }
 
