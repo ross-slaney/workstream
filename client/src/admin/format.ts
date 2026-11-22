@@ -4,6 +4,12 @@ export const dollars = (value: number) => value.toLocaleString("en-US", { style:
 
 export const hours = (value: number) => `${(Math.round(value * 10) / 10).toLocaleString("en-US")} h`;
 
+/** Gigabytes, to a tenth. */
+export const gigabytes = (value: number) => `${(Math.round(value * 10) / 10).toLocaleString("en-US")} GB`;
+
+/** GB-months: gigabytes times the share of a month they were kept. To a hundredth, since a few minutes of a disk is already some. */
+export const gbMonths = (value: number) => (Math.round(value * 100) / 100).toLocaleString("en-US");
+
 /** Seconds a start took; a dash when none got that far. */
 export const seconds = (value: number | null) => (value === null ? "–" : `${(Math.round(value * 10) / 10).toLocaleString("en-US")} s`);
 

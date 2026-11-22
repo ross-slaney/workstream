@@ -4,7 +4,7 @@ import { Dialog } from "@/components/kit/dialog";
 import { TextField } from "@/components/kit/field";
 import { ErrorNote, ReadState } from "@/components/kit/status";
 import type { AdminOverview, RunningDesktop, TeamNumbers } from "@/lib/workstream/api";
-import { dollars, hours, seconds, since } from "../format";
+import { dollars, gbMonths, gigabytes, hours, seconds, since } from "../format";
 import { RunningChart } from "../running-chart";
 import type { AdminScreenProps } from "./props";
 
@@ -75,16 +75,17 @@ const cell = "px-3 py-2 text-sm text-foreground";
 const head = "px-3 py-2 text-left text-[12.5px] font-medium text-muted-foreground";
 
 const PURPOSE: Record<string, string> = { task: "Tasks' desktops", spare: "Spares", prepare: "Preparing environments" };
+const KIND: Record<string, string> = { disk: "Desktops' disks", archive: "Archived tasks", setup: "Saved setups" };
 
 /**
- * What the desktops cost Workstream: the hours machines ran this month, by what they ran for, at each size's
- * price; the disks kept, which is all a stopped desktop costs; the environments' saved setups kept; and the
- * spares running now. Narrow enough for
- * a phone, so both surfaces draw it the same.
+ * What the desktops cost Workstream this month, each line at its own price: the hours machines ran, by what
+ * they ran for and at which size; the storage kept, by kind, in GB-months from the rows the storage job
+ * keeps; and the spares running now. Narrow enough for a phone, so both surfaces draw it the same.
  */
 export function CostsCard({ overview, now }: { overview: AdminOverview; now: number }) {
-  const { thisMonth, disks, disksMonthlyUsd, saves, savesMonthlyUsd, spares } = overview.machines;
-  const total = thisMonth.reduce((sum, line) => sum + line.usd, 0);
+  const { thisMonth, storage, spares } = overview.machines;
+  const machinesTotal = thisMonth.reduce((sum, line) => sum + line.usd, 0);
+  const storageTotal = storage.reduce((sum, line) => sum + line.usd, 0);
   return (
     <Card title="What the desktops cost" note="This month, at Azure's list prices">
       <table className="w-full border-collapse">
@@ -97,8 +98,10 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
         </thead>
         <tbody className="divide-y divide-border">
           {thisMonth.map((line) => (
-            <tr key={line.purpose}>
-              <td className={cell}>{PURPOSE[line.purpose] ?? line.purpose}</td>
+            <tr key={`${line.purpose}:${line.size}`}>
+              <td className={cell}>
+                {PURPOSE[line.purpose] ?? line.purpose}, <span className="text-muted-foreground">{line.size}</span>
+              </td>
               <td className={`${cell} text-right tabular-nums`}>{hours(line.hours)}</td>
               <td className={`${cell} text-right tabular-nums`}>{dollars(line.usd)}</td>
             </tr>
@@ -106,15 +109,40 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
           <tr>
             <td className={`${cell} font-medium`}>All machines</td>
             <td className={cell} />
-            <td className={`${cell} text-right font-medium tabular-nums`}>{dollars(total)}</td>
+            <td className={`${cell} text-right font-medium tabular-nums`}>{dollars(machinesTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b border-border">
+            <th scope="col" className={head}>Storage kept</th>
+            <th scope="col" className={`${head} text-right`}>Now</th>
+            <th scope="col" className={`${head} text-right`}>GB-months</th>
+            <th scope="col" className={`${head} text-right`}>Cost</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {storage.map((line) => (
+            <tr key={line.kind}>
+              <td className={cell}>{KIND[line.kind] ?? line.kind}</td>
+              <td className={`${cell} text-right tabular-nums`}>
+                {gigabytes(line.gb)} <span className="text-muted-foreground">in {line.kept}</span>
+              </td>
+              <td className={`${cell} text-right tabular-nums`}>{gbMonths(line.gbMonths)}</td>
+              <td className={`${cell} text-right tabular-nums`}>{dollars(line.usd)}</td>
+            </tr>
+          ))}
+          <tr>
+            <td className={`${cell} font-medium`}>{storage.length === 0 ? "Nothing is kept" : "All storage"}</td>
+            <td className={cell} />
+            <td className={cell} />
+            <td className={`${cell} text-right font-medium tabular-nums`}>{dollars(storageTotal)}</td>
           </tr>
         </tbody>
       </table>
       <p className="text-[13px] text-muted-foreground">
-        {disks === 0 ? "No disk is kept." : `${disks} ${disks === 1 ? "disk is" : "disks are"} kept, one for each desktop whether it runs or not: ${dollars(disksMonthlyUsd)} a month at this many.`}{" "}
-        {saves === 0
-          ? "No saved setup is kept."
-          : `${saves} saved ${saves === 1 ? "setup is" : "setups are"} kept, one at most for each environment: ${dollars(savesMonthlyUsd)} a month for what is on them.`}{" "}
+        A GB-month is a gigabyte kept for a whole month; what is kept is counted every 15 minutes. A desktop's disk is counted at its full size, an archived task and a saved setup at what is on them.{" "}
         {spares.length === 0
           ? "No spare is running."
           : `Spares running now: ${spares.map((spare) => `${spare.teamName} (${spare.size}, ${spare.state}, ${since(spare.since, now)})`).join("; ")}.`}

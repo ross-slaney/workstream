@@ -144,10 +144,43 @@
       "left": "{left} left"
     },
     "desktops": {
-      "title": "Desktops",
-      "hours": "{hours, plural, one {# hour} other {# hours}} of desktop time",
+      "title": "Desktop time",
       "running": "{running} of {limit} running now",
-      "body": "A desktop counts from when it starts until it stops. Idle desktops stop by themselves."
+      "size": "Size",
+      "month": "This month",
+      "sizes": {
+        "small": "Small",
+        "standard": "Standard",
+        "large": "Large"
+      },
+      "machines": {
+        "small": "2 cores, 8 GB memory",
+        "standard": "4 cores, 16 GB memory",
+        "large": "8 cores, 32 GB memory"
+      },
+      "hours": "{hours, plural, one {# hour} other {# hours}}",
+      "empty": "No desktop has run this month.",
+      "body": "A desktop counts from when it starts until it stops, and each size is counted on its own. Idle desktops stop by themselves."
+    },
+    "storage": {
+      "title": "Storage",
+      "kind": "What is kept",
+      "now": "Kept now",
+      "month": "This month",
+      "kinds": {
+        "disk": "Desktop disks",
+        "archive": "Archived tasks",
+        "setup": "Saved setups"
+      },
+      "about": {
+        "disk": "The disk of each task's desktop, whether the desktop is running or not. Counted at the disk's full size.",
+        "archive": "What is kept of each archived task. Counted at what is on it.",
+        "setup": "Each environment's saved setup, which its tasks start from. Counted at what is on it."
+      },
+      "gb": "{amount} GB",
+      "gbMonths": "{amount, plural, one {# GB-month} other {# GB-months}}",
+      "empty": "Nothing has been kept this month.",
+      "body": "A GB-month is one gigabyte kept for a whole month, so 64 GB kept for half a month is 32 GB-months. What is kept is counted every 15 minutes."
     }
   },
   "github": {
