@@ -1,6 +1,6 @@
 # Infrastructure
 
-Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with two exceptions written down below: the model, when it is Claude in Microsoft Foundry rather than Anthropic's API, and the GitHub OAuth client people sign in with. The README's "Run your own in Azure" is the short version of this page, in order.
+Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with two exceptions written down below: the model, when it is Claude in Microsoft Foundry rather than Anthropic's API, and the GitHub OAuth client people sign in with. [docs/self-hosting.md](../docs/self-hosting.md) is the short version of this page, in order.
 
 ## What is deployed
 

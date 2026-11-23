@@ -125,7 +125,7 @@ public static class ModelGateway
         {
             // A plain refusal: the agent's client waits and tries again on a 5xx, and reads a 401 or 403 as its own
             // credential having failed. This will not change by waiting, and the words are for the person.
-            // The words reach the person in the conversation; which settings are missing is for whoever runs this (README, "Models").
+            // The words reach the person in the conversation; which settings are missing is for whoever runs this (docs/self-hosting.md, "Models").
             logs.CreateLogger(typeof(ModelGateway)).LogWarning("A model call was refused: Workstream:Model:Endpoint and Workstream:Model:Key are not set.");
             await RefuseAsync(http, StatusCodes.Status400BadRequest, "invalid_request_error", "No AI model is set up on this Workstream yet, so I can't do the work. Whoever runs it needs to add one.");
             return;
