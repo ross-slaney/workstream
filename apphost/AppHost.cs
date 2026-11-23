@@ -51,7 +51,7 @@ var api = builder
     .WithEnvironment("Workstream__Desktops__Host", Setting("WORKSTREAM_DESKTOP_HOST", "docker"))
     .WithEnvironment("Workstream__Desktops__ApiUrl", Setting("WORKSTREAM_DESKTOP_API_URL", "http://host.docker.internal:" + apiPort))
     .WithEnvironment("Workstream__Desktops__IdleMinutes", Setting("WORKSTREAM_DESKTOP_IDLE_MINUTES", "120"))
-    // The agent's models: Workstream's Foundry resource (README, "Models"). Without these the agent says models are not set up.
+    // The agent's models: Workstream's Foundry resource (docs/self-hosting.md, "Models"). Without these the agent says models are not set up.
     .WithEnvironment("Workstream__Model__Endpoint", Setting("WORKSTREAM_MODEL_ENDPOINT", ""))
     .WithEnvironment("Workstream__Model__Key", Setting("WORKSTREAM_MODEL_KEY", ""))
     // Sign in with GitHub: a GitHub OAuth client of the developer's own whose callback is this API's
