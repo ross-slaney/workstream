@@ -8,6 +8,101 @@ A desktop runs while someone is using it or its agent is working. One that nobod
 
 Making a machine takes Azure from fifteen seconds to a minute. While someone is in a team's workspace, Workstream keeps one desktop running ahead of them, so the task they start begins on it at once.
 
+Workstream is open source under the [MIT license](LICENSE). You can run it on your own computer to try it, and run your own copy in your Azure subscription for a team.
+
+## Try it on your computer
+
+On your computer each desktop is a Docker container instead of an Azure machine. Everything else works the same way. You need about 10 GB of free disk space and:
+
+- Docker
+- the .NET 10 SDK
+- Node 22
+- an Anthropic API key from [console.anthropic.com](https://console.anthropic.com), for the agent
+
+1. Install the web app's packages and build the desktop's image. The image takes several minutes the first time and is about 3 GB.
+
+   ```bash
+   cd client && npm ci && cd ..
+   docker build -t workstream-desktop:local desktop
+   ```
+
+2. Copy `.env.example` to `.env` and set the agent's model to Anthropic's API.
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Then set these two lines in `.env`:
+
+   ```
+   WORKSTREAM_MODEL_ENDPOINT=https://api.anthropic.com
+   WORKSTREAM_MODEL_KEY=<your Anthropic API key>
+   ```
+
+3. Start everything: SQL Server in a container, the API and the web app.
+
+   ```bash
+   dotnet run --project apphost
+   ```
+
+4. Open http://localhost:8091/sign-in?view=signup and create an account with any email and a password. Nobody needs an inbox on your computer.
+
+5. Press **New task**, write what you want done, and watch its desktop start.
+
+The API is at http://localhost:5280. The system administrator is `admin@workstream.test`, with the password in `.env.example`, and reaches `/admin`. To show **Continue with GitHub** on the sign-in page, make a GitHub OAuth app whose callback URL is `http://localhost:5280/sqlos/auth/oidc/callback` and put its two values in `.env` ([infra/README.md](infra/README.md#sign-in-with-github)).
+
+## Run your own in Azure
+
+Your copy runs in your Azure subscription and deploys from your fork of this repository on GitHub. Nothing is made by hand in Azure except the model, if you use Azure's. You need:
+
+- an Azure subscription where you are an Owner and a tenant administrator
+- the Azure CLI (`az`) and the GitHub CLI (`gh`), both signed in
+- an Anthropic API key, or Claude deployed in Microsoft Foundry ([infra/README.md](infra/README.md#models))
+- an email address for the system administrator
+
+It costs about $100 to $125 a month in Azure with nobody using it, and then each desktop's hours and disk ([infra/README.md](infra/README.md#what-it-costs-with-nobody-using-it)). It runs in West US 3.
+
+1. Fork this repository on GitHub and clone your fork. GitHub turns Actions off on a new fork, so turn them on in the fork's **Actions** tab.
+
+2. Raise your subscription's core limit. A new subscription has 10 cores in a region, which is two Standard desktops. When this was set up, Azure granted 40 at once and for free:
+
+   ```bash
+   SUB=$(az account show --query id -o tsv)
+   for name in cores standardDasv7Family; do
+     az quota update --resource-name $name --scope /subscriptions/$SUB/providers/Microsoft.Compute/locations/westus3 \
+       --limit-object value=40 --resource-type dedicated
+   done
+   ```
+
+3. Give GitHub the right to deploy to your subscription. Run this from your clone. It makes the GitHub environments `production` and `staging` on your fork and stores an Azure credential in each.
+
+   ```bash
+   ./scripts/setup-azure.sh
+   ```
+
+4. Tell your fork who the administrator is and which model to use.
+
+   ```bash
+   gh variable set ADMINISTRATOR_EMAIL --env production --body "you@example.com"
+   gh variable set MODEL_ENDPOINT --env production --body "https://api.anthropic.com"
+   gh secret set MODEL_KEY --env production   # paste your Anthropic API key when it asks
+   ```
+
+5. Publish a release. Its tag is `v` followed by the version in `client/app.json`, for example `v0.7.1`.
+
+   ```bash
+   VERSION=$(node -p "require('./client/app.json').expo.version")
+   gh release create "v$VERSION" --title "Workstream $VERSION" --generate-notes
+   ```
+
+   This runs `.github/workflows/release.yml`. The first time takes about 45 minutes, because it builds the desktops' machine image. Follow it with `gh run watch`. When it finishes, the run's summary gives your two addresses: the web app at `https://workstream-web.<domain>` and the API at `https://workstream-api.<domain>`.
+
+6. Open the web app and sign in with the administrator's email. Sign-in sends a code by email. The first emails come from a domain Azure manages and may land in spam.
+
+7. Optionally, let people sign in with GitHub, so their desktops can push and open pull requests as them. Make a GitHub OAuth app with the two addresses from step 5, set its two values on your fork, and deploy the same release again. [infra/README.md](infra/README.md#sign-in-with-github) has the steps.
+
+To change your copy later, merge into `main` and publish the next version ([Ship it](#ship-it)).
+
 ## What is in this repository
 
 | Folder | What it is |
@@ -20,22 +115,6 @@ Making a machine takes Azure from fifteen seconds to a minute. While someone is 
 | `infra/` | Bicep for everything in Azure. |
 | `tests/` | Journeys through the API, with allow and deny cases for each kind of caller. |
 | `docs/` | [The core model](docs/core-model.md) (who can do what to what, in SqlOS terms) and [how the pieces fit](docs/architecture.md). |
-
-## Run it locally
-
-You need the .NET 10 SDK, Node 22 and Docker.
-
-```bash
-cd client && npm ci && cd ..
-docker build -t workstream-desktop:local desktop
-dotnet run --project apphost
-```
-
-The web app is at http://localhost:8091 and the API at http://localhost:5280. Create an account at `/sign-in?view=signup` with any email and a password; locally nobody needs an inbox. The form also shows Continue with GitHub once `.env` has a GitHub OAuth client of your own (`WORKSTREAM_GITHUB_OAUTH_CLIENT_ID` and `WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET`, see `.env.example`). The system administrator is `admin@workstream.test` with the password in `.env.example`, and reaches `/admin`.
-
-Locally a desktop is a Docker container made from `desktop/Dockerfile`, which runs the same two scripts the Azure image is baked with. The first build takes several minutes and about 3 GB.
-
-The agent needs a model. Run `./scripts/dev-env.sh` once, signed in to Azure: it writes the Foundry endpoint and key into `.env`, which the AppHost reads. Without them everything else works and the agent says models are not set up.
 
 ## Start a task from a terminal
 
@@ -78,6 +157,6 @@ Production ships only from a published GitHub release. Merging to `main` deploys
 
 ## Models
 
-Every model call an agent makes goes through the API's gateway (`api/Model/ModelGateway.cs`) to Workstream's own Microsoft Foundry resource. A desktop never holds a model key: it holds only its own key, which lets it reach its own task and nothing else. The gateway counts each call's tokens and charges them, in dollars, against the team's monthly allowance; when the allowance is used up the team's agents stop until a system administrator raises it.
+Every model call an agent makes goes through the API's gateway (`api/Model/ModelGateway.cs`). A desktop never holds a model key. It holds only its own key, which reaches its own task and nothing else. The gateway sends each call on to the model endpoint you set, counts its tokens, and charges them in dollars against the team's monthly allowance. When the allowance is used up, the team's agents stop until a system administrator raises it.
 
-There is no bring-your-own-key and no payment yet. An allowance is a limit, not a bill.
+The endpoint is either Anthropic's API (`https://api.anthropic.com` and an Anthropic API key) or Claude deployed in Microsoft Foundry ([infra/README.md](infra/README.md#models)). Both take the same requests. With Foundry, `./scripts/dev-env.sh` writes its endpoint and key into `.env` for your computer. There is no payment in Workstream yet, so an allowance is a limit, not a bill.

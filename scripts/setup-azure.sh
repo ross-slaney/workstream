@@ -19,12 +19,13 @@
 #
 #   PREFIX  app registration name prefix (default workstream-github)
 #   ENVS    environments to set up (default "production staging")
-#   REPO    GitHub repository for the secrets (default agenetix/workstream); "none" stores no secret
+#   REPO    GitHub repository for the secrets (default: the repository this checkout is from, by `gh repo view`);
+#           "none" stores no secret
 set -euo pipefail
 
 PREFIX=${PREFIX:-workstream-github}
 ENVS=${ENVS:-production staging}
-REPO=${REPO:-agenetix/workstream}
+REPO=${REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
 
 subscription=$(az account show --query id -o tsv)
 tenant=$(az account show --query tenantId -o tsv)
@@ -80,6 +81,8 @@ for env in $ENVS; do
       --body "{\"principalId\":\"$sp\",\"resourceId\":\"$graph\",\"appRoleId\":\"$graph_group_readwrite\"}" -o none
   fi
 
+  # The GitHub environment is made when it is missing, so a fresh fork needs nothing set up by hand first.
+  [ "$REPO" = none ] || gh api "repos/$REPO/environments/$env" --silent 2>/dev/null || gh api -X PUT "repos/$REPO/environments/$env" --silent
   if [ "$REPO" != none ] && ! gh secret list -R "$REPO" --env "$env" --json name --jq '.[].name' | grep -qx AZURE_CREDENTIALS; then
     az ad app credential reset --id "$app" --append --display-name "Workstream GitHub CI" --years 1 -o json \
       | jq -c --arg c "$app" --arg t "$tenant" --arg s "$subscription" '{clientId:$c, clientSecret:.password, tenantId:$t, subscriptionId:$s}' \

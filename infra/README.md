@@ -1,6 +1,6 @@
 # Infrastructure
 
-Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with two exceptions written down below: the Foundry resource and its model deployments, and the GitHub OAuth client people sign in with.
+Everything in Azure is declared here and deployed by `.github/workflows/release.yml`. Nothing is made by hand, with two exceptions written down below: the model, when it is Claude in Microsoft Foundry rather than Anthropic's API, and the GitHub OAuth client people sign in with. The README's "Run your own in Azure" is the short version of this page, in order.
 
 ## What is deployed
 
@@ -12,7 +12,7 @@ Everything in Azure is declared here and deployed by `.github/workflows/release.
 | `workstream` | The runtime identity, the SQL server and database | `data.bicep` |
 | `workstream` | The API and the web app | `api.bicep`, `web.bicep` |
 | `workstream-desktops` | One virtual machine per task, with its disk and network interface. The API makes and removes them; Bicep declares only the API's right to. | `desktops.bicep` |
-| `workstream-ai` | The Foundry resource. Made by hand, see "Models". | |
+| `workstream-ai` | The Foundry resource, when the model is Claude in Foundry. Made by hand, see "Models". | |
 
 The two origins are under the container apps environment's own domain: `https://workstream-web.<domain>` and `https://workstream-api.<domain>`. A domain of our own is not set up yet.
 
@@ -39,8 +39,8 @@ Then set, on the GitHub environment `production`:
 | Name | Kind | What |
 | --- | --- | --- |
 | `ADMINISTRATOR_EMAIL` | variable | The one address that reaches `/admin`. They sign in by emailed code like everyone else. Changing it moves the role at the next deploy; without it nobody is the administrator. |
-| `MODEL_ENDPOINT` | variable | The Foundry resource's Anthropic endpoint, `https://<resource>.services.ai.azure.com/anthropic`. |
-| `MODEL_KEY` | secret | The Foundry resource's key. |
+| `MODEL_ENDPOINT` | variable | `https://api.anthropic.com`, or a Foundry resource's Anthropic endpoint, `https://<resource>.services.ai.azure.com/anthropic`. |
+| `MODEL_KEY` | secret | An Anthropic API key, or the Foundry resource's key. |
 
 Without the two model values the product deploys and agents say models are not set up. The `staging` environment takes the same two model values, and `ADMINISTRATOR_PASSWORD` as a secret.
 
@@ -83,52 +83,13 @@ The run's summary gives its two addresses. Its administrator is `admin@workstrea
 
 ## Hibernation
 
-Built, measured, and off. A paused desktop loses every program; a hibernated one writes its memory to its disk first, and resuming brings everything back as it was (`docs/architecture.md`, "Hibernating a paused desktop"). Whether to turn it on is a decision about Trusted Launch, below.
-
-### What Azure needs, as it was found
-
-Tried in West US 3 on 2026-11-21, in a scratch group since deleted:
-
-- **A size that hibernates.** `az vm list-skus` says `HibernationSupported` for `Standard_D2as_v6`, `D4as_v6` and `D8as_v6` and not for the Dasv7 sizes desktops use today. The v6 sizes have the same cores and memory, and the same list price to the tenth of a cent ($0.0908, $0.182 and $0.363 an hour). `/dev/kvm` is there on them, with hibernation on too. The `standardDav6Family` limit is 40 cores, raised from 10 the way "Limits to know" says.
-- **No Trusted Launch.** Azure refuses: "Trusted launch is not supported for Linux VM with Hibernation capability", with Secure Boot on or off and with the virtual TPM on or off. (Under Secure Boot the Debian kernel also locks hibernation out by itself.) A machine's security type cannot be changed afterwards, in either direction. So a desktop that hibernates is made with neither Secure Boot nor a virtual TPM.
-- **An image definition that says so.** A machine with hibernation is made only from a gallery definition with the feature `IsHibernateSupported`. It cannot be added to a definition that exists (the update is refused), so there is a second one, `machine-hibernate`. A disk built with Trusted Launch cannot go into it, and one built without cannot go into `machine`, so its versions are baked on a builder without Trusted Launch (`image-builder.bicep`, `trustedLaunch=false`).
-- **The machine itself.** Nothing of Azure's: no extension and no agent. `desktop/image/hibernate.sh` makes a swap file as large as the machine's memory at first boot (a third of a second, beside the desktop; 8, 16 or 32 GB of the disk by size) and answers Azure's request by telling the kernel to hibernate, and `resume-here.sh` lets only the machine that hibernated wake up from its disk. On a machine made without hibernation it does nothing, so every image has it.
-
-### What was measured
-
-Machines made the way the API makes them, without Trusted Launch, with a desktop session, the agent exchanging with a stand-in API, Chromium with a page open, VS Code, a node server, a counter and a Docker container running. Seconds, from the request to Azure.
-
-| | Standard (`D4as_v6`, 16 GB) | Large (`D8as_v6`, 32 GB) |
-| --- | --- | --- |
-| Pause: until Azure has released the machine | 27 to 38, middle 28 (5 times) | 37 to 41, middle 39 (3 times) |
-| Resume: until the display answers | 27 to 42, middle 33 (6 times) | 33 to 35, middle 34 (3 times) |
-| Resume: until the agent has exchanged with the API again | 25 to 39, middle 31 | 32 to 34, middle 34 |
-| The same machine started after a plain pause, for comparison | 22 to the display, 23 to the exchange (once), with nothing running | |
-
-Every resume brought back the same boot, the same processes (the session, the agent, Chromium and its pages, VS Code, the node server, the counter, the container) and a working network, with the clock right to the second. The agent's exchange recovered by itself each time.
-
-Those desktops had about 1.7 GB in use. With a program holding 10 GB more on the Large one, half of it the kind that does not compress, the pause took 97 and 90 seconds and the resume 109 and 103 seconds to the display: about 7 seconds more for each gigabyte in use, each way. A real project's stack (a database in a container, a bundler, a browser) holds several gigabytes, so its desktop resumes in a minute or two rather than half a minute.
-
-A new machine is no slower on v6 than on v7: five each from the release image, alternating, showed their display after 22 to 25 seconds on v6 (middle 23) and 24 to 52 on v7 (middle 40), which is Azure's own spread that hour and not the size. Five more made to hibernate, from an image baked with these scripts on a builder without Trusted Launch, showed theirs after 24 to 28 seconds (middle 25): the room for memory is made beside the desktop, not before it.
-
-Two things to know before relying on it:
-
-- **A resume is slower to a screen than a plain start, and slower the more memory is in use.** What programs hold is read back from a disk that gives 60 MB a second. The kernel is told to write what programs hold and let go of cached files first; left to shrink the image as far as it could, it pushed programs' memory to swap, and the desktop hardly answered for a minute and a half after it was back.
-- **A machine that does not hibernate is stopped the plain way, ten minutes late.** Azure waited ten minutes for the machine and left it running; a plain stop asked for in the meantime was taken and carried out only then. The API waits that out and then deallocates, and the desktop comes back as from any pause. It happened in testing while `hibernate.sh` still went through `systemctl hibernate`, which refused twice: for a minute after a resume, and on the boot in which the swap file was made again. It tells the kernel directly now.
-
-### Turning it on
-
-One line: `DEFINITION: machine-hibernate` in `release.yml`. The next release bakes the image into that definition, because it is empty, on a builder without Trusted Launch, and deploys the API with `desktopsHibernate=true` (`main.bicep`): `Workstream:Desktops:Azure:Hibernate`, the three v6 sizes, and the image from that definition. Staging first: `gh workflow run staging.yml -f action=deploy -f ref=main -f desktop-image=true -f hibernate=true`.
-
-Desktops that exist keep what they have. A paused one is started as the machine it is, with Trusted Launch on a v7 size, and is paused the plain way from then on. An archived one comes back on a machine like the one its disk was made on, because a disk keeps its security type and Azure takes it only on a machine of the same kind: with Trusted Launch and without hibernation (`AzureDesktopHost.CreateAsync` reads it off the archive). Only desktops made after the change hibernate. Saved setups are made again by themselves, since a save is for one image version. Turning it off again is the same line back, and the same holds the other way round.
-
-What is given up is Trusted Launch on desktops: Secure Boot, which stops a desktop booting a kernel or boot loader that is not signed, and the virtual TPM. A desktop is already untrusted, its person has root, it holds one key that reaches its own task, and it has no way to another machine (`docs/architecture.md`, "What a desktop can and cannot do"); Trusted Launch protects a desktop's own boot from what runs on it, and nothing else from the desktop. That is the owner's call, which is why this is off.
-
-To check the host against Azure without deploying anything, `tests/Workstream.Tests/AzureDesktopHostLive.cs` makes, pauses, resumes, archives, brings back and deletes one machine in a resource group you name.
+Built, measured, and off. [docs/hibernation.md](../docs/hibernation.md) has what Azure needs for it, what was measured and how to turn it on.
 
 ## Models
 
-Agents call Claude on Microsoft Foundry through the API's gateway. The Foundry resource and its deployments are made by hand, once, because deploying a model from a partner means accepting that partner's terms through Azure Marketplace, which is a person's decision and not a pipeline's.
+Agents call Claude through the API's gateway, at the endpoint in `MODEL_ENDPOINT` with the key in `MODEL_KEY`. The simplest is Anthropic's own API: `https://api.anthropic.com` and an API key from [console.anthropic.com](https://console.anthropic.com). Nothing else is needed.
+
+The other is Claude deployed in your own Microsoft Foundry resource, which keeps the model calls in Azure. The Foundry resource and its deployments are made by hand, once, because deploying a model from a partner means accepting that partner's terms through Azure Marketplace, which is a person's decision and not a pipeline's.
 
 ```bash
 az group create -n workstream-ai -l eastus2
@@ -149,24 +110,26 @@ The deployment names are the defaults in `ModelOptions` (`api/Model/ModelGateway
 
 ## Sign in with GitHub
 
-People can sign in with GitHub beside the emailed code. It is SqlOS's GitHub connection, seeded by the API at start from two settings (`SqlOS:Oidc:GitHub:ClientId` and `SqlOS:Oidc:GitHub:ClientSecret`; `api/Workstream.cs`, `SeedGitHubSignIn`). It needs a GitHub OAuth client, which GitHub calls an "OAuth App". It is the second thing made by hand, after the Foundry resource, because GitHub has no way to make one without a person filling its form. The same sign-in is how desktops reach GitHub: SqlOS keeps the token GitHub gives it, and a task's desktop pushes with the token of the person who started the task ([docs/core-model.md](../docs/core-model.md), "A desktop's GitHub token").
+People can sign in with GitHub beside the emailed code. It is SqlOS's GitHub connection, seeded by the API at start from two settings (`SqlOS:Oidc:GitHub:ClientId` and `SqlOS:Oidc:GitHub:ClientSecret`; `api/Workstream.cs`, `SeedGitHubSignIn`). It needs a GitHub OAuth client, which GitHub calls an "OAuth App". It is made by hand because GitHub has no way to make one without a person filling its form. The same sign-in is how desktops reach GitHub: SqlOS keeps the token GitHub gives it, and a task's desktop pushes with the token of the person who started the task ([docs/core-model.md](../docs/core-model.md), "A desktop's GitHub token").
 
-### Making the OAuth client for production
+### Making the OAuth client
 
-1. Open https://github.com/organizations/agenetix/settings/applications/new (the organization's **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App**).
+Make it after the first release has deployed, because it needs your two addresses. The release run's summary gives them: the web app at `https://workstream-web.<domain>` and the API at `https://workstream-api.<domain>`.
+
+1. On GitHub, open **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth App**. Use your organization's settings if people from an organization will sign in, or your own otherwise.
 2. **Application name**: `Workstream`. People see it on GitHub's page when they sign in.
-3. **Homepage URL**: `https://workstream-web.happyhill-808cd2a4.westus3.azurecontainerapps.io`
-4. **Authorization callback URL**: `https://workstream-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/sqlos/auth/oidc/callback`. It is SqlOS's address on the API, not the web app's, and it must match exactly.
-5. Leave **Enable Device Flow** off. **Register application**.
-6. Copy the **Client ID**. **Generate a new client secret** and copy it; GitHub shows it once.
-7. Put the two values on the `production` environment:
+3. **Homepage URL**: your web app's address, `https://workstream-web.<domain>`.
+4. **Authorization callback URL**: `https://workstream-api.<domain>/sqlos/auth/oidc/callback`. It is on the API, not the web app, and it must match exactly.
+5. Leave **Enable Device Flow** off and press **Register application**.
+6. Copy the **Client ID**. Press **Generate a new client secret** and copy the secret, because GitHub shows it only once.
+7. Put the two values on your repository's `production` environment:
 
 ```bash
 gh variable set GH_OAUTH_CLIENT_ID --env production --body "<client id>"
 gh secret set GH_OAUTH_CLIENT_SECRET --env production   # paste the secret when asked
 ```
 
-8. Publish the next release. Its deploy passes them on (`.github/actions/deploy`, `infra/api.bicep`), and the sign-in page then shows **Continue with GitHub**.
+8. Deploy the current release again so the API gets them: `gh workflow run release.yml -f tag=vX.Y.Z` with the tag you published. The next release you publish also passes them on (`.github/actions/deploy`, `infra/api.bicep`). The sign-in page then shows **Continue with GitHub**.
 
 The client asks GitHub for a person's profile, their email addresses and their repositories (`read:user`, `user:email`, `repo`; the scopes are in code, `SeedGitHubSignIn`). GitHub shows them on its page the first time. A person needs a verified primary email address on GitHub; an address that already has a Workstream account signs in to that account.
 
@@ -176,11 +139,11 @@ To turn it off after it has been on, taking the two values away is not enough: S
 
 ### Staging and development
 
-A GitHub OAuth client sends people back to one callback address, so each place needs a client of its own. Staging: the same steps with `Workstream staging` as its name, `https://workstream-staging-web.happyhill-808cd2a4.westus3.azurecontainerapps.io` as its homepage and `https://workstream-staging-api.happyhill-808cd2a4.westus3.azurecontainerapps.io/sqlos/auth/oidc/callback` as its callback, and the same two names on the `staging` environment. A laptop: homepage `http://localhost:8091`, callback `http://localhost:5280/sqlos/auth/oidc/callback`, and `WORKSTREAM_GITHUB_OAUTH_CLIENT_ID` and `WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET` in `.env` (`.env.example`). The two are set together or not at all: the API refuses to start with only one.
+A GitHub OAuth client sends people back to one callback address, so each place needs a client of its own. Staging: the same steps with `Workstream staging` as its name and staging's two addresses from its run's summary (`https://workstream-staging-web.<domain>` and `https://workstream-staging-api.<domain>/sqlos/auth/oidc/callback`), and the same two names on the `staging` environment. Your computer: homepage `http://localhost:8091`, callback `http://localhost:5280/sqlos/auth/oidc/callback`, and `WORKSTREAM_GITHUB_OAUTH_CLIENT_ID` and `WORKSTREAM_GITHUB_OAUTH_CLIENT_SECRET` in `.env` (`.env.example`). The two are set together or not at all: the API refuses to start with only one.
 
 ### Rotating
 
-Generate a new client secret on the OAuth client's page beside the old one, set `GH_OAUTH_CLIENT_SECRET` to it, publish a release, then delete the old one on GitHub. Nobody is signed out: sessions are SqlOS's own.
+Generate a new client secret on the OAuth client's page beside the old one, set `GH_OAUTH_CLIENT_SECRET` to it, deploy the current release again, then delete the old one on GitHub. Nobody is signed out: sessions are SqlOS's own.
 
 ## Database access
 
