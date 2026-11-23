@@ -19,10 +19,6 @@ I built Workstream over a weekend in November 2026. It's open source now in case
 - A team shares its tasks and environments. You can also share one task with someone outside the team, by email, so they can watch it, talk to the agent or use the desktop.
 - A desktop pauses when nobody has used it for half an hour and picks up where it left off when you come back.
 
-![Starting a new task](docs/images/new-task.webp)
-
-![Choosing what a desktop starts with](docs/images/environment.webp)
-
 ## Built on SqlOS
 
 Workstream is also my example app for [SqlOS](https://github.com/ross-slaney/sqlos), a .NET library I wrote. It puts sign-in, organizations and permissions inside your own SQL Server database. Workstream has no users table and no permission logic of its own. Every question about who can do what is answered by SqlOS.
