@@ -19,9 +19,9 @@ An agent with a whole computer can do more than one in a terminal. It can click 
 
 ## Built on SqlOS
 
-Workstream is also my example app for [SqlOS](https://github.com/ross-slaney/sqlos), a .NET library I wrote. It puts sign-in, organizations and permissions inside your own SQL Server database. Workstream has no users table and no permission logic of its own. Every question about who can do what is answered by SqlOS.
+Workstream is a reference application for [SqlOS](https://github.com/ross-slaney/sqlos), a .NET library that runs authentication, organizations and fine-grained authorization inside your own SQL Server database. Workstream has no users table and no permission logic of its own. Every question about who can do what is answered by SqlOS.
 
-Here's how the pieces map:
+Each part of the product is expressed in SqlOS terms:
 
 - A team is a SqlOS organization, and its people are one group.
 - Every team, environment and task is a node in one tree, so a grant on a team covers all of its tasks.
@@ -29,7 +29,7 @@ Here's how the pieces map:
 - Each desktop signs in as its own service account. Its key reaches its own task and nothing else, so a desktop can't read another team's work even if the agent on it tries.
 - The task list and the conversation are read as authorized pages. SqlOS filters the rows by permission inside the query. A team's people hold one grant on the team, so the permission check stays one index read however many tasks the team has.
 
-The whole model is written down in [docs/core-model.md](docs/core-model.md). That's the best place to start if you want to see how an app built on SqlOS fits together.
+The full model is in [docs/core-model.md](docs/core-model.md), which shows how an application built on SqlOS fits together.
 
 ## Try it on your computer
 
