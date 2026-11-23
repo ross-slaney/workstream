@@ -8,8 +8,6 @@ Workstream gives every task its own Linux desktop in the cloud with an AI agent 
 
 An agent with a whole computer can do more than one in a terminal. It can click through a web app to find a bug, run a project's full stack in Docker, or fill in a spreadsheet. Because every task has its own desktop, you can start several at once and none of them gets in the way of your own machine. You can also see exactly what each one did, and take over when one gets stuck.
 
-I built Workstream over a weekend in November 2026. It's open source now in case it's useful to someone, or as an example of how to build this kind of app.
-
 ## What it does
 
 - Each task gets its own desktop, with Chrome, VS Code, a terminal and a file manager. Up to four tasks fit on your screen at once.
