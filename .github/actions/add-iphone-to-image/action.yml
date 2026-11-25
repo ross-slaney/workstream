@@ -27,10 +27,10 @@ runs:
         image=$(az sig image-version show -g workstream --gallery-name workstream --gallery-image-definition machine \
           --gallery-image-version "$VERSION" --query id -o tsv)
         az group create -n "$BUILDER" -l "$LOCATION" --tags project=workstream purpose=image-build -o none
-        # A Large desktop's machine, which is what the simulator runs on. It has no public address.
-        az vm create -g "$BUILDER" -n builder --image "$image" --specialized --size Standard_D8as_v7 \
-          --security-type TrustedLaunch --enable-secure-boot true --enable-vtpm true \
-          --public-ip-address "" --nsg-rule NONE --storage-sku Premium_LRS -o none --only-show-errors
+        # The same builder a bake uses (infra/image-builder.bicep), made from the image instead of from Debian, and
+        # the size of a Large desktop, which is what the simulator runs on.
+        az deployment group create -g "$BUILDER" -n builder -f infra/image-builder.bicep -o none --only-show-errors \
+          -p fromImage="$image" size=Standard_D8as_v7
         # The script's output comes back when it ends; it prints the last line only if every step ran.
         az vm run-command invoke -g "$BUILDER" -n builder --command-id RunShellScript --scripts @desktop/image/iphone.sh \
           --query "value[0].message" -o tsv | tee iphone.log
