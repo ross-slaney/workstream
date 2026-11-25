@@ -153,7 +153,8 @@ async function answerOf(response) {
 
 /** The source as one archive: the files git knows of, from the source's root. */
 function archive(app, file) {
-  const result = run("tar", ["--null", "-T", "-", "-czf", file, "-C", app.root], { input: app.files.join("\0"), cwd: app.root });
+  // Run from the source's root, where the names are relative to. GNU tar refuses a -C that follows the names.
+  const result = run("tar", ["--null", "-T", "-", "-czf", file], { input: app.files.join("\0"), cwd: app.root });
   if (result.status !== 0) throw new Error(`The source could not be archived: ${(result.stderr || "").trim().split("\n").pop()}`);
   return statSync(file).size;
 }
