@@ -25,6 +25,7 @@ test("on a desktop with the iPhone the agent is told how to get the app built, h
   assert.match(told, /`phone ios snapshot`/);
   assert.match(told, /`phone ios tap @e3`/);
   assert.match(told, /never with `CI=1`/);
+  assert.match(told, /`127\.0\.0\.1:8081`/);
   assert.match(told, /check it on every surface this desktop has/);
   assert.doesNotMatch(told, /This desktop has no iPhone/);
 });

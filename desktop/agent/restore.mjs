@@ -20,6 +20,12 @@ export const MAX_FILES = 12;
 /** The address of the agent's own window, which Chromium also lists and which opens itself. */
 export const AGENT_WINDOW = "http://127.0.0.1:4141";
 
+/** The iPhone's window (phone.mjs), which is a page of the same browser and is opened again with the phone, not as a tab. */
+export const IPHONE_WINDOW = "http://127.0.0.1:7979";
+
+/** A window the desktop opens by itself, which is not one of the person's or the agent's pages. */
+const ownWindow = (url) => String(url).startsWith(AGENT_WINDOW) || String(url).startsWith(IPHONE_WINDOW);
+
 /** Whether a command leaves something running: its last line ends in a lone `&`, or `& disown`. */
 export function endsInBackground(command) {
   const last = String(command ?? "").trim().split("\n").filter((line) => line.trim()).at(-1) ?? "";
@@ -61,7 +67,7 @@ export function noteFile(state, file) {
 /** The pages worth opening again, from Chromium's list of targets: web pages and files, not its own or the agent's window. */
 export function pagesOf(targets) {
   return (Array.isArray(targets) ? targets : [])
-    .filter((target) => target?.type === "page" && /^(https?|file):/i.test(target.url ?? "") && !String(target.url).startsWith(AGENT_WINDOW))
+    .filter((target) => target?.type === "page" && /^(https?|file):/i.test(target.url ?? "") && !ownWindow(target.url))
     .map((target) => target.url)
     .filter((url, index, all) => all.indexOf(url) === index)
     .slice(0, MAX_TABS);
