@@ -45,7 +45,7 @@ A desktop can have an Android phone and an iPhone on it, each in its own window 
 
 **Android.** The emulator runs on every size, and best on Standard or Large. The agent builds the Android app on the desktop, with the project's own tools.
 
-**iPhone.** The simulator is Apple's own iOS, and it needs a Large desktop. Installing it takes about twenty minutes and 30 GB, so it is done once, with the environment's [saved setup](/docs/environments#saved-setup), and every task starts with it.
+**iPhone.** The simulator is Apple's own iOS, and it needs a Large desktop. It is already on the image these desktops start from, so nothing is installed when a task starts.
 
 An iPhone app can only be built on a Mac, and a desktop is not one. So the desktop sends the app's source to Workstream, which builds it on a Mac and keeps the app for your team. Nothing is added to your repository.
 

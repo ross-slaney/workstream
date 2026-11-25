@@ -19,7 +19,9 @@ namespace Workstream.Api.Desktops;
 /// <see cref="Archive"/> names the task's own archive, for a machine that brings an archived desktop back: it
 /// starts from that and from nothing else.
 /// </summary>
-public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task, string? Save = null, string? Archive = null)
+/// <see cref="Iphone"/> asks for the image that already has the iPhone simulator on it, for a machine of an
+/// environment with the iPhone that starts from the image: its setup then has nothing to install.
+public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task, string? Save = null, string? Archive = null, bool Iphone = false)
 {
     /// <summary>
     /// What the desktop is told, as its agent reads it (desktop/agent/told.mjs): on a machine this is its user
@@ -159,6 +161,13 @@ public sealed class DesktopOptions
         /// deployed with (infra/main.bicep). A machine made from it starts as it is, with nothing to provision.
         /// </summary>
         public string ImageId { get; set; } = "";
+        /// <summary>
+        /// The same release's image with the iPhone simulator already installed (the gallery's
+        /// <c>machine-iphone</c>), which a machine of an environment with the iPhone is made from. It is 30 GB
+        /// larger, so only those machines use it. Empty where a deployment has none: such a machine then starts
+        /// from <see cref="ImageId"/> and its setup installs the simulator, which takes about twenty minutes.
+        /// </summary>
+        public string IphoneImageId { get; set; } = "";
         /// <summary>
         /// Each size's machine. Azure hibernates the generation before this one (<c>Standard_D4as_v6</c> and its
         /// siblings: the same cores, memory and price) and not this one, so a deployment that hibernates names
@@ -395,7 +404,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                 ["storageProfile"] = source is null
                     ? new JsonObject
                     {
-                        ["imageReference"] = new JsonObject { ["id"] = Azure.ImageId },
+                        ["imageReference"] = new JsonObject { ["id"] = spec.Iphone && Azure.IphoneImageId.Length > 0 ? Azure.IphoneImageId : Azure.ImageId },
                         ["osDisk"] = new JsonObject
                         {
                             ["createOption"] = "FromImage",

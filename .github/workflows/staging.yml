@@ -20,6 +20,10 @@ on:
         description: Bake the desktops' image from this ref too (for a change under desktop/); otherwise staging uses the newest release's
         type: boolean
         default: false
+      iphone-image:
+        description: Make the image with the iPhone simulator for staging's own image too (about 25 minutes more); otherwise staging uses a release's, when its image is a release's
+        type: boolean
+        default: false
       hibernate:
         description: Desktops hibernate when they are stopped (infra/README.md, "Hibernation"). Needs desktop-image too, unless a release already bakes hibernating images
         type: boolean
@@ -85,9 +89,52 @@ jobs:
           echo "Staging makes its desktops from image $version."
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+  # The image with the iPhone simulator for the version staging's desktops come from: a release's own, which
+  # is already there, or one made here from staging's own image when asked.
+  iphone-image:
+    name: Desktops' image with the iPhone
+    needs: desktop-image
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: staging
+    outputs:
+      has: ${{ steps.decide.outputs.has }}
+    env:
+      VERSION: ${{ needs.desktop-image.outputs.version }}
+      ASKED: ${{ inputs.iphone-image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Decide whether to make it
+        id: decide
+        run: |
+          set -euo pipefail
+          if [ "$DEFINITION" != machine ]; then { echo "make=false"; echo "has=false"; } >> "$GITHUB_OUTPUT"; exit 0; fi
+          have=$(az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine-iphone --query "[?provisioningState=='Succeeded'].name" -o tsv 2>/dev/null || true)
+          if grep -qx "$VERSION" <<<"$have"; then { echo "make=false"; echo "has=true"; } >> "$GITHUB_OUTPUT"
+          elif [ "$ASKED" = true ]; then { echo "make=true"; echo "has=true"; } >> "$GITHUB_OUTPUT"
+          else { echo "make=false"; echo "has=false"; } >> "$GITHUB_OUTPUT"; fi
+      - uses: ./.github/actions/add-iphone-to-image
+        if: steps.decide.outputs.make == 'true'
+        with:
+          version: ${{ env.VERSION }}
+      - name: Keep only this one of staging's own
+        if: steps.decide.outputs.make == 'true'
+        run: |
+          set -euo pipefail
+          az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition machine-iphone \
+            --query "[?starts_with(name, '0.0.') && name != '$VERSION'].name" -o tsv \
+            | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition machine-iphone --gallery-image-version {}
+
   deploy:
     name: Web + API (Bicep)
-    needs: desktop-image
+    needs: [desktop-image, iphone-image]
     if: inputs.action == 'deploy'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -109,6 +156,7 @@ jobs:
           tag: staging-${{ steps.commit.outputs.sha }}
           desktop-image-version: ${{ needs.desktop-image.outputs.version }}
           desktops-hibernate: ${{ inputs.hibernate }}
+          desktop-iphone-image: ${{ needs.iphone-image.outputs.has }}
           # The administrator here is a made-up address with a password (the secret ADMINISTRATOR_PASSWORD).
           administrator-email: ${{ vars.ADMINISTRATOR_EMAIL || 'admin@workstream.test' }}
           administrator-password: ${{ secrets.ADMINISTRATOR_PASSWORD }}
@@ -150,7 +198,7 @@ jobs:
             if [ "$(az group exists -n "$group")" = true ]; then az group delete -n "$group" --yes; fi
           done
           # The images staging baked for itself, in either definition.
-          for definition in machine machine-hibernate; do
+          for definition in machine machine-hibernate machine-iphone; do
             az sig image-version list -g workstream --gallery-name workstream --gallery-image-definition "$definition" \
               --query "[?starts_with(name, '0.0.')].name" -o tsv 2>/dev/null \
               | xargs -r -I{} az sig image-version delete -g workstream --gallery-name workstream --gallery-image-definition "$definition" --gallery-image-version {}

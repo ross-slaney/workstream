@@ -34,6 +34,8 @@ param spareHoursADay int = 6
 param desktopImageId string
 @description('Whether a desktop hibernates when it is stopped (api/Desktops/DesktopHosts.cs, AzureOptions.Hibernate). Azure hibernates the Dasv6 sizes and not the Dasv7 ones the API otherwise uses, at the same cores, memory and price, so the sizes change with it.')
 param desktopsHibernate bool = false
+@description('The same version of the image with the iPhone simulator installed, for environments with the iPhone; empty where there is none (api/Desktops/DesktopHosts.cs, AzureOptions.IphoneImageId).')
+param desktopIphoneImageId string = ''
 @description('The agents\' models (api/Model/ModelGateway.cs): the Foundry resource\'s Anthropic endpoint; empty leaves agents without one.')
 param modelEndpoint string = ''
 @secure()
@@ -112,6 +114,8 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
           { name: 'Workstream__Desktops__Spares__Enabled', value: sparesAtOnce > 0 ? 'true' : 'false' }
           { name: 'Workstream__Desktops__Spares__Max', value: string(sparesAtOnce) }
           { name: 'Workstream__Desktops__Spares__HoursPerDay', value: string(spareHoursADay) }
+        ], empty(desktopIphoneImageId) ? [] : [
+          { name: 'Workstream__Desktops__Azure__IphoneImageId', value: desktopIphoneImageId }
         ], desktopsHibernate ? [
           { name: 'Workstream__Desktops__Azure__Hibernate', value: 'true' }
           { name: 'Workstream__Desktops__Azure__Sizes__small', value: 'Standard_D2as_v6' }

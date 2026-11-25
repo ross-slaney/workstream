@@ -369,6 +369,15 @@ public sealed class BuildJourneys
             CollectionAssert.Contains(added.Apps.ToList(), "iphone");
             // With no repository and no script it still has something to prepare: the simulator, which takes a desktop twenty minutes.
             Assert.AreNotEqual("nothing", added.Setup.State);
+            // Its machines ask for the image that already has the simulator: the one preparing it, and a task's.
+            await Stack.Jobs.PrepareAsync(draft.Id, CancellationToken.None);
+            Assert.IsTrue(Stack.Desktops.Preparing(draft.Id)!.Iphone);
+            var task = await ada.PostAsync<TaskDto>($"/api/teams/{team.Id}/tasks", new StartTask(Guid.NewGuid().ToString("D"), draft.Id, null, "Open the app on the iPhone.", Guid.NewGuid().ToString("D")));
+            using (await Desktop.StartAsync(task.Id)) Assert.IsTrue(Stack.Desktops.For(task.Id).Iphone);
+            // A desktop of an environment without the iPhone asks for the plain one.
+            var plain = (await ada.GetAsync<ListPage<EnvironmentDto>>($"/api/teams/{team.Id}/environments")).Data.First(x => !x.Apps.Contains("iphone") && !x.Apps.Contains("android"));
+            var other = await ada.PostAsync<TaskDto>($"/api/teams/{team.Id}/tasks", new StartTask(Guid.NewGuid().ToString("D"), plain.Id, null, "Say hello.", Guid.NewGuid().ToString("D")));
+            using (await Desktop.StartAsync(other.Id)) Assert.IsFalse(Stack.Desktops.For(other.Id).Iphone);
             var apps = await ada.GetAsync<List<DesktopApp>>("/api/apps");
             Assert.IsTrue(apps.Any(x => x.Id == "iphone" && !x.Default));
             Assert.IsTrue(apps.Any(x => x.Id == "android" && !x.Default));

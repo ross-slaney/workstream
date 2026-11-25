@@ -8,7 +8,7 @@ Everything in Azure is declared here and deployed by `.github/workflows/release.
 
 | Group | What | File |
 | --- | --- | --- |
-| `workstream` | Container registry, Log Analytics, the private network with its NAT gateway, the container apps environment inside that network, Communication Services for email, the gallery that holds the desktops' image (`gallery.bicep`: the definition `machine`, and `machine-hibernate` for desktops that hibernate) | `foundation.bicep` |
+| `workstream` | Container registry, Log Analytics, the private network with its NAT gateway, the container apps environment inside that network, Communication Services for email, the gallery that holds the desktops' image (`gallery.bicep`: the definition `machine`, `machine-iphone` for the same image with the iPhone simulator on it, and `machine-hibernate` for desktops that hibernate) | `foundation.bicep` |
 | `workstream` | The runtime identity, the SQL server and database, and the storage account that holds the iPhone builds' files | `data.bicep` |
 | `workstream` | The API and the web app | `api.bicep`, `web.bicep` |
 | `workstream-desktops` | One virtual machine per task, with its disk and network interface. The API makes and removes them; Bicep declares only the API's right to. | `desktops.bicep` |
@@ -59,7 +59,8 @@ Publishing the GitHub release `vX.Y.Z` runs `release.yml` (the `release` skill d
 
 1. **Resolve.** The tag must be `v` + `client/app.json`'s version, on `main`, and published.
 2. **Desktops' image.** When `desktop/` changed since the previous release, or the gallery's definition is empty, the job makes a Debian 13 machine in a group of its own (`image-builder.bicep`), runs `desktop/image/bake.sh` on it, captures it into the gallery as version `X.Y.Z` (about half an hour), keeps the three newest versions and deletes the builder. Otherwise it does nothing. Either way it says which version this release makes its desktops from: its own, or the newest before it.
-3. **Web + API.** On a fresh installation the job first deploys `foundation.bicep` by itself, because the images need the registry and the web image needs the API's address. It builds both images, deploys `main.bicep` with the image version from the step before, and checks that both origins serve the exact commit.
+3. **The image with the iPhone.** When the gallery has no `machine-iphone` of that version, the job makes a machine from the image, installs the iPhone simulator on it (`desktop/image/iphone.sh`, about twenty minutes), captures it as the same version of `machine-iphone`, keeps the three newest and deletes the builder. An environment with the iPhone makes its desktops from it, so no task and no environment waits for the simulator to install.
+4. **Web + API.** On a fresh installation the job first deploys `foundation.bicep` by itself, because the images need the registry and the web image needs the API's address. It builds both images, deploys `main.bicep` with the image version from the step before, and checks that both origins serve the exact commit.
 
 The image comes first because the API and the image are released together: a deployment makes its desktops from one image version, the one it was deployed with, and never from whatever is newest. So the API never meets a desktop newer than itself, and deploying an older release again gets that release's image, as long as it is one of the three kept. Running and stopped desktops keep the disk they have.
 
@@ -219,7 +220,7 @@ dotnet test tests/Workstream.Tests --filter "FullyQualifiedName~AzureSavedSetupL
 
 Without those variables the test is skipped. What it measured is in [docs/architecture.md](../docs/architecture.md), "A saved setup".
 
-An iPhone build costs the Mac's minutes. GitHub does not charge for its standard Mac runner in a public repository, which this one is; in a private one it is $0.062 a minute, about $1.10 for a build of eighteen minutes. That rate is what the system administrator's page multiplies each team's Mac minutes by (`Workstream:Builds:MacMinuteUsd`), so the page shows what the builds would cost where they are paid for. A team may ask for 30 builds in a day (`Workstream:Builds:PerTeamADay`). An environment with the iPhone also needs a Large desktop, and its saved setup holds the simulator, about 30 GB: $1.50 a month.
+An iPhone build costs the Mac's minutes. GitHub does not charge for its standard Mac runner in a public repository, which this one is; in a private one it is $0.062 a minute, about $1.10 for a build of eighteen minutes. That rate is what the system administrator's page multiplies each team's Mac minutes by (`Workstream:Builds:MacMinuteUsd`), so the page shows what the builds would cost where they are paid for. A team may ask for 30 builds in a day (`Workstream:Builds:PerTeamADay`). An environment with the iPhone also needs a Large desktop, and its saved setup holds the simulator, about 30 GB: $1.50 a month. Each kept version of the image with the iPhone is about 55 GB in the gallery, $2.75 a month, and making one adds about 25 minutes of a Large machine to a release that bakes ($0.15).
 
 A pool of stopped machines was measured and not built: Azure takes as long to start a stopped machine as to make a new one (a middle of about 17 seconds for either, and up to a minute), so its disks would have bought nothing.
 

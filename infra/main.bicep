@@ -33,6 +33,8 @@ param administratorPassword string = ''
 param desktopImageVersion string
 @description('Whether a desktop hibernates when it is stopped, so that starting it again brings back every program as it was. Such desktops are made on the machine sizes Azure can hibernate, without Trusted Launch, from the gallery\'s machine-hibernate definition, which desktopImageVersion is then a version of (api.bicep, gallery.bicep). Set by the workflow that deploys (release.yml, staging.yml), which bakes into the same definition.')
 param desktopsHibernate bool = false
+@description('Whether the gallery has this version of the image with the iPhone simulator on it (its machine-iphone definition), which the deploy made just before this runs. An environment with the iPhone then makes its desktops from it. Not for desktops that hibernate, which have no such image.')
+param desktopIphoneImage bool = false
 @description('The agents\' models: the Foundry resource\'s Anthropic endpoint, e.g. https://<resource>.services.ai.azure.com/anthropic. The resource and its deployments are made by hand (README "Models"), never here; empty runs with agents that say models are not set up.')
 param modelEndpoint string = ''
 @secure()
@@ -148,6 +150,7 @@ module api 'api.bicep' = {
     desktopsSubnetId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Network/virtualNetworks/subnets', 'workstream-net', 'desktops')
     desktopImageId: resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images/versions', 'workstream', desktopsHibernate ? 'machine-hibernate' : 'machine', desktopImageVersion)
     desktopsHibernate: desktopsHibernate
+    desktopIphoneImageId: desktopIphoneImage && !desktopsHibernate ? resourceId(subscription().subscriptionId, shared, 'Microsoft.Compute/galleries/images/versions', 'workstream', 'machine-iphone', desktopImageVersion) : ''
     modelEndpoint: modelEndpoint
     modelKey: modelKey
     gitHubSignInClientId: gitHubSignInClientId
