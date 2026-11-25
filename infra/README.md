@@ -9,7 +9,7 @@ Everything in Azure is declared here and deployed by `.github/workflows/release.
 | Group | What | File |
 | --- | --- | --- |
 | `workstream` | Container registry, Log Analytics, the private network with its NAT gateway, the container apps environment inside that network, Communication Services for email, the gallery that holds the desktops' image (`gallery.bicep`: the definition `machine`, and `machine-hibernate` for desktops that hibernate) | `foundation.bicep` |
-| `workstream` | The runtime identity, the SQL server and database | `data.bicep` |
+| `workstream` | The runtime identity, the SQL server and database, and the storage account that holds the iPhone builds' files | `data.bicep` |
 | `workstream` | The API and the web app | `api.bicep`, `web.bicep` |
 | `workstream-desktops` | One virtual machine per task, with its disk and network interface. The API makes and removes them; Bicep declares only the API's right to. | `desktops.bicep` |
 | `workstream-ai` | The Foundry resource, when the model is Claude in Foundry. Made by hand, see "Models". | |
@@ -22,7 +22,7 @@ The two origins are under the container apps environment's own domain: `https://
 
 ### What the API may do in Azure
 
-The API and the web app run as one user-assigned identity, `workstream-runtime`. It pulls both images (`AcrPull` on the registry), owns the database's schema (it is in the SQL administrators group), and makes desktops: `Virtual Machine Contributor` on the `workstream-desktops` group and on the desktops' subnet, `Disk Snapshot Contributor` on the `workstream-desktops` group for environments' saved setups, and `Reader` on the gallery. It has no other role.
+The API and the web app run as one user-assigned identity, `workstream-runtime`. It pulls both images (`AcrPull` on the registry), owns the database's schema (it is in the SQL administrators group), and makes desktops: `Virtual Machine Contributor` on the `workstream-desktops` group and on the desktops' subnet, `Disk Snapshot Contributor` on the `workstream-desktops` group for environments' saved setups, `Reader` on the gallery, and `Storage Blob Data Contributor` on the builds' storage account. It has no other role.
 
 ## Setting up a subscription
 
@@ -32,7 +32,7 @@ Once, by an owner of the subscription who is also a tenant administrator, signed
 ./scripts/setup-azure.sh
 ```
 
-For each of the GitHub environments `production` and `staging` it makes an app registration (`workstream-github-production`, `workstream-github-staging`) and gives its service principal Contributor on the subscription, the right to assign exactly the four roles above, and Microsoft Graph `Group.ReadWrite.All` for the SQL administrators groups. It stores each credential as that environment's `AZURE_CREDENTIALS` secret. It is safe to run again, and it is run again when the runtime identity is given a new role, because the CI identity cannot widen what it may assign: an assignment whose condition is out of date is made again.
+For each of the GitHub environments `production` and `staging` it makes an app registration (`workstream-github-production`, `workstream-github-staging`) and gives its service principal Contributor on the subscription, the right to assign exactly the five roles above, and Microsoft Graph `Group.ReadWrite.All` for the SQL administrators groups. It stores each credential as that environment's `AZURE_CREDENTIALS` secret, and makes each environment's `BUILDER_KEY` secret when it has none ("iPhone builds" below). It is safe to run again, and it is run again when the runtime identity is given a new role, because the CI identity cannot widen what it may assign: an assignment whose condition is out of date is made again.
 
 Then set, on the GitHub environment `production`:
 
@@ -80,6 +80,22 @@ gh workflow run staging.yml -f action=remove
 Staging makes its desktops from the newest release's image. With `desktop-image=true` it bakes one of its own from the ref first, as version `0.0.N` in the same gallery; no release ever chooses a `0.0` version, only the newest is kept, and removing staging deletes it.
 
 The run's summary gives its two addresses. Its administrator is `admin@workstream.test` with the password in the `staging` environment's `ADMINISTRATOR_PASSWORD` secret. Remove it when you are done: while it exists it costs what its two apps and its database cost, and its desktops count against the same cores.
+
+## iPhone builds
+
+A desktop cannot build an iPhone app, so the API has one built on a Mac: a run of `.github/workflows/ios-build.yml` in this repository, on GitHub's Mac runner ([docs/architecture.md](../docs/architecture.md), "Phones on a desktop"). Three things make it work, and the first two need nothing done by hand:
+
+| Name | Kind | What |
+| --- | --- | --- |
+| `BUILDER_KEY` | secret, on each GitHub environment | The key the Mac calls the API with: `wsb_` and 64 hex characters. `scripts/setup-azure.sh` makes it. The deploy gives the same value to the API (`Workstream:Builds:Key`), and the workflow reads it from the environment its run is for. Without it a deployment builds no iPhone apps, and a desktop that asks is told so. |
+| The builds' storage | `infra/data.bicep` | A storage account in the deployment's own group, with one private container, `builds`. No public access and no account key: the runtime identity alone reads and writes it. |
+| A token that may run the workflow | the system administrator's GitHub sign-in, or the secret `BUILDER_GITHUB_TOKEN` | The API asks GitHub to run the workflow as the system administrator, with the token GitHub gave them when they signed in to Workstream with GitHub. They need write access to this repository, and to have signed in with GitHub once. To use another token instead (a fine-grained token with Actions read and write on this repository alone), set `BUILDER_GITHUB_TOKEN` on the environment. |
+
+The workflow runs from the release's tag, so the Mac's recipe (`builder/ios.sh`) is the one the release was made with. Staging runs it from the branch staging was deployed from.
+
+To rotate the key: `printf 'wsb_%s' "$(openssl rand -hex 32)" | gh secret set BUILDER_KEY --env production`, then deploy the current release again. A build in flight at that moment fails and is asked for again.
+
+This repository is public, so the workflow's runs are public too. The workflow writes nothing of a project to its log and uploads no artifact; what a run shows is a build's id, how long it took and whether it worked.
 
 ## Hibernation
 
@@ -166,7 +182,7 @@ An estimate from list prices, not a bill: about $105 a month at most, less while
 | Web app, one replica of 0.25 vCPU and 0.5 GB kept warm | up to about $20 |
 | SQL database, Basic | $4.90 |
 | Container registry, Basic | $5 |
-| Logs, email, the image in the gallery | a few dollars |
+| Logs, email, the image in the gallery, the builds' storage | a few dollars |
 
 None of the rest costs anything while nobody is using the product.
 
@@ -202,6 +218,8 @@ dotnet test tests/Workstream.Tests --filter "FullyQualifiedName~AzureSavedSetupL
 ```
 
 Without those variables the test is skipped. What it measured is in [docs/architecture.md](../docs/architecture.md), "A saved setup".
+
+An iPhone build costs the Mac's minutes. GitHub does not charge for its standard Mac runner in a public repository, which this one is; in a private one it is $0.062 a minute, about $1.10 for a build of eighteen minutes. That rate is what the system administrator's page multiplies each team's Mac minutes by (`Workstream:Builds:MacMinuteUsd`), so the page shows what the builds would cost where they are paid for. A team may ask for 30 builds in a day (`Workstream:Builds:PerTeamADay`). An environment with the iPhone also needs a Large desktop, and its saved setup holds the simulator, about 30 GB: $1.50 a month.
 
 A pool of stopped machines was measured and not built: Azure takes as long to start a stopped machine as to make a new one (a middle of about 17 seconds for either, and up to a minute), so its disks would have bought nothing.
 

@@ -4,6 +4,7 @@ using SqlOS.AuthServer.Authentication;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using Workstream.Api.Builds;
 using Workstream.Api.Desktops;
 using Workstream.Api.GitHub;
 using Workstream.Api.Model;
@@ -264,6 +265,7 @@ public static class WorkstreamHosting
         builder.AddDesktops();
         builder.AddModelGateway();
         builder.AddGitHub();
+        builder.AddBuilds();
         builder.AddWorkstreamJobs(connectionString);
         return builder.AddWorkstreamSqlOS(app, connectionString);
     }

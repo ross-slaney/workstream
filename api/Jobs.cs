@@ -22,6 +22,7 @@ public static class Jobs
         builder.Services.AddTransient<DesktopJobs>();
         builder.Services.AddTransient<StorageJobs>();
         builder.Services.AddTransient<TaskEmails>();
+        // BuildJobs is registered with the builds (Builds/Builds.cs).
         // Storage is made when first resolved: by the server below, or by whoever queues a job.
         builder.Services.AddHangfire(configuration => configuration
             .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
@@ -49,6 +50,7 @@ public sealed class RecurringJobsHostedService(IRecurringJobManager recurring) :
     public Task StartAsync(CancellationToken ct)
     {
         recurring.AddOrUpdate<DesktopJobs>(DesktopJobs.SweepId, job => job.SweepAsync(CancellationToken.None), DesktopJobs.SweepCron);
+        recurring.AddOrUpdate<Builds.BuildJobs>(Builds.BuildJobs.SweepId, job => job.SweepAsync(CancellationToken.None), Builds.BuildJobs.SweepCron);
         recurring.AddOrUpdate<StorageJobs>(StorageJobs.ReconcileId, job => job.ReconcileAsync(CancellationToken.None), StorageJobs.ReconcileCron);
         return Task.CompletedTask;
     }

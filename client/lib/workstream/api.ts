@@ -40,6 +40,8 @@ export type TeamUsage = {
   storage: StorageUse[];
   runningDesktops: number;
   maxRunningDesktops: number;
+  /** Minutes a Mac spent building the team's iPhone apps this month. */
+  macBuildMinutes: number;
 };
 
 /**
@@ -220,7 +222,10 @@ export type StorageCost = { kind: string; kept: number; gb: number; gbMonths: nu
 export type SpareNow = { teamId: string; teamName: string; size: string; state: string; since: string };
 
 /** The machines' time this month by purpose and size, the storage kept by kind, and the spares running now. */
-export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; spares: SpareNow[] };
+/** What the Mac that builds iPhone apps cost this month over every team: the builds that ended, their minutes, and those at a Mac minute's price. */
+export type MacCost = { builds: number; minutes: number; usd: number };
+
+export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; spares: SpareNow[]; mac: MacCost | null };
 
 /** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`, `archive`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };

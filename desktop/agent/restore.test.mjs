@@ -116,3 +116,13 @@ test("only the first start of the machine finds no mark", () => {
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test("the iPhone's window is not kept as a page to reopen: it comes back with the phone", () => {
+  const state = {};
+  noteTabs(state, [
+    { type: "page", url: "http://127.0.0.1:7979/0123abcd/" },
+    { type: "page", url: "http://127.0.0.1:4141/" },
+    { type: "page", url: "http://localhost:8081/" },
+  ]);
+  assert.deepEqual(state.tabs, ["http://localhost:8081/"]);
+});

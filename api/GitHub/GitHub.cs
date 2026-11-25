@@ -195,6 +195,20 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
         return (await SendAsync<PullRequest>(request, ct)).HtmlUrl;
     }
 
+    /// <summary>
+    /// Run a workflow of a repository, named by its file, at a branch or tag, with its inputs. GitHub answers
+    /// with nothing: the run starts a moment later. The token needs to be able to write to the repository.
+    /// </summary>
+    public async Task RunWorkflowAsync(string token, GitHubRepositoryName repository, string workflow, string reference, IReadOnlyDictionary<string, string> inputs, CancellationToken ct)
+    {
+        using var request = Request(HttpMethod.Post, $"/repos/{Path(repository)}/actions/workflows/{Uri.EscapeDataString(workflow)}/dispatches", token);
+        request.Content = JsonContent.Create(new RunWorkflow(reference, inputs));
+        using var response = await clients.CreateClient(ClientName).SendAsync(request, ct);
+        if (response.IsSuccessStatusCode) return;
+        var text = await response.Content.ReadAsStringAsync(ct);
+        throw new GitHubRefused(response.StatusCode, $"GitHub answered {(int)response.StatusCode}: {text[..Math.Min(text.Length, 300)]}");
+    }
+
     static string Path(GitHubRepositoryName repository) => $"{Uri.EscapeDataString(repository.Owner)}/{Uri.EscapeDataString(repository.Name)}";
 
     /// <summary>A branch or a file's path in an address: each part escaped, the slashes kept.</summary>
@@ -244,6 +258,7 @@ public sealed class GitHubClient(IHttpClientFactory clients, GitHubOptions optio
     sealed record NewPullRequest(
         [property: JsonPropertyName("title")] string Title, [property: JsonPropertyName("head")] string Head,
         [property: JsonPropertyName("base")] string Base, [property: JsonPropertyName("body")] string Body);
+    sealed record RunWorkflow([property: JsonPropertyName("ref")] string Ref, [property: JsonPropertyName("inputs")] IReadOnlyDictionary<string, string> Inputs);
     sealed record PullRequest([property: JsonPropertyName("html_url")] string HtmlUrl);
 }
 

@@ -83,7 +83,7 @@ const KIND: Record<string, string> = { disk: "Desktops' disks", archive: "Archiv
  * keeps; and the spares running now. Narrow enough for a phone, so both surfaces draw it the same.
  */
 export function CostsCard({ overview, now }: { overview: AdminOverview; now: number }) {
-  const { thisMonth, storage, spares } = overview.machines;
+  const { thisMonth, storage, spares, mac } = overview.machines;
   const machinesTotal = thisMonth.reduce((sum, line) => sum + line.usd, 0);
   const storageTotal = storage.reduce((sum, line) => sum + line.usd, 0);
   return (
@@ -141,6 +141,26 @@ export function CostsCard({ overview, now }: { overview: AdminOverview; now: num
           </tr>
         </tbody>
       </table>
+      {mac && mac.builds > 0 ? (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-border">
+              <th scope="col" className={head}>iPhone builds</th>
+              <th scope="col" className={`${head} text-right`}>Minutes</th>
+              <th scope="col" className={`${head} text-right`}>Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className={cell}>
+                A Mac, <span className="text-muted-foreground">{mac.builds === 1 ? "1 build" : `${mac.builds} builds`}</span>
+              </td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{Math.round(mac.minutes).toLocaleString()}</td>
+              <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{dollars(mac.usd)}</td>
+            </tr>
+          </tbody>
+        </table>
+      ) : null}
       <p className="text-[13px] text-muted-foreground">
         A GB-month is a gigabyte kept for a whole month; what is kept is counted every 15 minutes. A desktop's disk is counted at its full size, an archived task and a saved setup at what is on them.{" "}
         {spares.length === 0

@@ -21,6 +21,7 @@ a person's browser
 
 - **The web app** has no secrets and no database. Public pages (the landing page, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session. Its `/auth/callback` page is where SqlOS sends the browser, with a code, after someone signs in with GitHub.
 - **The API** is one process: the REST API with SqlOS for sign-in and authorization, the relay that carries a desktop's display to the people watching it, the gateway every agent's model calls go through, and the background jobs (Hangfire, in the app's own database) that make, stop and delete desktops.
+- **The Mac** is not a machine Workstream keeps: it is a run of one workflow in Workstream's own repository on GitHub's Mac runners, started by the API when a desktop needs an iPhone app built ("Phones on a desktop").
 - **A desktop** is a Debian virtual machine with the XFCE desktop on a TigerVNC display, made from one image. A machine made from the image starts as it is: nothing provisions it, and it learns what it is for from its user data. In development it is a Docker container built from the same two scripts.
 
 ## What happens when someone starts a task
@@ -156,7 +157,7 @@ The Android emulator runs on every size, on AMD's processors as on Intel's. `/de
 | `Standard_D8as_v7` (AMD EPYC 9V45) | 46 s with the disk already read, up to 180 s cold | 33 s |
 | `Standard_D8as_v6` (AMD EPYC 9V74) | 92 s | 32 s |
 
-Two things were wrong before, and neither was the processor. The emulator stops at once ("QEMU main loop exits abnormally with code 1") when it is started from a folder its user cannot read, such as the root-only folder an Azure run command starts in; that is what made it look as if it ran as root and not as the desktop's person. And the phone `avdmanager` makes by itself has two processors and 2 GB, which with the software renderer a desktop has took three minutes to start and came up with "System UI isn't responding"; the desktop's phone has four processors and 4 GB and a hardware keyboard (`image/phone.sh`). So the emulator wants a Standard or Large desktop; on a Small one it starts, slowly. The bake boots a throwaway phone made the same way, as the desktop's person, with the command the agent is told, and fails unless Android says it has booted and `adb` lists it (`image/check-emulator.sh`); `emulator -accel-check` alone passes even where the emulator cannot start. iPhone and iPad builds and the iOS simulator need macOS and Apple's tools, which no Linux desktop can run. The agent is told so and does the rest of a task.
+Two things were wrong before, and neither was the processor. The emulator stops at once ("QEMU main loop exits abnormally with code 1") when it is started from a folder its user cannot read, such as the root-only folder an Azure run command starts in; that is what made it look as if it ran as root and not as the desktop's person. And the phone `avdmanager` makes by itself has two processors and 2 GB, which with the software renderer a desktop has took three minutes to start and came up with "System UI isn't responding"; the desktop's phone has four processors and 4 GB and a hardware keyboard (`image/phone.sh`). So the emulator wants a Standard or Large desktop; on a Small one it starts, slowly. The bake boots a throwaway phone made the same way, as the desktop's person, with the command the agent is told, and fails unless Android says it has booted and `adb` lists it (`image/check-emulator.sh`); `emulator -accel-check` alone passes even where the emulator cannot start. The iPhone is the next section.
 
 `host.docker.internal` is the desktop, from its containers and from itself. On a Mac, Docker Desktop gives every container that name for the computer it runs on, and projects' scripts, compose files and settings use it; Docker Engine on Linux has no such name and no setting that adds one to every container. A desktop gives it without any change to a project (`image/configure.sh`):
 
@@ -170,6 +171,62 @@ The bake checks it from a network namespace joined to Docker's bridge, which is 
 A desktop started again after a stop starts Docker when it has containers, so the ones a project told Docker to restart (a database with a restart policy) come back with it.
 
 The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, and deliver changes on a branch of their own as a pull request opened with `gh`. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
+
+## Phones on a desktop
+
+An environment can give its desktops two more apps (`desktop/apps.json`): `android`, the Android phone above in a window of its own, and `iphone`, an iPhone simulator. Each has a button on the panel, comes up with the desktop, and is there for the person to click and type on. The agent uses them the way a person does: it opens the app, reads the screen and taps through what it changed, and is told to check a change on every surface the desktop has (`agent/phones.mjs`).
+
+One command is the same for the agent, a terminal and the panel's buttons (`agent/phone.mjs`, on the PATH as `phone`):
+
+| | |
+| --- | --- |
+| `phone android start` | Starts the emulator and waits until Android has booted. The Android app is built on the desktop, by the project's own tools. |
+| `phone ios start` | Boots the iPhone and opens its window. |
+| `phone ios run <folder>` | Gets the project's iPhone app (below), installs it and opens it. |
+| `phone ios snapshot`, `tap`, `type`, `scroll`, `open`, `screenshot`, `logs` | Reads the iPhone's screen as lines of text with a reference each, and acts on it. |
+
+### The iPhone simulator
+
+It is Apple's own iOS runtime, run on Linux by [x86Sim](https://github.com/x86sim/x86sim), which translates the runtime's arm64 code and draws with Mesa's software Vulkan, and driven by [agent-sim](https://github.com/Developing-Gamer/agent-sim), which gives the screen as text, takes taps and typing, and streams the screen to a browser. The image has agent-sim, one release checked against its hash (`image/configure.sh`), and the packages the simulator needs. The simulator itself is not in the image: it is x86Sim, the runtime (8 GB, downloaded from Apple) and one phone, 30 GB in all, and only some desktops want it.
+
+- **Installing it** (`phone ios setup`) is the first line of the setup of an environment that has the iPhone, before the environment's own script (`setupScriptFor`). So it is done once, on the machine that prepares the environment, and is in the saved setup every task starts from. Such an environment has a setup even with no repository and no script (`WorkEnvironment.HasSetup`).
+- **Size.** The phone takes 9 GB of memory, beside the project's own stack, so the iPhone needs a Large desktop, and an environment with it on a smaller one is refused.
+- **Its window** is a Chromium window on agent-sim's stream, which listens on the desktop's own loopback address with a token in its address. Nothing of the phone is reachable from outside the desktop: a person sees it as they see everything else, on the desktop's display through the API's relay.
+- **Where it runs.** agent-sim keeps the phone as a service of the person's own systemd, which the desktop's session is not part of. The image keeps that systemd running (lingering), and `phone` reaches it from wherever it is called.
+
+Measured on a `Standard_D8as_v7` (AMD EPYC 9V45) running Debian 13, on 24 November 2026: installing took 17 minutes, the phone's first boot 209 seconds and later boots 26 to 35, installing an app of 179 MB took 48 seconds, and a change to a screen's code reached an Expo development build from Metro on the same machine in about two and a half seconds. In about an hour of use the phone stopped answering once, and `phone ios stop` and `start` brought it back in half a minute. Siri does not open on it, and it has no debugger.
+
+Apple's simulator runtime comes with Apple's licence terms, which whoever runs a deployment should read for themselves.
+
+### The iPhone app is built on a Mac
+
+An iPhone app is built with Xcode, which needs macOS. A desktop sends the app's source to the API, and the API has it built on a Mac and keeps the result for the team ([the core model](core-model.md#build-an-iphone-app) has who may do what).
+
+```text
+the desktop                        the API                                the Mac
+phone ios build
+  hash of the native code   ─────► the team's build for that hash?
+                             ◄───── done: here is the app
+                                    or: waiting for its source
+  the source, one archive   ─────► kept in the team's storage
+                                    asks GitHub to run ios-build.yml ───► a new Mac, for this build
+                                                                 ◄─────── take the build, with the builder's key
+                                    the source ─────────────────────────► builder/ios.sh
+                                                                 ◄─────── the log, the app, how it ended
+  asks every ten seconds     ◄───── done: here is the app
+install, open
+```
+
+- **The hash** is what makes a build reusable. For an Expo app it is Expo's own fingerprint of the native project; for any other, a hash of the files that name its packages, configure the app or are native source. The kind of app, its folder and the Mac's recipe version (`RECIPE` in `phone.mjs`) go into it too. JavaScript and Dart are not in it: they reach the phone from the desktop's own server, so a task that changes only those takes the build the team already has.
+- **The source** is the files git knows of or would add, from the folder the app's packages are installed from: the app's own folder when it has a lockfile, or the nearest folder above it that has one, for an app in a workspace. Nothing git ignores is sent.
+- **The Mac** is `.github/workflows/ios-build.yml` in Workstream's own repository, on GitHub's `xcode-27` runner. `builder/ios.sh` builds the Debug configuration for the arm64 simulator: an Expo app (`expo prebuild`, then `xcodebuild`), a React Native app (`pod install`, then `xcodebuild`), a Flutter app or a plain Xcode project. Only the Expo path has been run on a real project so far.
+- **Nothing of a project is in the run's log.** That repository is public, and so are its runs. The build's whole output goes to a file that is sent to the API, and nothing is uploaded as an artifact; the run says that a build ran, for how long and whether it worked. The run is told the build's id and the API's address, which are no secret; its key is the GitHub environment's `BUILDER_KEY` secret, the same value the API was deployed with.
+- **The files** (the source until the build ends, then the app and the log) are in a storage account of the deployment's own, private, read and written only by the API's identity (`AzureBuildFiles`, `infra/data.bicep`), under the team's id. In development and the tests they are in a folder.
+- **Who starts the Mac.** The request to GitHub needs a token that may run the workflow. A deployment can set one (`Workstream:Builds:Token`); without it the API uses the system administrator's own GitHub token, from their sign-in with GitHub, since the deployment's administrator is who owns the repository.
+
+Measured on 24 November 2026 with Genius, an Expo 58 app on React Native 0.88: the source was 25 MB as an archive, the Mac built it with Xcode 27.2 in 1,070 seconds, and the app came back as 38 MB.
+
+A Mac that GitHub runs is new for each build, so no two teams' builds ever share a machine. GitHub's terms limit what its runners may be used for; a deployment that builds for many teams should read them, and can put another Mac behind `IMacBuilder` without changing anything a desktop does.
 
 ## What the desktops cost
 
@@ -187,6 +244,7 @@ The rates are one table, `DesktopOptions.Prices` (`Workstream:Desktops:Prices`),
 | A running machine, by size | $0.091 (small), $0.182 (standard), $0.364 (large) an hour |
 | A desktop's disk (`disk`) | $0.075 a gigabyte a month: a Standard SSD, $4.80 for 64 GiB and $9.60 for 128 |
 | An archived task (`archive`), a saved setup (`setup`) | $0.05 a gigabyte a month: a full snapshot on standard storage |
+| A minute of the Mac, for an iPhone build | $0.062 (`Workstream:Builds:MacMinuteUsd`): GitHub's price for its standard Mac runner in a private repository. In a public one, as Workstream's is, GitHub does not charge for it. |
 
 The system administrator's page multiplies each line by its rate. A team's Usage page shows the same lines as amounts, hours by size and GB-months by kind, with no dollars: there is no customer price yet, and when there is one it is a second column in this table, not new rows. A spare's and a preparing machine's own disks last minutes and are not counted.
 
@@ -217,6 +275,8 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 - A machine preparing an environment holds a key that reads that environment's setup, gets the GitHub token of whoever last saved the environment while its attempt lasts, and says how it went, and nothing else: no task, no conversation, no model. Its disk is saved for the environment's tasks only after it has removed the variables, the logs and the browser's profile, and its key is in its user data, never on the disk. What the setup script itself leaves on the disk is in the save, and every task of the environment starts with it.
 - A container on a desktop reaches that desktop's own loopback address through `host.docker.internal`, the agent's window and the browser's debugging port included. That is no more than any program on the desktop can do, and a container there is the task's own: nothing outside the machine can use that way in (the rule matches Docker's bridges only, and the network admits only the API's relay).
 - An environment's variables are stored protected and are sent only to a desktop made from that environment. They are on that desktop in plain text, because the work needs them there: anyone on the team can read them by opening the desktop.
+- It can have an iPhone app built: the source it sends for that goes to the API, and from there to a Mac that GitHub runs, for as long as the build takes. It can read its own team's builds, by a hash or an id, and nobody else's.
+- The Mac holds one credential, the builder's key, which is a secret of the deployment and of the workflow's GitHub environment. It reaches a build's source only between taking that build and ending it, and nothing else of any team: no task, no conversation, no model, no GitHub token.
 
 ## What is kept where
 
@@ -227,4 +287,5 @@ A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 | A desktop's disk | The work itself: the repository, files, the browser's profile, the agent's session, and what to start again after a stop. It goes with the task. |
 | A task's archive (a snapshot in the desktops' group) | A copy of that disk, in place of the disk, while the task is archived. It goes with the task. |
 | A saved setup (a snapshot in the desktops' group) | An environment's repository and whatever its setup script installed, and nothing of any task. It goes with the environment. |
+| The builds' storage account (in the deployment's own group) | The source of an iPhone build until the Mac is done with it, then the app and the Mac's log, under the team's id, for as long as a desktop keeps taking the app and thirty days more. |
 | The browser | The session's tokens, and which team was open last. |

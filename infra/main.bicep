@@ -41,6 +41,16 @@ param modelKey string = ''
 param gitHubSignInClientId string = ''
 @secure()
 param gitHubSignInClientSecret string = ''
+@description('iPhone builds: the key the Mac that builds them calls the API with, wsb_ and 64 hex characters, the secret BUILDER_KEY on the GitHub environment (scripts/setup-azure.sh makes it). The same secret is what .github/workflows/ios-build.yml reads. Empty builds no iPhone apps.')
+@secure()
+param builderKey string = ''
+@description('The repository whose ios-build.yml workflow is the Mac, owner/name: this one.')
+param buildsRepository string = ''
+@description('The branch or tag that workflow runs from: the release being deployed, or the branch a stage was deployed from.')
+param buildsRef string = 'main'
+@description('Optional: a GitHub token that may run that workflow, the secret BUILDER_GITHUB_TOKEN. Without it the system administrator\'s own GitHub token is used, from their sign-in with GitHub.')
+@secure()
+param buildsToken string = ''
 
 var production = empty(stage)
 var shared = 'workstream'
@@ -142,6 +152,13 @@ module api 'api.bicep' = {
     modelKey: modelKey
     gitHubSignInClientId: gitHubSignInClientId
     gitHubSignInClientSecret: gitHubSignInClientSecret
+    buildsContainer: data.outputs.buildsContainer
+    builderKey: builderKey
+    buildsRepository: buildsRepository
+    buildsRef: buildsRef
+    buildsToken: buildsToken
+    // The GitHub environment the Mac's workflow reads its key from.
+    buildsStage: production ? 'production' : 'staging'
   }
 }
 

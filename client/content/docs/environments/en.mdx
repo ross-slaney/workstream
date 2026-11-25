@@ -2,7 +2,7 @@
 title: "Environments"
 description: "What a task's desktop starts with: a repository, a setup script, variables, apps and a size, set in Workstream or kept in the repository as workstream.yml."
 order: 4
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 An environment is what a task's desktop starts with. A team sets its project up once as an environment, and every task started from it gets the same desktop. Everyone on the team can start tasks from the team's environments and edit them, on the Environments page.
@@ -51,7 +51,7 @@ instructions: |             # extra instructions for the agent
   Run npm test before you say you are done.
 ```
 
-Every setting is optional. One the file leaves out is what a new environment has: the Standard size, the default apps, and no setup script, variables or instructions. The apps are `chrome`, `vscode`, `terminal`, `files`, `writer`, `calc` and `impress`.
+Every setting is optional. One the file leaves out is what a new environment has: the Standard size, the default apps, and no setup script, variables or instructions. The apps are `chrome`, `vscode`, `terminal`, `files`, `writer`, `calc`, `impress`, `android` and `iphone`. The last two are [phones](/docs/desktops#phones), and `iphone` needs the Large size.
 
 The file is read strictly. A setting Workstream does not know, a size or app it does not have, a variable name a shell cannot read, or YAML that does not parse is named in the form with its line, and nothing is filled from the file until it is fixed.
 

@@ -61,6 +61,47 @@ resource firewall 'Microsoft.Sql/servers/firewallRules@2023-08-01' = {
   properties: { startIpAddress: '0.0.0.0', endIpAddress: '0.0.0.0' }
 }
 
+// Where the iPhone builds' files are kept: the source a desktop sends, and the app and the log a Mac hands
+// back (api/Builds/Builds.cs). Private: no public access and no account key, only the runtime identity,
+// which reads and writes the one container as Storage Blob Data Contributor. The API removes what it no
+// longer needs, so there is no lifecycle rule.
+resource builds 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'wsb${uniqueString(subscription().id, resourceGroup().name)}'
+  location: location
+  kind: 'StorageV2'
+  sku: { name: 'Standard_LRS' }
+  properties: {
+    accessTier: 'Hot'
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+  }
+}
+
+resource buildsBlobs 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: builds
+  name: 'default'
+}
+
+resource buildsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: buildsBlobs
+  name: 'builds'
+  properties: { publicAccess: 'None' }
+}
+
+// Storage Blob Data Contributor, on this account alone.
+resource buildsAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: builds
+  name: guid(builds.id, identity.id, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+  properties: {
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+  }
+}
+
+output buildsContainer string = '${builds.properties.primaryEndpoints.blob}builds'
 output identityId string = identity.id
 output principalId string = identity.properties.principalId
 output clientId string = identity.properties.clientId

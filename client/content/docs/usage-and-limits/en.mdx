@@ -2,7 +2,7 @@
 title: "Usage and limits"
 description: "What a team uses and what limits it: a monthly model allowance, desktop time counted per size, storage, and how many desktops run at once."
 order: 7
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 Usage is counted per team. Everyone on the team can see it on the Usage page. Workstream has no prices and takes no payment yet, so these are limits, not a bill.
@@ -12,6 +12,7 @@ Usage is counted per team. Everyone on the team can see it on the Usage page. Wo
 | Models | The cost of every model call the team's agents make, in dollars | An allowance per team per calendar month |
 | Desktop time | Hours a desktop is running, counted separately for each size | None of its own; the limit is on how many run at once |
 | Storage | The disks of paused desktops, archived desktops and saved setups | None today |
+| iPhone builds | Minutes a Mac spends building the team's iPhone apps | 30 builds asked for in a day |
 | Desktops at once | Desktops running at the same moment | A number per team |
 
 ## Models
@@ -33,6 +34,12 @@ Three kinds of storage are counted, in GB-months:
 - each environment's saved setup.
 
 The Usage page shows how much the team has of each. To use less, delete tasks you no longer need. See [Running, paused, archived, deleted](/docs/running-paused-archived).
+
+## iPhone builds
+
+An iPhone app is built on a Mac, which a desktop asks for when the app's native code has changed. The time the Mac spends is counted in minutes, whether or not the build worked. A team that has had no app built does not see this on its Usage page.
+
+A team can ask for 30 builds in a day. A desktop that asks for another is told the limit is reached, and can still take any app the team already has.
 
 ## Desktops at once
 

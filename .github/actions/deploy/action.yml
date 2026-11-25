@@ -38,6 +38,15 @@ inputs:
     default: ''
   github-oauth-client-secret:
     default: ''
+  builder-key:
+    description: iPhone builds (infra/README.md, "iPhone builds"). The key the Mac that builds them calls the API with, the environment's BUILDER_KEY secret; without it this deployment builds no iPhone apps.
+    default: ''
+  builds-ref:
+    description: The branch or tag the Mac's workflow (.github/workflows/ios-build.yml) runs from. A release's own tag, or the branch a stage is deployed from.
+    default: main
+  builds-token:
+    description: Optional. A GitHub token that may run that workflow; without it the system administrator's own GitHub token is used.
+    default: ''
 outputs:
   origin:
     description: Where the web app answers.
@@ -145,7 +154,12 @@ runs:
         DESKTOPS_HIBERNATE: ${{ inputs.desktops-hibernate }}
         GH_OAUTH_CLIENT_ID: ${{ inputs.github-oauth-client-id }}
         GH_OAUTH_CLIENT_SECRET: ${{ inputs.github-oauth-client-secret }}
+        BUILDER_KEY: ${{ inputs.builder-key }}
+        BUILDS_REPOSITORY: ${{ github.repository }}
+        BUILDS_REF: ${{ inputs.builds-ref }}
+        BUILDS_TOKEN: ${{ inputs.builds-token }}
       run: |
+        [ -n "$BUILDER_KEY" ] || echo "::notice::No BUILDER_KEY is set: this deployment builds no iPhone apps (infra/README.md, \"iPhone builds\")."
         # Once more on failure: a fresh installation's SQL administrators group (data.bicep) cannot take its
         # members in the same second Entra makes it, and the deployment is idempotent.
         for attempt in 1 2; do
@@ -154,7 +168,8 @@ runs:
                administratorEmail="$ADMINISTRATOR_EMAIL" administratorPassword="$ADMINISTRATOR_PASSWORD" \
                modelEndpoint="$MODEL_ENDPOINT" modelKey="$MODEL_KEY" desktopImageVersion="$DESKTOP_IMAGE_VERSION" \
                desktopsHibernate="$DESKTOPS_HIBERNATE" \
-               gitHubSignInClientId="$GH_OAUTH_CLIENT_ID" gitHubSignInClientSecret="$GH_OAUTH_CLIENT_SECRET" && break
+               gitHubSignInClientId="$GH_OAUTH_CLIENT_ID" gitHubSignInClientSecret="$GH_OAUTH_CLIENT_SECRET" \
+               builderKey="$BUILDER_KEY" buildsRepository="$BUILDS_REPOSITORY" buildsRef="$BUILDS_REF" buildsToken="$BUILDS_TOKEN" && break
           [ "$attempt" = 1 ] || exit 1
           echo "::warning::The deployment failed once; deploying again."
         done

@@ -225,9 +225,9 @@ public static partial class WorkstreamApi
         return outcome.IsOk ? Results.Ok(await EnvironmentDtoAsync(outcome.Value!, db, desktops, ct)) : ToResult(outcome);
     }
 
-    static async Task<IResult> GetAdminOverview(HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, TimeProvider clock, CancellationToken ct)
+    static async Task<IResult> GetAdminOverview(HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, Builds.BuildOptions builds, TimeProvider clock, CancellationToken ct)
     {
-        var outcome = await Operations.AdminOverviewAsync(CallerOf(http), db, fga, desktops, clock, ct);
+        var outcome = await Operations.AdminOverviewAsync(CallerOf(http), db, fga, desktops, builds, clock, ct);
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 

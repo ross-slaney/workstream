@@ -72,7 +72,11 @@ public static partial class WorkstreamApi
         app.Map(DesktopRelay.Route, DesktopRelay.HandleAsync).ExcludeFromDescription();
 
         // A task's desktop, with its key: its own exchanges, and its agent's model calls.
-        MapDesktop(app.MapGroup("/api/desktop").RequireAuthorization(DesktopKeys.Policy));
+        var desktop = app.MapGroup("/api/desktop").RequireAuthorization(DesktopKeys.Policy);
+        MapDesktop(desktop);
+        MapDesktopBuilds(desktop);
+        // The Mac that builds iPhone apps, with its key (Builds/Builds.cs).
+        MapBuilder(app.MapGroup("/api/builder").RequireAuthorization(Builds.BuilderKeys.Policy));
         app.Map($"{ModelGateway.Path}/{{**path}}", ModelGateway.HandleAsync).RequireAuthorization(DesktopKeys.Policy).ExcludeFromDescription();
         return app;
     }

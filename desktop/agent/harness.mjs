@@ -84,7 +84,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: [onThisDesktop(workspace), projectTools(), restored, setupEnded(setupResult), noSetup(setup), projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
+      append: [onThisDesktop(workspace), projectTools(setup.apps), restored, setupEnded(setupResult), noSetup(setup), projectWork(setup.repository), setup.instructions].filter(Boolean).join("\n\n"),
     },
     // The repository's own instructions and skills (CLAUDE.md, .claude/skills) apply, as they would on a laptop.
     settingSources: ["user", "project", "local"],

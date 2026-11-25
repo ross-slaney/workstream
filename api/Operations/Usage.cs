@@ -24,7 +24,7 @@ public sealed record StorageUse(string Kind, decimal Gb, double GbMonths);
 /// </summary>
 public sealed record TeamUsage(
     DateTimeOffset Since, decimal ModelSpentUsd, decimal ModelAllowanceUsd,
-    IReadOnlyList<SizeHours> DesktopHours, IReadOnlyList<StorageUse> Storage, int RunningDesktops, int MaxRunningDesktops);
+    IReadOnlyList<SizeHours> DesktopHours, IReadOnlyList<StorageUse> Storage, int RunningDesktops, int MaxRunningDesktops, double MacBuildMinutes = 0);
 
 /// <summary>How many desktops were running at a moment.</summary>
 public sealed record RunningPoint(DateTimeOffset At, int Running);
@@ -59,7 +59,10 @@ public sealed record StartTimes(string Source, int Starts, double? ScreenSeconds
 /// What the desktops cost Workstream this month: the machines' time by purpose and size, the storage kept by
 /// kind, and the spares running now.
 /// </summary>
-public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, IReadOnlyList<StorageCost> Storage, IReadOnlyList<SpareNow> Spares);
+public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, IReadOnlyList<StorageCost> Storage, IReadOnlyList<SpareNow> Spares, MacCost? Mac = null);
+
+/// <summary>What the Mac that builds iPhone apps cost this month over every team: how many builds ended, their minutes, and those at a Mac minute's price.</summary>
+public sealed record MacCost(int Builds, double Minutes, decimal Usd);
 
 /// <summary>The system administrator's page: what is running now, the last day's curve, each team's month, what the desktops cost and how long they take to start.</summary>
 public sealed record AdminOverview(
@@ -105,7 +108,7 @@ public static partial class Operations
                 Math.Round(StorageRun.GbMonths(kind.Select(x => (x.Gb, x.StartedAt, x.EndedAt)), since, now), 3))).ToList();
         return Outcome<TeamUsage>.Ok(new TeamUsage(
             since, await ModelSpentAsync(db, teamId, since, ct), team.ModelAllowanceUsd, hours, storage,
-            await RunningDesktopsAsync(db, teamId, ct), team.MaxRunningDesktops));
+            await RunningDesktopsAsync(db, teamId, ct), team.MaxRunningDesktops, await MacMinutesAsync(db, teamId, since, ct)));
     }
 
     /// <summary>Sizes from the smallest up, and kinds in the order the product lists them; anything unknown goes last.</summary>
@@ -126,7 +129,7 @@ public static partial class Operations
     /// Everything the system administrator's page shows. One check, on root; the numbers are sums over every
     /// team, which SqlOS has no authorized form of.
     /// </summary>
-    public static async Task<Outcome<AdminOverview>> AdminOverviewAsync(Caller caller, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, TimeProvider clock, CancellationToken ct)
+    public static async Task<Outcome<AdminOverview>> AdminOverviewAsync(Caller caller, WorkstreamDbContext db, ISqlOSFgaAuthService fga, DesktopOptions desktops, Builds.BuildOptions builds, TimeProvider clock, CancellationToken ct)
     {
         if (!await fga.HasCapabilityAsync(caller.PrincipalId, Permissions.AdminView)) return Outcome<AdminOverview>.Forbidden("This page is for system administrators.");
         var now = clock.GetUtcNow();
@@ -190,6 +193,11 @@ public static partial class Operations
                 Middle(source.Where(x => x.ReadyAt is not null).Select(x => (x.ReadyAt!.Value - x.StartedAt).TotalSeconds))))
             .OrderBy(x => x.Source).ToList();
 
+        // The Mac's time: every build that ended this month, at a Mac minute's price.
+        var built = await db.Builds.AsNoTracking().Where(x => x.EndedAt >= since).Select(x => x.MacSeconds).ToListAsync(ct);
+        var macMinutes = Math.Round(built.Sum() / 60.0, 1);
+        var mac = new MacCost(built.Count, macMinutes, Math.Round((decimal)macMinutes * builds.MacMinuteUsd, 2));
+
         return Outcome<AdminOverview>.Ok(new AdminOverview(
             running.Count, teams.Count, await db.Set<SqlOSUser>().CountAsync(x => x.IsActive, ct), tasks.Values.Sum(),
             spent.Values.Sum(), Math.Round(HoursOf(runs.Select(x => (x.StartedAt, x.EndedAt)), since, now), 2),
@@ -197,7 +205,7 @@ public static partial class Operations
             [.. running.Select(x => new RunningDesktop(x.Id, x.Title, x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.AgentWorking, x.StateChangedAt))],
             numbers,
             new MachineCosts(costs, storage,
-                [.. spares.Select(x => new SpareNow(x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.CreatedAt))]),
+                [.. spares.Select(x => new SpareNow(x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.CreatedAt))], mac),
             starts));
     }
 

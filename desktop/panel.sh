@@ -12,6 +12,16 @@ ROOT=/opt/workstream
 apps="$*"
 [ -n "$apps" ] || apps=$(jq -r '.[] | select(.default) | .id' "$ROOT/apps.json")
 
+# In a session that is up, the panel is stopped before anything is written: a running panel writes its own
+# launchers back as it goes, over the ones written here.
+session=no
+if [ -n "${DISPLAY:-}" ] && pgrep -x xfwm4 >/dev/null 2>&1; then
+  session=yes
+  xfce4-panel --quit >/dev/null 2>&1 || true
+  for _ in $(seq 50); do pgrep -x xfce4-panel >/dev/null 2>&1 || break; sleep 0.1; done
+  pkill -x xfce4-panel 2>/dev/null || true
+fi
+
 panel="$HOME/.config/xfce4/panel"
 config="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
 mkdir -p "$panel" "$(dirname "$config")"
@@ -66,9 +76,14 @@ cat > "$config" <<XML
 </channel>
 XML
 
-# A panel that is already running reads its settings from the settings service, which read this file when it
-# started: both are started again, the service first, so the panel comes back with what was just written.
-if pgrep -x xfce4-panel >/dev/null 2>&1; then
+# The settings service read this file when it started, so it is started again, and then the panel. The panel
+# is looked for afterwards and started once more if it is not there: asked to restart itself while the
+# settings service was going away, it sometimes did not come back, and the desktop was left without one.
+if [ "$session" = yes ]; then
   pkill -x xfconfd 2>/dev/null || true
-  xfce4-panel --restart >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5; do
+    pgrep -x xfce4-panel >/dev/null 2>&1 && break
+    (setsid xfce4-panel --disable-wm-check >/dev/null 2>&1 &)
+    sleep 2
+  done
 fi
