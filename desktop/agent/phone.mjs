@@ -203,7 +203,9 @@ export async function build(folder, { again = false } = {}) {
     const logFile = path.join(kept, "build.log");
     writeFileSync(logFile, text);
     throw Object.assign(new Error(`The iPhone app did not build: ${asked.failure ?? "the log says why."}`), {
-      log: text.split("\n").slice(-60).join("\n"), logFile, hint: "Fix what the log says, then run it again with --again.",
+      // A build that never reached a Mac has no log, and nothing in the project to fix.
+      log: text.trim() ? text.split("\n").slice(-60).join("\n") : null, logFile,
+      hint: text.trim() ? "Fix what the log says, then run it again with --again." : "Once that is put right, run it again with --again.",
     });
   }
   mkdirSync(kept, { recursive: true });
