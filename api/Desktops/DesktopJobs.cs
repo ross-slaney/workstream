@@ -58,7 +58,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 // is a copy of the one that was archived. Any other new machine starts from the environment's
                 // saved setup, or the image.
                 spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key,
-                    Save: task.Archive is null ? await SaveForAsync(scope, db, task, ct) : null, Archive: task.Archive);
+                    Save: task.Archive is null ? await SaveForAsync(scope, db, task, ct) : null, Archive: task.Archive,
+                    Iphone: await HasIphoneAsync(db, task.EnvironmentId, ct));
             }
         }
         var machine = spec?.Name ?? existing!;
@@ -252,7 +253,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             // Its key opens nothing until a task takes the spare: the account is granted nothing here.
             var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), spare.Id, spare.TeamId, ct);
             await db.SaveChangesAsync(ct);
-            spec = new DesktopSpec(DesktopHosting.NameFor(spare.Id), spare.Id, spare.TeamId, spare.Size, options.ApiUrl, key, MachinePurpose.Spare);
+            spec = new DesktopSpec(DesktopHosting.NameFor(spare.Id), spare.Id, spare.TeamId, spare.Size, options.ApiUrl, key, MachinePurpose.Spare,
+                Iphone: await HasIphoneAsync(db, spare.EnvironmentId, ct));
         }
 
         DesktopPlace place;
@@ -335,6 +337,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         }
         if (machine is not null) await host.DeleteAsync(machine, ct);
     }
+
+    /// <summary>Whether the environment's desktops come with the iPhone, and so start from the image that has its simulator.</summary>
+    static async Task<bool> HasIphoneAsync(WorkstreamDbContext db, string environmentId, CancellationToken ct) =>
+        await db.Environments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == environmentId, ct) is { } environment && environment.Apps.Contains(AppCatalog.Iphone);
 
     /// <summary>
     /// What a task's new machine starts from: the environment's saved setup when it is good for the
@@ -422,7 +428,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 // Another job began it in the same moment.
                 return;
             }
-            spec = new DesktopSpec(DesktopHosting.NameFor(runId), desktopId, environment.TeamId, environment.Size, options.ApiUrl, key, MachinePurpose.Prepare);
+            spec = new DesktopSpec(DesktopHosting.NameFor(runId), desktopId, environment.TeamId, environment.Size, options.ApiUrl, key, MachinePurpose.Prepare,
+                Iphone: environment.Apps.Contains(AppCatalog.Iphone));
         }
 
         DesktopPlace place;

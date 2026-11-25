@@ -1,0 +1,55 @@
+name: Add the iPhone simulator to the desktops' image
+description: >-
+  Makes a machine from one version of the desktops' image, installs the iPhone simulator on it
+  (desktop/image/iphone.sh), and captures it into the gallery's machine-iphone definition as the same version.
+  An environment with the iPhone makes its desktops from that image, so nothing is installed when a task or an
+  environment starts. The builder is deleted whether or not it worked. Expects azure/login and a checkout of
+  the commit being released.
+inputs:
+  version:
+    description: The version of the desktops' image to start from, which is also the version published.
+    required: true
+  location:
+    default: westus3
+runs:
+  using: composite
+  steps:
+    - name: Install the simulator on a machine made from the image
+      shell: bash
+      env:
+        BUILDER: workstream-iphone-image-${{ github.run_id }}
+        LOCATION: ${{ inputs.location }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # The definition is declared with the gallery; a deployment made before it existed gets it here.
+        az deployment group create -g workstream -n gallery -f infra/gallery.bicep -o none --only-show-errors
+        image=$(az sig image-version show -g workstream --gallery-name workstream --gallery-image-definition machine \
+          --gallery-image-version "$VERSION" --query id -o tsv)
+        az group create -n "$BUILDER" -l "$LOCATION" --tags project=workstream purpose=image-build -o none
+        # The same builder a bake uses (infra/image-builder.bicep), made from the image instead of from Debian, and
+        # the size of a Large desktop, which is what the simulator runs on.
+        az deployment group create -g "$BUILDER" -n builder -f infra/image-builder.bicep -o none --only-show-errors \
+          -p fromImage="$image" size=Standard_D8as_v7
+        # The script's output comes back when it ends; it prints the last line only if every step ran.
+        az vm run-command invoke -g "$BUILDER" -n builder --command-id RunShellScript --scripts @desktop/image/iphone.sh \
+          --query "value[0].message" -o tsv | tee iphone.log
+        grep -q "WORKSTREAM IPHONE IMAGE OK" iphone.log
+    - name: Publish it
+      shell: bash
+      env:
+        BUILDER: workstream-iphone-image-${{ github.run_id }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        az vm deallocate -g "$BUILDER" -n builder -o none
+        az sig image-version create -g workstream --gallery-name workstream --gallery-image-definition machine-iphone \
+          --gallery-image-version "$VERSION" --virtual-machine "$(az vm show -g "$BUILDER" -n builder --query id -o tsv)" \
+          --replica-count 1 --storage-account-type Standard_LRS -o none
+        echo "### The image with the iPhone, \`$VERSION\`, published in \`machine-iphone\`" >> "$GITHUB_STEP_SUMMARY"
+    - name: Delete the builder
+      if: always()
+      shell: bash
+      env:
+        BUILDER: workstream-iphone-image-${{ github.run_id }}
+      run: az group delete -n "$BUILDER" --yes --no-wait

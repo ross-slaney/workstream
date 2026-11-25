@@ -52,6 +52,26 @@ public sealed class AzureDesktopHostTests
     }
 
     [TestMethod]
+    public async Task A_machine_of_an_environment_with_the_iPhone_is_made_from_the_image_that_has_its_simulator()
+    {
+        static string Image(FakeAzure azure) => Made(azure)["storageProfile"]!["imageReference"]!["id"]!.GetValue<string>();
+        const string withIphone = "/images/machine-iphone/versions/1.0.0";
+
+        // A deployment with such an image: the machine that wants the iPhone starts from it, and no other does.
+        var (host, azure) = Played(hibernate: false, options => options.Azure.IphoneImageId = withIphone);
+        await host.CreateAsync(Spec() with { Iphone = true }, default);
+        Assert.AreEqual(withIphone, Image(azure));
+        (host, azure) = Played(hibernate: false, options => options.Azure.IphoneImageId = withIphone);
+        await host.CreateAsync(Spec(), default);
+        Assert.AreEqual("/images/machine/versions/1.0.0", Image(azure));
+
+        // A deployment without one: the machine starts from the one image there is, and its setup installs the simulator.
+        (host, azure) = Played(hibernate: false);
+        await host.CreateAsync(Spec() with { Iphone = true }, default);
+        Assert.AreEqual("/images/machine/versions/1.0.0", Image(azure));
+    }
+
+    [TestMethod]
     public async Task With_hibernation_a_machine_is_made_to_hibernate_and_a_stop_hibernates_it()
     {
         var (host, azure) = Played(hibernate: true, options => options.Azure.Sizes[DesktopSizes.Standard] = "Standard_D4as_v6");

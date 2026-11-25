@@ -55,3 +55,24 @@ resource hibernating 'Microsoft.Compute/galleries/images@2024-03-03' = {
     ]
   }
 }
+
+// The same image with the iPhone simulator already installed (desktop/image/iphone.sh): x86Sim, Apple's iOS
+// runtime and one phone, 30 GB more. An environment with the iPhone makes its desktops from it, so nothing is
+// installed when a task or an environment starts. Each of its versions is made from the same version of
+// `machine` (.github/actions/add-iphone-to-image).
+resource withIphone 'Microsoft.Compute/galleries/images@2024-03-03' = {
+  parent: gallery
+  name: 'machine-iphone'
+  location: location
+  properties: {
+    osType: 'Linux'
+    osState: 'Specialized'
+    hyperVGeneration: 'V2'
+    architecture: 'x64'
+    identifier: { publisher: 'workstream', offer: 'machine', sku: 'debian-13-iphone' }
+    features: [
+      { name: 'SecurityType', value: 'TrustedLaunch' }
+      { name: 'DiskControllerTypes', value: 'SCSI, NVMe' }
+    ]
+  }
+}

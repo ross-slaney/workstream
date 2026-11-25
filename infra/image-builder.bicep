@@ -11,7 +11,12 @@ param location string = resourceGroup().location
 param trustedLaunch bool = true
 @secure()
 @description('Nobody signs in to the builder. Azure wants an account all the same.')
-param adminPassword string
+param adminPassword string = ''
+@description('A version of the gallery\'s own image to start from, for the builder the iPhone simulator is added to (.github/actions/add-iphone-to-image). Empty starts from Debian. Such an image is specialized, so the machine is what the image was and is given no account.')
+param fromImage string = ''
+@description('The builder\'s size. The one the simulator is added to is a Large desktop\'s machine, which is what the simulator runs on.')
+param size string = 'Standard_D4as_v7'
+
 
 resource rules 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   name: 'builder'
@@ -51,12 +56,12 @@ resource builder 'Microsoft.Compute/virtualMachines@2024-11-01' = {
   name: 'builder'
   location: location
   properties: {
-    hardwareProfile: { vmSize: 'Standard_D4as_v7' }
+    hardwareProfile: { vmSize: size }
     storageProfile: {
-      imageReference: { publisher: 'Debian', offer: 'debian-13', sku: '13-gen2', version: 'latest' }
+      imageReference: empty(fromImage) ? { publisher: 'Debian', offer: 'debian-13', sku: '13-gen2', version: 'latest' } : { id: fromImage }
       osDisk: { createOption: 'FromImage', diskSizeGB: 64, managedDisk: { storageAccountType: 'Premium_LRS' } }
     }
-    osProfile: { computerName: 'builder', adminUsername: 'builder', adminPassword: adminPassword }
+    osProfile: empty(fromImage) ? { computerName: 'builder', adminUsername: 'builder', adminPassword: adminPassword } : null
     // Left out, not set to Standard: Azure takes that word only on a subscription that asked to be allowed it.
     securityProfile: trustedLaunch
       ? { securityType: 'TrustedLaunch', uefiSettings: { secureBootEnabled: true, vTpmEnabled: true } }
