@@ -18,7 +18,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, openAsBlob, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -130,15 +130,16 @@ export function describeApp(folder) {
 
 // ── Workstream's API, with the desktop's key ────────────────────────────────────────────────────────────
 
-async function api(method, route, { body, stream, length } = {}) {
+async function api(method, route, { body, file } = {}) {
   const { api: origin, key } = await toldNow();
   if (!origin || !key) throw new Error("This desktop was not told its Workstream API, so it cannot ask for a build.");
   const headers = { authorization: `Bearer ${key}` };
   if (body) headers["content-type"] = "application/json";
-  if (stream) Object.assign(headers, { "content-type": "application/gzip", "content-length": String(length) });
+  // A file goes as a blob, which has a length: the API takes a build's source only with its length said.
+  if (file) headers["content-type"] = "application/gzip";
   const response = await fetch(`${origin}${route}`, {
-    method, headers, body: stream ?? (body ? JSON.stringify(body) : undefined), ...(stream ? { duplex: "half" } : {}),
-    signal: AbortSignal.timeout(stream ? 30 * 60_000 : 60_000),
+    method, headers, body: file ?? (body ? JSON.stringify(body) : undefined),
+    signal: AbortSignal.timeout(file ? 30 * 60_000 : 60_000),
   });
   return response;
 }
@@ -180,7 +181,7 @@ export async function build(folder, { again = false } = {}) {
     const source = path.join(kept, "source.tar.gz");
     const bytes = archive(app, source);
     say(`Sending the source to be built on a Mac: ${app.files.length} files, ${megabytes(bytes)} (${app.kind}, ${app.hash.slice(0, 12)}).`);
-    asked = await answerOf(await api("PUT", `/api/desktop/builds/${asked.id}/source`, { stream: Readable.toWeb(createReadStream(source)), length: bytes }));
+    asked = await answerOf(await api("PUT", `/api/desktop/builds/${asked.id}/source`, { file: await openAsBlob(source) }));
     rmSync(source, { force: true });
   } else if (asked.state !== "done" && asked.state !== "failed") {
     say(`Your team's build of this native code is already under way (${app.hash.slice(0, 12)}). Waiting for it.`);
