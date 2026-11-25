@@ -55,7 +55,7 @@ jobs:
       - working-directory: desktop/agent
         run: npm test
       - name: The image's scripts parse
-        run: for script in desktop/image/*.sh desktop/*.sh scripts/*.sh client/scripts/*.sh; do bash -n "$script"; done
+        run: for script in desktop/image/*.sh desktop/*.sh scripts/*.sh client/scripts/*.sh builder/*.sh; do bash -n "$script"; done
 
   cli:
     name: Command line

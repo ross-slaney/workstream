@@ -1,0 +1,89 @@
+name: iPhone build
+
+# The Mac that builds iPhone apps for Workstream's desktops (docs/architecture.md, "Phones on a desktop").
+# A desktop is Linux and cannot build one, so it sends its app's source to the API, and the API runs this
+# workflow for that build (api/Builds/Builds.cs). The run takes the source from the API with the builder's
+# key, builds it (builder/ios.sh) and hands back the log and the app.
+#
+# This repository is public, so its runs' logs are too. Nothing of a team's project is written here: the
+# build's whole output goes to a file that is sent to the API, which keeps it for the team, and nothing is
+# uploaded as an artifact. What a run shows is that a build ran, for how long, and whether it worked.
+
+run-name: iPhone build ${{ inputs.build }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: The build's id, from the API.
+        required: true
+        type: string
+      api:
+        description: The API's address.
+        required: true
+        type: string
+      stage:
+        description: The deployment whose builder key to use.
+        required: true
+        default: production
+        type: choice
+        options: [production, staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ inputs.build }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    # GitHub's Mac with the newest Xcode.
+    runs-on: xcode-27
+    timeout-minutes: 90
+    environment: ${{ inputs.stage }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        env:
+          BUILD: ${{ inputs.build }}
+          API: ${{ inputs.api }}
+          BUILDER_KEY: ${{ secrets.BUILDER_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD" =~ ^[0-9a-f-]{36}$ ]] || { echo "The build's id is not one."; exit 2; }
+          [[ "$API" =~ ^https://[A-Za-z0-9.-]+$ ]] || { echo "The API's address is not one."; exit 2; }
+          [ -n "$BUILDER_KEY" ] || { echo "This deployment has no BUILDER_KEY secret."; exit 2; }
+          work="$RUNNER_TEMP/build"; mkdir -p "$work/src" "$work/out"
+          call() { curl -fsS --retry 3 --retry-delay 5 -H "Authorization: Bearer $BUILDER_KEY" "$@"; }
+
+          taken=$(call -X POST "$API/api/builder/builds/$BUILD/take")
+          directory=$(jq -r .directory <<< "$taken")
+          call "$API/api/builder/builds/$BUILD/source" | tar -xz -C "$work/src"
+
+          start=$(date +%s)
+          if bash builder/ios.sh "$work/src" "$work/out" "$directory" > "$work/out/build.log" 2>&1; then ok=true; else ok=false; fi
+          echo "Finished in $(( $(date +%s) - start )) seconds: ok=$ok."
+
+          # The log first, so a build that failed can be read; then the app; then how it ended.
+          tail -c 20000000 "$work/out/build.log" > "$work/out/log.txt"
+          call -X PUT -H "Content-Type: text/plain" --data-binary @"$work/out/log.txt" "$API/api/builder/builds/$BUILD/log" -o /dev/null
+          bundle=""
+          if [ "$ok" = true ]; then
+            call -X PUT -H "Content-Type: application/gzip" --data-binary @"$work/out/app.tar.gz" "$API/api/builder/builds/$BUILD/app" -o /dev/null
+            bundle=$(cat "$work/out/bundle-id.txt")
+          fi
+          jq -n --argjson ok "$ok" --arg bundle "$bundle" '{ok: $ok, bundleId: $bundle, failure: (if $ok then null else "The app did not build. Its log says why." end)}' \
+            | call -X POST -H "Content-Type: application/json" --data-binary @- "$API/api/builder/builds/$BUILD/end" -o /dev/null
+          [ "$ok" = true ]
+      - name: Say it failed, when the build never got to say so
+        if: failure()
+        env:
+          BUILD: ${{ inputs.build }}
+          API: ${{ inputs.api }}
+          BUILDER_KEY: ${{ secrets.BUILDER_KEY }}
+        run: |
+          # Refused when the build already ended, which is the usual case and is fine.
+          curl -sS -o /dev/null -X POST -H "Authorization: Bearer $BUILDER_KEY" -H "Content-Type: application/json" \
+            --data '{"ok": false, "failure": "The Mac stopped before the app was built."}' "$API/api/builder/builds/$BUILD/end" || true
