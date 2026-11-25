@@ -42,7 +42,7 @@ inputs:
     description: iPhone builds (infra/README.md, "iPhone builds"). The key the Mac that builds them calls the API with, the environment's BUILDER_KEY secret; without it this deployment builds no iPhone apps.
     default: ''
   builds-ref:
-    description: The branch or tag the Mac's workflow (.github/workflows/ios-build.yml) runs from: the release, or the branch a stage is deployed from.
+    description: The branch or tag the Mac's workflow (.github/workflows/ios-build.yml) runs from. A release's own tag, or the branch a stage is deployed from.
     default: main
   builds-token:
     description: Optional. A GitHub token that may run that workflow; without it the system administrator's own GitHub token is used.

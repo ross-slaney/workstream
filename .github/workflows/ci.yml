@@ -94,3 +94,6 @@ jobs:
       - run: az bicep build --file infra/main.bicep --stdout > /dev/null
       - run: az bicep build --file infra/foundation.bicep --stdout > /dev/null
       - run: az bicep build --file infra/gallery.bicep --stdout > /dev/null
+      # A composite action is only read when a deploy uses it, which is too late to learn it does not parse.
+      - name: The actions and workflows parse
+        run: python3 -c "import glob, yaml; [yaml.safe_load(open(f)) for f in glob.glob('.github/actions/*/action.yml') + glob.glob('.github/workflows/*.yml')]"
