@@ -28,6 +28,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
     public DbSet<ModelUsage> ModelUsage => Set<ModelUsage>();
     public DbSet<PersonSettings> PersonSettings => Set<PersonSettings>();
     public DbSet<TaskWatcher> TaskWatchers => Set<TaskWatcher>();
+    public DbSet<AppBuild> Builds => Set<AppBuild>();
 
     /// <summary>What a new team may use, from configuration (Workstream:Teams). Set once at start.</summary>
     internal static decimal DefaultModelAllowanceUsd { get; set; } = 20m;
@@ -230,6 +231,31 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             usage.Property(x => x.Model).HasMaxLength(100);
             usage.Property(x => x.CostUsd).HasPrecision(18, 6);
             usage.HasIndex(x => new { x.TeamId, x.At });
+        });
+
+        // A team's builds of its iPhone apps. Not protected rows: a desktop reads its team's after the page that
+        // finds its task (TASK_RUN_AGENT), and the Mac after one TEAM_RUN_BUILD check on the team.
+        model.Entity<AppBuild>(build =>
+        {
+            build.ToTable("Builds");
+            build.Property(x => x.Id).HasMaxLength(36);
+            build.Property(x => x.TeamId).HasMaxLength(100);
+            build.Property(x => x.TaskId).HasMaxLength(36);
+            build.Property(x => x.Platform).HasMaxLength(20);
+            build.Property(x => x.Hash).HasMaxLength(64);
+            build.Property(x => x.Directory).HasMaxLength(AppBuild.MaxDirectoryLength);
+            build.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
+            build.Property(x => x.Failure).HasMaxLength(AppBuild.MaxFailureLength);
+            build.Property(x => x.BundleId).HasMaxLength(200);
+            build.Property(x => x.Attempt).HasMaxLength(32);
+            build.Ignore(x => x.HasEnded);
+            // A team keeps one build a hash: two desktops asking at once make one.
+            build.HasIndex(x => new { x.TeamId, x.Platform, x.Hash }).IsUnique();
+            // A team's month of Mac time, and its builds asked for in the last day.
+            build.HasIndex(x => new { x.TeamId, x.AskedAt });
+            // The sweep: what is still in flight, and what nobody has taken for a while.
+            build.HasIndex(x => new { x.State, x.UsedAt });
+            build.HasOne<Team>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
         });
 
         model.Entity<PersonSettings>(settings =>

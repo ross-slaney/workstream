@@ -42,10 +42,21 @@ param modelKey string = ''
 param gitHubSignInClientId string = ''
 @secure()
 param gitHubSignInClientSecret string = ''
+@description('iPhone builds (api/Builds/Builds.cs): the blob container their files are kept in, the Mac\'s key, the repository and the branch or tag whose workflow is the Mac, the GitHub environment that workflow reads its key from, and optionally a token that may run it.')
+param buildsContainer string = ''
+@secure()
+param builderKey string = ''
+param buildsRepository string = ''
+param buildsRef string = 'main'
+param buildsStage string = 'production'
+@secure()
+param buildsToken string = ''
 
 var models = !empty(modelEndpoint) && !empty(modelKey)
 var gitHubSignIn = !empty(gitHubSignInClientId) && !empty(gitHubSignInClientSecret)
 var email = !empty(communication)
+var builds = !empty(builderKey) && !empty(buildsRepository) && !empty(buildsContainer)
+var buildsOwnToken = builds && !empty(buildsToken)
 var administrator = passwordSignIn && !empty(administratorEmail) && !empty(administratorPassword)
 
 resource emailService 'Microsoft.Communication/communicationServices@2023-04-01' existing = if (email) {
@@ -62,7 +73,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [], gitHubSignIn ? [{ name: 'github-sign-in-client-secret', value: gitHubSignInClientSecret }] : [])
+      secrets: concat(email ? [{ name: 'acs', value: emailService!.listKeys().primaryConnectionString }] : [], models ? [{ name: 'model-key', value: modelKey }] : [], administrator ? [{ name: 'administrator-password', value: administratorPassword }] : [], gitHubSignIn ? [{ name: 'github-sign-in-client-secret', value: gitHubSignInClientSecret }] : [], builds ? [{ name: 'builder-key', value: builderKey }] : [], buildsOwnToken ? [{ name: 'builds-token', value: buildsToken }] : [])
       registries: [{ server: registryHost, identity: identityId }]
       ingress: {
         external: true
@@ -117,6 +128,15 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         ] : [], gitHubSignIn ? [
           { name: 'SqlOS__Oidc__GitHub__ClientId', value: gitHubSignInClientId }
           { name: 'SqlOS__Oidc__GitHub__ClientSecret', secretRef: 'github-sign-in-client-secret' }
+        ] : [], builds ? [
+          // iPhone builds: their files in this copy's own storage, and the Mac that is a workflow of the repository.
+          { name: 'Workstream__Builds__Azure__Container', value: buildsContainer }
+          { name: 'Workstream__Builds__Key', secretRef: 'builder-key' }
+          { name: 'Workstream__Builds__Repository', value: buildsRepository }
+          { name: 'Workstream__Builds__Ref', value: buildsRef }
+          { name: 'Workstream__Builds__Stage', value: buildsStage }
+        ] : [], buildsOwnToken ? [
+          { name: 'Workstream__Builds__Token', secretRef: 'builds-token' }
         ] : [])
         probes: [
           { type: 'Startup', httpGet: { path: '/health', port: 8080 }, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 90 }

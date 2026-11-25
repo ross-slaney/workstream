@@ -33,6 +33,35 @@ Terminal=false
 Categories=Utility;
 EOF
 
+# The phones, opened from the panel when the environment has them (apps.json): each starts its phone and
+# shows its window (agent/phone.mjs).
+cat > /usr/share/applications/workstream-iphone.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=iPhone
+Comment=The iPhone simulator on this desktop
+Exec=phone ios start
+Icon=phone
+Terminal=false
+Categories=Development;
+EOF
+cat > /usr/share/applications/workstream-android.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Android phone
+Comment=The Android phone on this desktop
+Exec=phone android start
+Icon=phone
+Terminal=false
+Categories=Development;
+EOF
+# `phone`, for the agent, for a terminal and for the launchers above.
+cat > /usr/local/bin/phone <<'EOF'
+#!/bin/sh
+exec node /opt/workstream/agent/phone.mjs "$@"
+EOF
+chmod +x /usr/local/bin/phone
+
 # The agent and its packages.
 (cd "$ROOT/agent" && npm ci --omit=dev --no-audit --no-fund && npm cache clean --force >/dev/null 2>&1)
 chmod +x "$ROOT/start.sh" "$ROOT/session.sh" "$ROOT/panel.sh" "$ROOT/agent/shims/gh" "$ROOT"/image/*.sh
@@ -107,6 +136,23 @@ for file in ~/.bashrc ~/.profile; do
 done
 git config --global init.defaultBranch main
 EOF
+
+# agent-sim, which drives the iPhone simulator (x86Sim running Apple's own iOS runtime), for the desktop's
+# person: one release, checked against the hash written here. It is small. What it installs when an
+# environment asks for the iPhone (`phone ios setup`) is not: x86Sim, the runtime from Apple and a phone.
+# x86Sim runs on x86-64 only, and not inside a container.
+AGENT_SIM_VERSION=v0.1.0
+AGENT_SIM_SHA256=7417da971cc120250caca7ca611fe7540e923bb0a3a0ce595b99d01e5a7f7359
+if [ "$(dpkg --print-architecture)" = amd64 ] && [ ! -f /.dockerenv ]; then
+  archive=$(mktemp)
+  curl -fsSL -o "$archive" "https://github.com/Developing-Gamer/agent-sim/releases/download/$AGENT_SIM_VERSION/agent-sim-x86_64-linux.tar.gz"
+  echo "$AGENT_SIM_SHA256  $archive" | sha256sum -c --quiet
+  chmod 0644 "$archive"
+  sudo -u work -H bash -c "set -euo pipefail; mkdir -p ~/.local/share/agent-sim/src ~/.local/bin; tar -xzf '$archive' -C ~/.local/share/agent-sim/src --strip-components=1; ln -sf ~/.local/share/agent-sim/src/bin/agent-sim ~/.local/bin/agent-sim; ~/.local/bin/agent-sim --version"
+  rm -f "$archive"
+  # The phone runs as a service of the person's own systemd, which this keeps running without a login.
+  loginctl enable-linger work 2>/dev/null || install -D /dev/null /var/lib/systemd/linger/work
+fi
 
 # A project's own tools, ready for the person: the ASP.NET Core development certificate (which an Aspire
 # dashboard or any https://localhost serves), trusted by the browser and by .NET; and a phone for the Android

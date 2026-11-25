@@ -2,7 +2,7 @@
 title: "Security"
 description: "A desktop has no public address, only people who may see its task see its screen, and it reaches GitHub as the person who started the task."
 order: 9
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 A desktop runs whatever its agent is asked to, with every permission on that machine. So Workstream treats every desktop as untrusted and limits what one can reach.
@@ -36,6 +36,7 @@ A desktop holds one credential of its own, its key.
 - The key stops working when the task is deleted.
 - A desktop never holds a model key. Its model calls go through Workstream, which adds the key on its side. A leaked desktop key is worth at most what is left of one team's monthly allowance.
 - With its key, a desktop can ask for one more thing: the GitHub token of the person who started its task, so `git` and `gh` push and open pull requests as them. It reaches what that person's GitHub account reaches. It is asked for each time it is needed and never written to the desktop's disk, but it is in the desktop's memory while it is used, so anyone who can use the desktop, or tell its agent what to do, could read it during the task. A desktop whose environment's variables hold a `GITHUB_TOKEN` uses that instead. See [GitHub](/docs/github).
+- A desktop with the iPhone can have the project's iPhone app built. The app's source, without anything git ignores, goes from the desktop to Workstream and from there to a Mac that GitHub runs for that one build. The Mac's log and the app come back to Workstream's own storage, under your team. Nothing about your project is written to the build's public log, and nothing is added to your repository.
 
 ## Secrets you put on a desktop
 

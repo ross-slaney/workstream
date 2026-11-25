@@ -133,6 +133,9 @@ public sealed class PlatformSeedHostedService(IServiceProvider services, ILogger
         var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
         var app = scope.ServiceProvider.GetRequiredService<WorkstreamApp>();
         await PlatformSeed.SeedAsync(db, DateTimeOffset.UtcNow, app.AdministratorEmail, ct);
+        // The Mac that builds iPhone apps, where this deployment has one (Builds/Builds.cs).
+        await Builds.BuilderKeys.SeedAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), scope.ServiceProvider.GetRequiredService<Builds.BuildOptions>(), ct);
+        await db.SaveChangesAsync(ct);
         if (app is { AdministratorEmail: { } administrator, AdministratorPassword: { } password }
             && await PlatformSeed.SetAdministratorPasswordAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), administrator, password, DateTimeOffset.UtcNow, ct))
         {

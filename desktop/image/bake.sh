@@ -72,6 +72,12 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   # grep reads the whole list: with -q it stops at the match, lsinitramfs gets a broken pipe and pipefail fails the check.
   lsinitramfs "/boot/initrd.img-$(uname -r)" | grep scripts/init-premount/workstream-resume-here > /dev/null
   test -f /home/work/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+  # The phones: the command, the two launchers, and agent-sim for the desktop's person (configure.sh). The
+  # iPhone simulator itself is installed by an environment that wants it.
+  command -v phone ffmpeg > /dev/null
+  test -f /usr/share/applications/workstream-iphone.desktop -a -f /usr/share/applications/workstream-android.desktop
+  sudo -u work -H /home/work/.local/bin/agent-sim --version
+  test -f /var/lib/systemd/linger/work
 } > "$log" 2>&1
 
 # Make this disk an image (seal.sh). `waagent -deprovision` would do part of it, but it stops the agent that

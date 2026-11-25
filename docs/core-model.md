@@ -17,6 +17,7 @@ This document defines who can do what to what. It is written in SqlOS terms firs
 | Paused | A desktop whose machine is released and whose disk is kept. It resumes in about half a minute. In the code and the API this is the state `stopped`, the name the rows already hold. |
 | Archived | A desktop paused for as long as its team allows: its disk is copied to an archive, and the machine and the disk are deleted. It comes back on a new machine made from the archive. |
 | Agent | The program on the desktop that does the work. It is built on the Claude Agent SDK and calls models only through Workstream. |
+| Build | A project's iPhone app, built on a Mac because a desktop cannot build one. A desktop asks for the build of the native code it has, and the team keeps one build for each. |
 | Message | One entry in a task's conversation, written by a person or by the agent. |
 | Share | One task given to a person outside its team: to watch it, to write to its agent too, or to use its desktop as well, for a while or until it is taken back. |
 | workstream.yml | A file at the root of an environment's repository that holds the environment's size, apps, setup script, variable names and instructions. An environment filled from it, or saved to it, follows it. |
@@ -34,6 +35,7 @@ Any column that names an actor holds a principal id.
 | `service_account` | The machine preparing an environment | `service_account::desktop-{setupId}` | One for each environment, with an id made from the environment's id (`EnvironmentSetup.DesktopIdFor`), so it is never a task's or a spare's. Each attempt to prepare gives it a new key, so a machine from an earlier attempt cannot speak for the current one. |
 | `agent` | The desktop operator | `agent::desktop-operator` | The background jobs that start, stop and delete desktops, keep a team's spare, prepare environments, and write down what each team keeps on storage. No credential: the jobs run in the API process. |
 | `agent` | The task notifier | `agent::task-notifier` | The background job that emails a task's people when the agent's turn ends. No credential. |
+| `service_account` | The Mac that builds iPhone apps | `service_account::app-builder` | One for the deployment. Its key is the deployment's setting (`Workstream:Builds:Key`), which the workflow that is the Mac holds as its secret. The key says the Mac is calling; what it may do is the grant below. Where a deployment sets no key the account is expired. |
 
 A team is a SqlOS organization. SqlOS keeps its name, memberships and invitations; the app mirrors each membership into the team's group (`IdentityProvisioning.cs`).
 
@@ -45,6 +47,7 @@ A person's command line (`cli/workstream.mjs`) is not a principal of its own. It
 root                          system_admin    -> group::system_admins
 │                             desktop_operator -> agent::desktop-operator
 │                             task_notifier   -> agent::task-notifier
+│                             app_builder     -> service_account::app-builder
 └── team::{teamId}            team_member     -> group::{teamId}
     │                         team_admin      -> each administrator
     ├── environment::{id}     environment_setup -> service_account::desktop-{setupId}
@@ -77,12 +80,14 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | `TASK_PROMPT` | task | Write to the agent and interrupt it. Writing to a paused or archived task starts its desktop. |
 | `TASK_DRIVE` | task | Use the desktop's mouse, keyboard and clipboard. Without it the relay drops what the browser would send them. Starting a paused, archived or failed desktop is using it, and takes this too. |
 | `TASK_MANAGE` | task | Rename, pause and delete it; share it, see who it is shared with, and take a share back. |
-| `TASK_RUN_AGENT` | task | The desktop's own: read its setup, say how its setup script is going, exchange messages, call the model, and get the GitHub token of the person who started the task. |
+| `TASK_RUN_AGENT` | task | The desktop's own: read its setup, say how its setup script is going, exchange messages, call the model, get the GitHub token of the person who started the task, and ask for its team's iPhone builds: send a build's source, see how it stands, and take its app and its log. |
 | `TASK_OPERATE_DESKTOP` | task | The operator's own: start, pause, archive and delete the desktop, and count the disk or archive the task keeps. |
 | `TEAM_OPERATE_SPARE` | team | The operator's own: make and remove the desktop kept ready for the team's next task. |
 | `TASK_NOTIFY` | task | The notifier's own: read what the agent last said and email the task's people about it. |
 | `ENVIRONMENT_RUN_SETUP` | environment | The preparing desktop's own: read the environment's setup, with its variables, and say how it went. |
 | `ENVIRONMENT_OPERATE_SETUP` | environment | The operator's own: make the machine that prepares the environment, save its disk, and remove both. |
+| `TEAM_RUN_BUILD` | team | The Mac's own: take a build of the team's, read its source, and hand back its log and its app. |
+| `TEAM_OPERATE_BUILD` | team | The operator's own: ask the Mac for a build once its source is here, fail a build the Mac never finished, and remove what nobody has taken for a while. |
 
 ## Scopes
 
@@ -99,12 +104,13 @@ A scope is the client's ceiling, not a decision about a node: a token without a 
 | Role | Granted on | To | Carries |
 | --- | --- | --- | --- |
 | `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits. Nothing inside a team. |
-| `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE`, `ENVIRONMENT_OPERATE_SETUP` |
+| `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE`, `ENVIRONMENT_OPERATE_SETUP`, `TEAM_OPERATE_BUILD` |
 | `task_notifier` | root | `agent::task-notifier` | `TASK_NOTIFY` |
 | `team_member` | team | the team's group | `TEAM_VIEW`, `TEAM_VIEW_USAGE`, `TEAM_CREATE_ENVIRONMENT`, `TEAM_CREATE_TASK`, `ENVIRONMENT_VIEW`, `ENVIRONMENT_EDIT`, `TASK_VIEW`, `TASK_PROMPT`, `TASK_DRIVE`, `TASK_MANAGE` |
 | `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS` |
 | `task_desktop` | task | the desktop that works on the task | `TASK_RUN_AGENT` |
 | `environment_setup` | environment | the environment's preparing account | `ENVIRONMENT_RUN_SETUP` |
+| `app_builder` | root | the Mac that builds iPhone apps | `TEAM_RUN_BUILD`: the source of any team's build while it is being built, and nothing else of any team. |
 | `task_watcher` | task | a person outside the team the task is shared with | `TASK_VIEW` |
 | `task_prompter` | task | the same | `TASK_VIEW`, `TASK_PROMPT` |
 | `task_driver` | task | the same | `TASK_VIEW`, `TASK_PROMPT`, `TASK_DRIVE` |
@@ -135,6 +141,7 @@ Everyone on a team can see, use and manage every task and environment in it, and
 | An environment is prepared | Its preparing account is provisioned the first time and granted `environment_setup` on the environment, once; each attempt issues it a new key. |
 | An attempt to prepare ends (saved, failed, too long) | The preparing account is expired. Its grant stays, and opens nothing while the account is expired. |
 | An environment is deleted | Its preparing account is expired, and the environment's node is removed, with the grant on it. |
+| The API starts with a builder key set | The Mac's account is provisioned the first time, given the key's hash when the key changed, and granted `app_builder` on root, once. With no key set, the account is expired, and its grant opens nothing. |
 
 Grants are derived from these events. Nothing revokes "the grant this action made".
 
@@ -154,7 +161,7 @@ Grants are derived from these events. Nothing revokes "the grant this action mad
 
 "Shared with me" leaves out the teams the person is on (their SqlOS memberships), so what the page finds is what a task grant reaches. The filter is applied under each of the person's nodes, so the page also reads past their own teams' tasks under their team grants.
 
-A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Who a task is shared with is SqlOS's grants on the task's node with the three sharing roles whose `EffectiveTo` has not passed, and its waiting invitations are `TaskInvitations` rows, both read after one `TASK_MANAGE` check on the task. Usage and the administrator's numbers are sums over `ModelUsage`, `DesktopRuns` and `StorageRuns`, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
+A team's people and its pending invitations are SqlOS's own rows, read after one `TEAM_VIEW` check on the team. Who a task is shared with is SqlOS's grants on the task's node with the three sharing roles whose `EffectiveTo` has not passed, and its waiting invitations are `TaskInvitations` rows, both read after one `TASK_MANAGE` check on the task. A team's builds are `Builds` rows, found by the team and the hash: a desktop reads its team's after the page that finds its task (`TASK_RUN_AGENT`), and the Mac reads one after a `TEAM_RUN_BUILD` check on that build's team. Usage and the administrator's numbers are sums over `ModelUsage`, `DesktopRuns`, `StorageRuns` and `Builds`, read after one check (`TEAM_VIEW_USAGE` on the team, `ADMIN_VIEW` on root); SqlOS has no authorized count.
 
 ## App data, and why SqlOS does not hold it
 
@@ -173,6 +180,7 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `ModelUsage` | Tokens and cost of each model call an agent makes. | Usage. |
 | `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
 | `TaskWatchers` | When each person last had a task's desktop on screen, one row a person a task. Removed with the task. | A fact about what someone did, like `Tasks.CreatedBy`, and never a permission: whether they may watch is `TASK_VIEW`. It is read only to keep from emailing someone about the task they are looking at. |
+| `Builds` | A team's builds of its iPhone apps: the hash of the native code it is a build of, the app's folder inside the source, the task whose desktop asked first (a fact), where it stands (waiting for its source, queued, building, done, failed), why it failed, the app's bundle identifier and size, when it was asked for, taken and ended, how long the Mac had it, and when a desktop last took the app. One row a team a hash. | A lifecycle and usage, like `EnvironmentSetups` and `DesktopRuns`. Nobody is granted on a build: it relates a team to an app, and a desktop reaches it through the one task it holds `task_desktop` on. The source, the app and the log are files in the deployment's own storage, under the team's id. |
 
 `Tasks.CreatedBy` records who started a task. It grants nothing.
 
@@ -223,7 +231,7 @@ The limits are settings (`Workstream:Desktops:Spares`): one spare a team, so man
 
 ### Prepare an environment
 
-Cloning a repository and running a setup script can take minutes on every new desktop. An environment with a repository or a setup script is prepared instead: the setup is done once, on a machine of its own, and that machine's disk is saved for the environment's tasks to start from.
+Cloning a repository and running a setup script can take minutes on every new desktop. An environment with a repository, a setup script or the iPhone among its apps (whose simulator takes twenty minutes to install) is prepared instead: the setup is done once, on a machine of its own, and that machine's disk is saved for the environment's tasks to start from.
 
 1. Something asks for it: the environment is added with a setup, or its setup inputs change; someone presses "Prepare again" (`POST /api/environments/{id}/setup`, `ENVIRONMENT_EDIT`); or a task starts and finds no save it can use (it is not asked again for settings whose last attempt failed), or finds one older than a week (the task uses the old one, and the new one is made behind it).
 2. The operator (`ENVIRONMENT_OPERATE_SETUP` on the environment) makes a machine when the limits allow (`Workstream:Desktops:Saves`: one preparing at once, four hours of preparing a day, each attempt as long as the setup script may run and half an hour more). The machine is told the API's address and a new key for the environment's preparing account, which holds `environment_setup` on the environment and nothing else. Its time is a `DesktopRun` with the purpose `prepare`.
@@ -304,6 +312,21 @@ A desktop works on GitHub as the person who started its task.
 
 The token is the person's: it reaches every repository their GitHub account reaches, with their permissions, and GitHub decides how long it lasts. It is never written to the desktop's disk; it is in the desktop's memory while git or gh uses it. Someone a task is shared with who may write to its agent (`task_prompter`) or use its desktop (`task_driver`) can have work pushed in the starter's name, as the team's people can, while the share lasts.
 
+### Build an iPhone app
+
+An iPhone app is built with Xcode on a Mac, and a desktop is neither. So the desktop asks Workstream for the build, and Workstream has it made on a Mac of its own. Nothing is added to the project's repository, and nothing of the build is kept on GitHub.
+
+1. On the desktop, `phone ios build` works out a hash of everything the native app is made from (for an Expo app, Expo's own fingerprint; otherwise the files that name the packages, configure the app or are native source). It asks with the desktop's key (`POST /api/desktop/builds`: the platform, the hash and the app's folder). The API finds the task the desktop works on (`TASK_RUN_AGENT`) and answers with the build its team has for that hash, whatever its state, or makes one that waits for its source. A team has a limit of builds asked for in a day (`Workstream:Builds:PerTeamADay`, 30).
+2. A build that is done is taken at once (`GET /api/desktop/builds/{id}/app`). A change to JavaScript or Dart alone does not change the hash, so most tasks take the app their team already has.
+3. For a build that waits, the desktop sends the source as one archive (`PUT /api/desktop/builds/{id}/source`): the files git knows of, from the folder the app's packages are installed from. The API keeps it under the team's id and queues a job.
+4. The job, as `agent::desktop-operator` (`TEAM_OPERATE_BUILD` on the team), asks the Mac: one request to GitHub to run the workflow `ios-build.yml` of Workstream's own repository for this build (`IMacBuilder`, `api/Builds/Builds.cs`), with the token a deployment set for it or, without one, the system administrator's own GitHub token. A Mac that cannot be asked fails the build with the reason.
+5. The Mac calls back with its key (`service_account::app-builder`). Each call loads the build and checks `TEAM_RUN_BUILD` on its team: it takes the build (`POST /api/builder/builds/{id}/take`), reads the source, builds, hands back the log and the app, and says how it ended. The source is then removed.
+6. The desktop, which asked how the build stands every ten seconds, takes the app, installs it on its iPhone and opens it. A build that failed keeps its log, which the desktop prints for the agent; it is built again only when a desktop asks for that (`again`).
+
+Two desktops of a team that ask for the same hash in the same moment get one build: the team has one row a hash, and the second is answered with the first's. Another team's desktop asking for the same hash gets a build of its own, and is never told the first exists.
+
+A build the Mac has not finished in ninety minutes fails, and an app no desktop has taken for thirty days is removed with its log, both by a sweep every ten minutes (`BuildJobs.SweepAsync`).
+
 ### Picking a repository
 
 The environment form lists the signed-in person's repositories (`GET /api/github/repositories`, most recently pushed first, up to three hundred) and a picked repository's branches (`GET /api/github/repositories/{owner}/{name}/branches`), read from GitHub with their token. Nothing is checked in Workstream: it is their GitHub, read as them.
@@ -325,6 +348,7 @@ A team has a model allowance for the calendar month and a limit on desktops runn
 - **Models**: dollars spent against the allowance, from `ModelUsage`.
 - **Desktop time**: hours for each size the team's tasks ran on (small, standard, large), from `DesktopRuns` with the purpose `task`. A spare and a machine preparing an environment are Workstream's cost, not the team's. How many are running now is shown beside the limit.
 - **Storage**: GB-months for each kind the team kept, from `StorageRuns`, with the gigabytes kept now.
+- **iPhone builds**: minutes a Mac had the team's builds, from `Builds` (each build's time from when the Mac took its source until it said it was done, counted in the month it ended, whether or not it worked). A team that has had none built does not see the line.
 
 | Kind | What is kept | Counted at |
 | --- | --- | --- |
@@ -336,7 +360,7 @@ A GB-month is one gigabyte kept for a month of 730 hours: the sum, over the rows
 
 Storage is not written when something happens. Every fifteen minutes a job (`StorageJobs`, as `agent::desktop-operator`) reads what every team keeps now, from the operator's page of tasks and from the saved setups, and makes the open `StorageRuns` rows agree: it begins a row for anything kept that has none, ends the row of anything that is gone, and when a size changed ends the row and begins another at the same moment. Run twice, it does nothing the second time, and a run that was missed is put right by the next, so a row is exact to fifteen minutes.
 
-The team's page shows amounts and no prices, except the model allowance. A system administrator sees every running desktop, can change a team's limits, and sees what each line costs Workstream: machine hours by purpose and size, and storage by kind, each at its rate in `DesktopOptions.Prices` (architecture.md, "What the desktops cost"). Payments are not built, and no customer price exists; the numbers that a bill would be made from are.
+The team's page shows amounts and no prices, except the model allowance. A system administrator sees every running desktop, can change a team's limits, and sees what each line costs Workstream: machine hours by purpose and size, and storage by kind, each at its rate in `DesktopOptions.Prices` (architecture.md, "What the desktops cost"), and the Mac's minutes at `Workstream:Builds:MacMinuteUsd`. Payments are not built, and no customer price exists; the numbers that a bill would be made from are.
 
 ## Decisions
 
@@ -352,8 +376,12 @@ The team's page shows amounts and no prices, except the model allowance. A syste
 - **workstream.yml is read at each start, and the environment keeps a copy.** Reading it at the start keeps the repository the source of truth without a webhook or a sync job; keeping the last values means a task still starts when GitHub is slow or the starter has no token. Variables are names in the file and values here, so a secret never goes into a repository.
 - **All inference goes through the gateway.** The Foundry key never leaves the API. Usage is recorded where it is spent.
 - **The command line signs in through the browser with SqlOS's device flow, not with an API key and not with a loopback redirect.** SqlOS has a client for exactly this (`SeedCliClient`: public, no secret, the device and refresh grants, an allow-list of scopes and one audience), and its headless flow has the device steps (`/headless/device/resolve`, `approve`, `deny`), so the approval is one more page of the web app over the sign-in it already has. The token is the person's own session, so the command line has the person's grants as they are now, and loses them when the person does. An API key in SqlOS is a machine client bound to a service account, a principal of its own: to act as the person it would need grants copied from theirs on every team and kept in step with their memberships, a stored copy of access that the rules forbid. Authorization code with PKCE on a loopback address would also work in SqlOS, but it needs a free local port and a browser on the same machine, and the web app's sign-in would have to finish another client's request; the device flow needs neither, so it also works over SSH, in a container or on a dev VM. A scope of its own (`workstream.start`) keeps the command line to reading and starting tasks: a token taken from a laptop cannot stop, delete, rename or write to a task, change a team, or open a desktop.
+- **An iPhone app is built on Workstream's side, never in the project's repository.** The Mac is a workflow of Workstream's own repository, started by Workstream and paid for by whoever runs the deployment; the source goes there from the desktop through the API, and the app comes back the same way. A project adds no workflow, no file and no secret, and its GitHub account sees no run, no artifact and no minutes. The cost is that a project's source for that build leaves the desktop for a Mac GitHub runs, for as long as the build takes.
+- **A build belongs to a team and is found by a hash the desktop works out.** One row a team a hash is what makes a second task free and two tasks at once one build. The hash is not checked by the API: a desktop that sent a wrong one would get the wrong app, and only its own team's, since every lookup is inside the team its task is in. Sharing builds across teams would save Mac time for two teams on one repository, and would let one team learn what another has built; it was not done.
+- **The Mac is one principal with one grant.** Its key is a deployment's secret, the same for every build, so nothing secret travels in a workflow's inputs, which a public repository's runs may show. What the key reaches is narrow: a build's source only between taking it and ending it, and nothing else of any team.
+
 - **The agent is Workstream's own, on the Claude Agent SDK.** Anthropic's terms for hosting Claude Code itself require each end user to bring their own credential; products built on the Agent SDK use the developer's API key or cloud provider. Claude Code is not wired to Workstream's inference.
 
 ## Not built yet
 
-Payments, API keys for integrations, single sign-on, connecting GitHub to an account that signed in by emailed code at another address, a private task inside a shared team, Windows desktops, a list in the web app of the command lines a person has signed in, to sign one out from there, a saved setup for a spare.
+Payments, API keys for integrations, single sign-on, connecting GitHub to an account that signed in by emailed code at another address, a private task inside a shared team, Windows desktops, iPhone builds for a real device or for the App Store, a team's storage counted for the apps it keeps, a list in the web app of the command lines a person has signed in, to sign one out from there, a saved setup for a spare.

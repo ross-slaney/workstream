@@ -5,5 +5,7 @@
   { "id": "files", "name": "Files", "description": "The file manager.", "launcher": "thunar.desktop", "default": true },
   { "id": "writer", "name": "Writer", "description": "Documents (LibreOffice).", "launcher": "libreoffice-writer.desktop", "default": false },
   { "id": "calc", "name": "Calc", "description": "Spreadsheets (LibreOffice).", "launcher": "libreoffice-calc.desktop", "default": false },
-  { "id": "impress", "name": "Impress", "description": "Slides (LibreOffice).", "launcher": "libreoffice-impress.desktop", "default": false }
+  { "id": "impress", "name": "Impress", "description": "Slides (LibreOffice).", "launcher": "libreoffice-impress.desktop", "default": false },
+  { "id": "android", "name": "Android phone", "description": "An Android phone on the desktop. The agent runs the project's app on it and taps through it.", "launcher": "workstream-android.desktop", "default": false },
+  { "id": "iphone", "name": "iPhone", "description": "An iPhone simulator on the desktop. The app is built on a Mac for you. Needs a Large desktop.", "launcher": "workstream-iphone.desktop", "default": false }
 ]

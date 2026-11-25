@@ -189,3 +189,7 @@ jobs:
           # Sign in with GitHub (infra/README.md "Sign in with GitHub"); without both, people sign in by emailed code only.
           github-oauth-client-id: ${{ vars.GH_OAUTH_CLIENT_ID }}
           github-oauth-client-secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          # iPhone builds (infra/README.md "iPhone builds"): the Mac is ios-build.yml at this release's tag.
+          builder-key: ${{ secrets.BUILDER_KEY }}
+          builds-ref: ${{ needs.resolve.outputs.tag }}
+          builds-token: ${{ secrets.BUILDER_GITHUB_TOKEN }}

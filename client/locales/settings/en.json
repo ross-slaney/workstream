@@ -207,6 +207,11 @@
       "gbMonths": "{amount, plural, one {# GB‑month} other {# GB‑months}}",
       "empty": "Nothing has been kept this month.",
       "body": "A GB‑month is one gigabyte kept for a whole month, so 64 GB kept for half a month is 32 GB‑months. What is kept is counted every 15 minutes."
+    },
+    "builds": {
+      "title": "iPhone builds",
+      "minutes": "{minutes, plural, one {# minute on a Mac} other {# minutes on a Mac}}",
+      "body": "An iPhone app is built on a Mac, which a desktop asks for when its native code has changed. A change to JavaScript alone uses the build your team already has."
     }
   }
 }

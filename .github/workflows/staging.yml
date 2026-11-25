@@ -117,6 +117,10 @@ jobs:
           # A GitHub OAuth client of staging's own, if it has one: a client sends people back to one address only.
           github-oauth-client-id: ${{ vars.GH_OAUTH_CLIENT_ID }}
           github-oauth-client-secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          # iPhone builds: the Mac is ios-build.yml at the ref staging was deployed from (a branch or a tag).
+          builder-key: ${{ secrets.BUILDER_KEY }}
+          builds-ref: ${{ inputs.ref }}
+          builds-token: ${{ secrets.BUILDER_GITHUB_TOKEN }}
 
   remove:
     name: Remove staging

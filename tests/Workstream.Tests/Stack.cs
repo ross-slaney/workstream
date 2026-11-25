@@ -44,6 +44,9 @@ public static class Stack
     public static readonly FakeGitHub GitHub = new();
     public static readonly FakeGitHubTokens GitHubTokens = new();
     public static readonly FakeGitHubSignIn GitHubSignIn = new();
+    public static readonly FakeMac Mac = new();
+    /// <summary>The key the Mac that builds iPhone apps calls with, as a deployment sets it.</summary>
+    public const string BuilderKey = "wsb_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     static DistributedApplication? aspire;
     static WebApplication? api;
@@ -55,6 +58,9 @@ public static class Stack
 
     /// <summary>The job that writes down what every team keeps, for storage's GB-months.</summary>
     public static StorageJobs Storage => Services.GetRequiredService<StorageJobs>();
+
+    /// <summary>The builds' jobs: asking the Mac once a build's source is here, and the sweep.</summary>
+    public static Workstream.Api.Builds.BuildJobs Builds => Services.GetRequiredService<Workstream.Api.Builds.BuildJobs>();
 
     /// <summary>The job that emails a task's people when the agent's turn ends, with the played provider.</summary>
     public static TaskEmails Emails => Services.GetRequiredService<TaskEmails>();
@@ -136,6 +142,11 @@ public static class Stack
         builder.Configuration[WorkstreamApp.GitHubSignInClientSecret] = FakeGitHubSignIn.ClientSecret;
         // Every journey invites from this one address; SqlOS's hourly caps are for the public.
         builder.Configuration["SqlOS:Invitations:MaxInvitationsPerIpPerHour"] = "100000";
+        // iPhone builds: the Mac is played here, and its files are kept in a folder of this run's own.
+        builder.Configuration["Workstream:Builds:Key"] = BuilderKey;
+        builder.Configuration["Workstream:Builds:Repository"] = "acme/workstream";
+        builder.Configuration["Workstream:Builds:Folder"] = Path.Combine(Path.GetTempPath(), $"workstream-test-builds-{Guid.NewGuid():N}");
+        builder.Configuration["Workstream:Builds:PerTeamADay"] = "6";
         builder.AddWorkstreamApi();
         builder.Services.AddSingleton<IDesktopHost>(Desktops);
         builder.Services.AddHttpClient(ModelGateway.ClientName).ConfigurePrimaryHttpMessageHandler(() => Model);
@@ -143,6 +154,7 @@ public static class Stack
         builder.Services.AddSingleton<ISqlOSEmailSender>(Mail);
         builder.Services.AddHttpClient(GitHubClient.ClientName).ConfigurePrimaryHttpMessageHandler(() => GitHub);
         builder.Services.AddSingleton<IGitHubTokens>(GitHubTokens);
+        builder.Services.AddSingleton<Workstream.Api.Builds.IMacBuilder>(Mac);
         builder.Services.AddHttpClient(nameof(SqlOS.AuthServer.Services.SqlOSOidcAuthService)).ConfigurePrimaryHttpMessageHandler(() => GitHubSignIn);
         var app = builder.Build();
         app.MapWorkstreamApi();

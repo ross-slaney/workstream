@@ -86,6 +86,15 @@ if [ -z "$SLIM" ]; then
   fi
 fi
 
+# What the iPhone simulator needs (agent-sim's own list, scripts/setup-vm.sh): its scripts are Python, it
+# draws with Mesa's software Vulkan, and it streams the phone's screen with ffmpeg. The simulator itself is
+# installed by an environment's setup (agent/phone.mjs), since it is 30 GB that only some desktops want.
+if [ -z "$SLIM" ] && [ "$ARCH" = amd64 ]; then
+  apt-get update
+  apt-get install -y --no-install-recommends python3-pil python3-dnspython openssl mesa-vulkan-drivers ffmpeg
+  apt-get clean
+fi
+
 # Where the tools are, for every program on the desktop: start.sh reads this, and so does every login shell.
 cat > /etc/profile.d/workstream-tools.sh <<'EOF'
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_ROOT=/usr/share/dotnet

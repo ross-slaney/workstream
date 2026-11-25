@@ -82,6 +82,17 @@ export function StorageCard({ usage, draw }: { usage: TeamUsage; draw: (lines: U
   );
 }
 
+/** iPhone builds: the minutes a Mac spent building the team's apps this month. Only a team that had one built sees it. */
+export function BuildsCard({ usage }: { usage: TeamUsage }) {
+  const t = useT("settings");
+  if (!(usage.macBuildMinutes > 0)) return null;
+  return (
+    <Card title={t("usage.builds.title")} body={t("usage.builds.body")}>
+      <p className="text-xl font-semibold tracking-tight text-foreground">{t("usage.builds.minutes", { minutes: Math.round(usage.macBuildMinutes) })}</p>
+    </Card>
+  );
+}
+
 const quiet = "text-[13px] text-muted-foreground";
 
 /** The lines as a table: a row each, its amounts in columns that line up down the card. For a wide window. */

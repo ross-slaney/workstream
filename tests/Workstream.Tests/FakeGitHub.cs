@@ -32,6 +32,8 @@ public sealed class FakeGitHub : HttpMessageHandler
         public HashSet<string> Protected { get; } = [];
         public ConcurrentQueue<(string Branch, string Path, string Message)> Commits { get; } = new();
         public ConcurrentQueue<(string Head, string Base, string Title)> PullRequests { get; } = new();
+        /// <summary>The workflow runs asked for: the workflow's file, the branch or tag, and the inputs as JSON.</summary>
+        public ConcurrentQueue<(string Workflow, string Ref, string Inputs)> Runs { get; } = new();
 
         public Repository With(string path, string text, string branch = "main")
         {
@@ -154,6 +156,14 @@ public sealed class FakeGitHub : HttpMessageHandler
             repository.Branches[name] = new ConcurrentDictionary<string, string>(files);
             return Json(new { @ref = $"refs/heads/{name}", @object = new { sha = CommitOf(name) } }, HttpStatusCode.Created);
         }
+        if (request.Method == HttpMethod.Post && rest.StartsWith("actions/workflows/", StringComparison.Ordinal) && rest.EndsWith("/dispatches", StringComparison.Ordinal))
+        {
+            if (!repository.CanPush) return Status(HttpStatusCode.Forbidden, "Must have admin rights to Repository.");
+            var run = System.Text.Json.Nodes.JsonNode.Parse(body)!;
+            repository.Runs.Enqueue((rest["actions/workflows/".Length..^"/dispatches".Length], run["ref"]!.GetValue<string>(), run["inputs"]!.ToJsonString()));
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }
+
         if (request.Method == HttpMethod.Post && rest == "pulls")
         {
             var asked = JsonNode.Parse(body)!;

@@ -50,6 +50,11 @@ public static class WorkstreamAuthorization
         /// <summary>The operator's own: make the machine that prepares an environment, save its disk and remove both.</summary>
         public const string EnvironmentOperateSetup = "ENVIRONMENT_OPERATE_SETUP";
 
+        /// <summary>The Mac's own: take the source of a team's build, and hand back its log and its app.</summary>
+        public const string TeamRunBuild = "TEAM_RUN_BUILD";
+        /// <summary>The operator's own: ask the Mac to build, fail a build it never finished, and remove what nobody takes.</summary>
+        public const string TeamOperateBuild = "TEAM_OPERATE_BUILD";
+
         public static readonly string[] All =
         [
             AdminView,
@@ -57,6 +62,7 @@ public static class WorkstreamAuthorization
             EnvironmentView, EnvironmentEdit,
             TaskView, TaskPrompt, TaskDrive, TaskManage, TaskRunAgent, TaskOperateDesktop, TeamOperateSpare, TaskNotify,
             EnvironmentRunSetup, EnvironmentOperateSetup,
+            TeamRunBuild, TeamOperateBuild,
         ];
     }
 
@@ -75,6 +81,8 @@ public static class WorkstreamAuthorization
         /// <summary>They watch it, write to the agent and use the desktop's mouse and keyboard.</summary>
         public const string TaskDriver = "task_driver";
         public const string EnvironmentSetup = "environment_setup";
+        /// <summary>The Mac that builds iPhone apps, for every team.</summary>
+        public const string AppBuilder = "app_builder";
     }
 
     public static void Seed(SqlOSFgaSeedBuilder seed)
@@ -106,10 +114,15 @@ public static class WorkstreamAuthorization
         seed.Permission(Permissions.EnvironmentRunSetup, "Do the environment's setup", ResourceTypes.Environment);
         seed.Permission(Permissions.EnvironmentOperateSetup, "Prepare the environment and keep its saved setup", ResourceTypes.Environment);
 
+        seed.Permission(Permissions.TeamRunBuild, "Build the team's iPhone apps", ResourceTypes.Team);
+        seed.Permission(Permissions.TeamOperateBuild, "Ask for the team's builds and remove old ones", ResourceTypes.Team);
+
         // The dashboard's numbers and every team's limits, and nothing inside a team: someone who should see a
         // team's tasks and desktops is invited to the team like anyone else.
         seed.Role(Roles.SystemAdmin, "System administrator").Can(Permissions.AdminView);
-        seed.Role(Roles.DesktopOperator, "Desktop operator").Can(Permissions.TaskOperateDesktop, Permissions.TeamOperateSpare, Permissions.EnvironmentOperateSetup);
+        seed.Role(Roles.DesktopOperator, "Desktop operator").Can(Permissions.TaskOperateDesktop, Permissions.TeamOperateSpare, Permissions.EnvironmentOperateSetup, Permissions.TeamOperateBuild);
+        // The source of any team's build in flight, and nothing else of any team.
+        seed.Role(Roles.AppBuilder, "The Mac that builds iPhone apps").Can(Permissions.TeamRunBuild);
         seed.Role(Roles.TaskNotifier, "Task notifier").Can(Permissions.TaskNotify);
         seed.Role(Roles.EnvironmentSetup, "The desktop preparing the environment").Can(Permissions.EnvironmentRunSetup);
         seed.Role(Roles.TeamMember, "Team member").Can(

@@ -10,9 +10,11 @@
 #   - Role Based Access Control Administrator, conditioned to assign only the four roles the Bicep gives the
 #     runtime identity: AcrPull (registry-access.bicep), Virtual Machine Contributor (desktops.bicep,
 #     desktop-access.bicep), Disk Snapshot Contributor (desktops.bicep, for environments' saved setups) and
-#     Reader (desktop-access.bicep);
+#     Reader (desktop-access.bicep), and Storage Blob Data Contributor (data.bicep, for the iPhone builds' files);
 #   - Microsoft Graph Group.ReadWrite.All, for each copy's `…-sql-admins` group (data.bicep).
-# It stores the principal's credential as the environment's AZURE_CREDENTIALS secret when the environment has none.
+# It stores the principal's credential as the environment's AZURE_CREDENTIALS secret when the environment has none,
+# and makes the environment's BUILDER_KEY secret when it has none: the key the Mac that builds iPhone apps
+# calls the API with (.github/workflows/ios-build.yml), which the deploy also gives the API.
 #
 # Nothing here depends on what the Bicep deploys, so a change to infra never needs this run again, except a
 # new role for the runtime identity: the condition is then written again, which only an Owner can do.
@@ -38,8 +40,9 @@ acr_pull=7f951dda-4ed3-4680-a7ca-43fe172d538d
 machine_contributor=9980e02c-c2be-4d73-94e8-173b1dc7cf3c
 reader=acdd72a7-3385-48ef-bd42-f606fba81ae7
 snapshot_contributor=7efff54f-a5b4-42b5-a1c5-5411624893ce
+blob_contributor=ba92f5b4-2d11-453d-a403-e96b0029c9fe
 graph_group_readwrite=62a82d76-70ea-41e2-9197-370581804d09
-roles="$acr_pull, $machine_contributor, $snapshot_contributor, $reader"
+roles="$acr_pull, $machine_contributor, $snapshot_contributor, $reader, $blob_contributor"
 condition="((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles}))"
 
 graph=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
@@ -88,5 +91,9 @@ for env in $ENVS; do
       | jq -c --arg c "$app" --arg t "$tenant" --arg s "$subscription" '{clientId:$c, clientSecret:.password, tenantId:$t, subscriptionId:$s}' \
       | gh secret set AZURE_CREDENTIALS -R "$REPO" --env "$env"
   fi
-  echo "$name: Contributor, Role Based Access Control Administrator (AcrPull, Virtual Machine Contributor, Reader), Graph Group.ReadWrite.All"
+  # The Mac's key: random, never shown, the same value for the workflow and (through the deploy) the API.
+  if [ "$REPO" != none ] && ! gh secret list -R "$REPO" --env "$env" --json name --jq '.[].name' | grep -qx BUILDER_KEY; then
+    printf 'wsb_%s' "$(openssl rand -hex 32)" | gh secret set BUILDER_KEY -R "$REPO" --env "$env"
+  fi
+  echo "$name: Contributor, Role Based Access Control Administrator (AcrPull, Virtual Machine Contributor, Disk Snapshot Contributor, Reader, Storage Blob Data Contributor), Graph Group.ReadWrite.All"
 done

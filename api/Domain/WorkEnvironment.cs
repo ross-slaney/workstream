@@ -70,8 +70,11 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     /// </summary>
     public string? SetupInputs { get; private set; }
 
-    /// <summary>Whether there is anything to prepare: a repository to clone, or a script to run.</summary>
-    public bool HasSetup => RepositoryUrl is not null || SetupScript is not null;
+    /// <summary>
+    /// Whether there is anything to prepare: a repository to clone, a script to run, or the iPhone simulator
+    /// to install, which takes a desktop twenty minutes and so is done once, for the saved setup.
+    /// </summary>
+    public bool HasSetup => RepositoryUrl is not null || SetupScript is not null || Apps.Contains(AppCatalog.Iphone);
 
     public void KeepSetupInputs(string fingerprint) => SetupInputs = fingerprint;
 
@@ -101,6 +104,8 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
         if (apps.FirstOrDefault(app => !AppCatalog.Has(app)) is { } unknown) throw new DomainRuleException($"'{unknown}' is not an app a desktop can come with.");
         Apps = apps;
         Size = DesktopSizes.Has(settings.Size) ? settings.Size : throw new DomainRuleException($"A desktop's size is one of {string.Join(", ", DesktopSizes.Keys)}.");
+        // The simulator alone takes 9 GB of memory, beside the project's own stack.
+        if (apps.Contains(AppCatalog.Iphone) && Size != DesktopSizes.Large) throw new DomainRuleException("The iPhone simulator needs a Large desktop.");
         RepositoryUrl = Rules.RepositoryUrl(settings.RepositoryUrl);
         RepositoryBranch = RepositoryUrl is null ? null : Rules.OptionalText(settings.RepositoryBranch, "A branch", 200);
         SetupScript = Rules.OptionalText(settings.SetupScript, "A setup script", MaxScriptLength);
@@ -154,6 +159,11 @@ public static class AppCatalog
     public static readonly IReadOnlyList<DesktopApp> All = Read();
 
     public static readonly IReadOnlyList<string> Defaults = [.. All.Where(app => app.Default).Select(app => app.Id)];
+
+    /// <summary>The iPhone simulator, which only a Large desktop has room for.</summary>
+    public const string Iphone = "iphone";
+    /// <summary>The Android emulator's window.</summary>
+    public const string Android = "android";
 
     public static bool Has(string id) => All.Any(app => app.Id == id);
 

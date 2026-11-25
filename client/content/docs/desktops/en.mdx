@@ -2,7 +2,7 @@
 title: "Desktops"
 description: "What is installed on a Workstream desktop, the three sizes, and how long a desktop takes to start."
 order: 2
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 A desktop is a Debian Linux virtual machine with the XFCE graphical desktop. Each task has its own. The person on the desktop can use `sudo` without a password and can run Docker, and so can the agent.
@@ -20,6 +20,8 @@ An environment chooses which apps get a button on the desktop's panel.
 | Writer | Documents (LibreOffice). | No |
 | Calc | Spreadsheets (LibreOffice). | No |
 | Impress | Slides (LibreOffice). | No |
+| Android phone | An Android phone in its own window. | No |
+| iPhone | An iPhone simulator in its own window. Needs a Large desktop. | No |
 
 ## Developer tools
 
@@ -37,7 +39,22 @@ These are installed on every desktop, whatever the environment:
 
 Anything else a project needs goes in the environment's [setup script](/docs/environments#setup-script).
 
-Two things do not run on a desktop today. The Android emulator does not start on the machines the three sizes use, though Android builds work on all of them. iPhone and iPad builds and the iOS simulator need macOS, which a Linux desktop cannot run.
+## Phones
+
+A desktop can have an Android phone and an iPhone on it, each in its own window beside the browser. Add `android` or `iphone` to the environment's apps. You can click and type on a phone as you do on the rest of the desktop, and the agent uses it the same way: it opens the app, reads the screen, taps through what it changed and says what it saw.
+
+**Android.** The emulator runs on every size, and best on Standard or Large. The agent builds the Android app on the desktop, with the project's own tools.
+
+**iPhone.** The simulator is Apple's own iOS, and it needs a Large desktop. Installing it takes about twenty minutes and 30 GB, so it is done once, with the environment's [saved setup](/docs/environments#saved-setup), and every task starts with it.
+
+An iPhone app can only be built on a Mac, and a desktop is not one. So the desktop sends the app's source to Workstream, which builds it on a Mac and keeps the app for your team. Nothing is added to your repository.
+
+- A new build takes fifteen to thirty minutes. It is needed only when the app's native code changed: a native package, a config plugin or native source.
+- A change to JavaScript or Dart uses the app your team already has, and reaches the phone from the dev server on the desktop.
+- Workstream builds Expo apps today. React Native, Flutter and plain Xcode projects take the same path and have not been tried on a real project yet.
+- Siri does not work on the simulator, and neither does anything that needs a real device.
+
+The minutes a Mac spends on your team's builds are on the [Usage page](/docs/usage-and-limits#iphone-builds).
 
 ## Sizes
 

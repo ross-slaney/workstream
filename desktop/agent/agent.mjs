@@ -29,6 +29,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { authorFor } from "./github.mjs";
 import { panelFor } from "./panel.mjs";
+import { phoneStarts, setupScriptFor } from "./phones.mjs";
 import { startedFromLine, tail, usedBytes } from "./prepared.mjs";
 import { failureMessage, followScript, runScript, setupMinutes } from "./setup.mjs";
 import { localPort, machineStarted, noteTabs, restartScript, restoredLine, restorePlan } from "./restore.mjs";
@@ -323,10 +324,12 @@ async function prepareFiles(setup, saved) {
 async function prepareWindows(setup, workspace) {
   await sessionReady();
   await showApps(setup.apps);
-  if (setup.setupScript && !state.prepared) {
+  // The environment's own script, after the iPhone simulator's install when the environment has the iPhone (phones.mjs).
+  const script = setupScriptFor(setup);
+  if (script && !state.prepared) {
     say("activity", "Running the setup script");
     const minutes = setupMinutes(setup);
-    const { code, output } = await runSetupScript(setup.setupScript, workspace, setup.variables, minutes);
+    const { code, output } = await runSetupScript(script, workspace, setup.variables, minutes);
     if (code === 0) say("activity", "The setup script finished");
     else say("text", failureMessage(code, minutes, output));
     // Kept, so the agent is told how the setup ended however often it starts again.
@@ -341,7 +344,13 @@ async function prepareWindows(setup, workspace) {
   // The browser is always there: it is the one the agent's browser tools drive. A spare opened it while it waited.
   if (!(await browserAnswers())) start("chromium", ["about:blank"], setup.variables);
   if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
+  startPhones(setup);
   watchTabs();
+}
+
+/** The environment's phones come up with the desktop, each in its own window (phone.mjs), so they are there to watch and to touch. */
+function startPhones(setup) {
+  for (const args of phoneStarts(setup.apps)) start(process.execPath, [path.join(root, "agent/phone.mjs"), ...args], setup.variables);
 }
 
 /**
@@ -366,6 +375,7 @@ async function restore(plan, setup, workspace) {
   const away = plan.tabs.filter((url) => localPort(url) === null);
   if (await browserAnswers()) away.forEach((url) => start("chromium", [url], setup.variables));
   else start("chromium", away.length > 0 ? away : ["about:blank"], setup.variables);
+  startPhones(setup);
   say("activity", "Started again what was running before the desktop stopped");
   // Pages are recorded again once every page that was open is back, so a quick second stop loses none.
   Promise.all(here.map(async (url) => {
@@ -474,10 +484,11 @@ async function prepareForSave(setup) {
     branch = await git(target, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => null);
   }
   let output = "";
-  if (setup.setupScript) {
+  const script = setupScriptFor(setup);
+  if (script) {
     let sent = 0;
     // As the desktop's person, out of sight, for as long as a setup may run (setup.mjs).
-    const result = await runScript(setup.setupScript, {
+    const result = await runScript(script, {
       cwd: workspace, env: { ...process.env, ...setup.variables }, limitMs: setupMinutes(setup) * 60_000,
       onOutput: (written) => {
         output = written;
@@ -568,7 +579,7 @@ if (saved) {
   state.startedFrom = saved;
   await saveState();
 }
-const scripted = Boolean(setup.setupScript && !state.prepared);
+const scripted = Boolean(setupScriptFor(setup) && !state.prepared);
 const workspace = await prepareFiles(setup, saved);
 const windows = prepareWindows(setup, workspace).catch((error) => log("Preparing the desktop's windows failed:", error));
 if (scripted) await windows;
