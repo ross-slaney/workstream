@@ -265,7 +265,21 @@ function setupIphone() {
   return 0;
 }
 
-const windowOpen = () => run("wmctrl", ["-l"]).stdout.split("\n").some((line) => / iPhone$/.test(line) || /agent-sim/.test(line));
+const windows = () => (run("wmctrl", ["-l"]).stdout ?? "").split("\n");
+const windowOpen = (title) => windows().some((line) => line.includes(title));
+
+/**
+ * Put a window where a phone belongs: at the right of the screen, beside the browser and the editor, and no
+ * larger than a phone. A program asked for a size opens at the size it last had, so the window is moved once
+ * it is there. The screen is 1280 wide (session.sh), and the panel takes the bottom 45.
+ */
+export const PLACES = { iphone: { title: "agent-sim", at: "0,850,0,430,866" }, android: { title: "Android Emulator", at: "0,430,0,-1,-1" } };
+
+async function place({ title, at }) {
+  if (!process.env.DISPLAY) return;
+  for (let waited = 0; waited < 40 && !windowOpen(title); waited++) await sleep(250);
+  if (windowOpen(title)) run("wmctrl", ["-r", title, "-e", at]);
+}
 
 /** Boot the phone, stream it on this desktop only, and open its window where the person can touch it. */
 async function startIphone() {
@@ -286,8 +300,9 @@ async function startIphone() {
       if (await fetch(url, { signal: AbortSignal.timeout(1000) }).then((response) => response.ok, () => false)) break;
     }
   }
-  if (process.env.DISPLAY && !windowOpen()) {
-    spawn("chromium", [`--app=${url}`, "--window-size=460,960", "--window-position=800,0"], { detached: true, stdio: "ignore" }).unref();
+  if (process.env.DISPLAY && !windowOpen(PLACES.iphone.title)) {
+    spawn("chromium", [`--app=${url}`], { detached: true, stdio: "ignore" }).unref();
+    await place(PLACES.iphone);
   }
   say("The iPhone is on. Read its screen with `phone ios snapshot`, and tap what it lists with `phone ios tap @e3`.");
   return 0;
@@ -327,6 +342,7 @@ async function startAndroid() {
     say("Starting the Android phone: about a minute, and up to three the first time on a new desktop.");
     for (let waited = 0; waited < 150 && !androidBooted(); waited++) await sleep(2000);
     if (!androidBooted()) throw new Error(`The Android phone did not boot in five minutes. Its log is ${path.join(dir, "android.log")}.`);
+    await place(PLACES.android);
   }
   say("The Android phone is on. `adb devices` lists it. Read its screen with `adb shell uiautomator dump /sdcard/ui.xml && adb shell cat /sdcard/ui.xml`, and tap with `adb shell input tap X Y`.");
   return 0;
