@@ -304,7 +304,10 @@ async function startIphone() {
     }
   }
   if (process.env.DISPLAY && !windowOpen(PLACES.iphone.title)) {
-    spawn("chromium", [`--app=${url}`], { detached: true, stdio: "ignore" }).unref();
+    // A browser of its own, with its own profile and no part in the desktop's browser: the agent's browser
+    // tools drive that one, and would otherwise find this window among its pages and take it somewhere else.
+    spawn("chromium", [`--user-data-dir=${path.join(dir, "iphone-window")}`, "--remote-debugging-port=0", `--app=${url}`, "--window-size=430,890", "--window-position=850,0"],
+      { detached: true, stdio: "ignore" }).unref();
     await place(PLACES.iphone);
   }
   say("The iPhone is on. Read its screen with `phone ios snapshot`, and tap what it lists with `phone ios tap @e3`.");
