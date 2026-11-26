@@ -506,6 +506,11 @@ export async function main(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // Whoever reads the output may stop early (`phone ios tap … | head`). The command still finishes what it
+  // was doing to the phone, and ends with its own result.
+  process.stdout.on("error", (error) => {
+    if (error.code !== "EPIPE") throw error;
+  });
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (error) {

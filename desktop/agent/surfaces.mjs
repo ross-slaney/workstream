@@ -98,6 +98,9 @@ export function main(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.stdout.on("error", (error) => {
+    if (error.code !== "EPIPE") throw error;
+  });
   try {
     process.env.DISPLAY ??= ":1";
     process.exitCode = main(process.argv.slice(2));
