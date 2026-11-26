@@ -183,7 +183,24 @@ One command is the same for the agent, a terminal and the panel's buttons (`agen
 | `phone android start` | Starts the emulator and waits until Android has booted. The Android app is built on the desktop, by the project's own tools. |
 | `phone ios start` | Boots the iPhone and opens its window. |
 | `phone ios run <folder>` | Gets the project's iPhone app (below), installs it and opens it. |
-| `phone ios snapshot`, `tap`, `type`, `scroll`, `open`, `screenshot`, `logs` | Reads the iPhone's screen as lines of text with a reference each, and acts on it. |
+| `phone <ios or android> snapshot` | The phone's screen as lines of text, one for each thing on it, with a reference (`@e3`). |
+| `phone <ios or android> tap`, `type`, `fill`, `scroll`, `swipe`, `open`, `wait`, `screenshot`, `launch`, `terminate`, `logs`, `install` | Uses the phone. The words are the same on both. |
+| `surfaces arrange` | Puts the browser and the phones side by side, each fully visible (`agent/surfaces.mjs`). |
+
+### Using a phone
+
+The two phones are driven by different tools (agent-sim for the iPhone, `adb` for Android), and the commands are written once over both (`agent/touch.mjs`, `agent/screen.mjs`), so an agent learns one way to use a phone. An Android screen is read from `uiautomator dump` into the same lines the iPhone's are.
+
+- **A command that changes the screen waits until the screen is still, and prints it.** A tap is sent in milliseconds and shown some time later, longer when the desktop is busy. On the first task that used the phones the agent slept fifteen to twenty seconds after each tap because it could not know. Now `tap` reads the screen before, and after until it has changed and two readings agree (one reading on Android, which only reads a screen at rest, and takes about two seconds to). A screen with nothing on it yet is still loading and is waited on. Measured on a Large desktop: about a second on the iPhone, five to eight on Android.
+- **Typing says what the field holds.** `type` returns when the field holds what it held with the text put in, and fails with what it holds instead. This is what stops garbled text: the simulator delivers keys one at a time, and a second command sent while the first one's keys were still arriving had its Shift land on them (`8081` came out as `*)*!`).
+- **`fill` empties the field first.** It taps the end of the field, deletes what it holds until a reading says it is empty, and types. `type` is for the field that already has the keyboard.
+- **References** are to the last reading. Every command that prints the screen gives new ones.
+
+### The desktop's windows
+
+A window opens where its program last had it, and the last one opened covers the others, so a desktop that is handed over with three surfaces can show one of them. `surfaces arrange` places the iPhone at the right, the Android phone beside it and the browser in the rest, and raises them in that order. The screen is 1280 wide and Chromium goes no narrower than 508, so with both phones the browser shows a page at a phone's width. The agent is told to run it when it hands work over.
+
+The desktop's browser opens `https://localhost` without Chromium's "not private" page (`--allow-insecure-localhost`, `image/configure.sh`). A project's own server there has a certificate that nothing vouches for, whatever made it, and the page it would otherwise show covered the phones for half an hour on that first task. Only addresses on the desktop itself are opened this way.
 
 ### The iPhone simulator
 

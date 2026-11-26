@@ -14,7 +14,9 @@ test("the agent is told to follow the repository's rules and skills, and how a d
 test("the agent is told how to start the Android phone, on every size, and how to use it", () => {
   const told = projectTools();
   assert.match(told, /`phone android start`/);
-  assert.match(told, /adb shell input tap/);
+  assert.match(told, /`phone android snapshot`/);
+  assert.match(told, /`phone android fill @e3 "text"`/);
+  assert.doesNotMatch(told, /adb shell input/);
   assert.doesNotMatch(told, /processor does not|Intel/);
 });
 

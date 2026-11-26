@@ -15,9 +15,12 @@ getent group kvm >/dev/null && usermod -aG kvm work
 
 # Chromium: no first-run questions, one profile shared by the person and the agent's browser tools (which
 # attach on port 9222, open to this desktop only), and no sandbox of its own inside a container, which has
-# none to give (said without the warning bar Chromium would otherwise show about it).
+# none to give (said without the warning bar Chromium would otherwise show about it). A project's own server
+# on https://localhost has a certificate nothing vouches for, whatever made it (mkcert, a framework's
+# development certificate, a self-signed one): Chromium opens those without its "not private" page. Only
+# this desktop itself is ever reached that way.
 cat > /etc/chromium.d/workstream <<'EOF'
-export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check --password-store=basic --disable-features=Translate --remote-debugging-port=9222 --user-data-dir=/home/work/.workstream/browser"
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check --password-store=basic --disable-features=Translate --allow-insecure-localhost --remote-debugging-port=9222 --user-data-dir=/home/work/.workstream/browser"
 if [ -f /.dockerenv ]; then export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type --disable-dev-shm-usage"; fi
 EOF
 
@@ -61,6 +64,13 @@ cat > /usr/local/bin/phone <<'EOF'
 exec node /opt/workstream/agent/phone.mjs "$@"
 EOF
 chmod +x /usr/local/bin/phone
+
+# `surfaces`, which puts the browser and the phones side by side (agent/surfaces.mjs).
+cat > /usr/local/bin/surfaces <<'EOF'
+#!/bin/sh
+exec node /opt/workstream/agent/surfaces.mjs "$@"
+EOF
+chmod +x /usr/local/bin/surfaces
 
 # The agent and its packages.
 (cd "$ROOT/agent" && npm ci --omit=dev --no-audit --no-fund && npm cache clean --force >/dev/null 2>&1)
