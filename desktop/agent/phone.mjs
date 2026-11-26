@@ -6,8 +6,18 @@
 //   phone ios build [folder]   get the project's iPhone app: the build the team already has, or a new one made on a Mac
 //   phone ios run [folder]     build, install and open the app on the iPhone
 //   phone ios stop             shut the iPhone down
-//   phone ios <anything else>  agent-sim's own command: snapshot, tap, type, scroll, screenshot, open, logs, launch…
 //   phone android start        start the Android phone and wait until it has booted
+//
+// Using either phone, with the same words (touch.mjs):
+//
+//   phone <ios|android> snapshot                 what is on the screen, one line each, with a reference
+//   phone <ios|android> tap @e3 | "words" | X Y   tap, wait until the screen is still, and print it
+//   phone <ios|android> type "text"              type into the focused field and say what it holds
+//   phone <ios|android> fill @e3 "text"          tap a field, empty it, type, and say what it holds
+//   phone <ios|android> scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone]
+//   phone <ios|android> screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
+//   phone android back | home;  phone ios press home
+//   phone ios <anything else>                    agent-sim's own command
 //
 // An iPhone app is built with Xcode, which a Linux desktop does not have, so `build` sends the app's source to
 // Workstream, which has it built on a Mac and keeps the result for the team (api/Builds). What decides whether
@@ -25,6 +35,8 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { toldNow } from "./told.mjs";
+import { acted, android, fill, iphone, readAndroid, typeText, waitFor } from "./touch.mjs";
+import { linesOf } from "./screen.mjs";
 
 /** Changes when the Mac's recipe changes what it builds (builder/ios.sh), so old builds are not taken for new ones. */
 export const RECIPE = "1";
@@ -350,8 +362,102 @@ async function startAndroid() {
     if (!androidBooted()) throw new Error(`The Android phone did not boot in five minutes. Its log is ${path.join(dir, "android.log")}.`);
     await place(PLACES.android);
   }
-  say("The Android phone is on. `adb devices` lists it. Read its screen with `adb shell uiautomator dump /sdcard/ui.xml && adb shell cat /sdcard/ui.xml`, and tap with `adb shell input tap X Y`.");
+  say("The Android phone is on. Read its screen with `phone android snapshot`, and tap what it lists with `phone android tap @e3`.");
   return 0;
+}
+
+const adbShell = (...args) => spawnSync("adb", ["shell", ...args], { stdio: "inherit" }).status ?? 1;
+
+/** The Android screen's size in pixels, which a scroll is measured against. */
+function androidSize() {
+  const size = /(\d+)x(\d+)/.exec(run("adb", ["shell", "wm", "size"]).stdout ?? "");
+  return size ? [Number(size[1]), Number(size[2])] : [1080, 2400];
+}
+
+/** The commands for using the Android phone, in the iPhone's words. */
+async function useAndroid(command, rest, { wait }) {
+  if (!androidBooted()) throw new Error("The Android phone is not on. Start it with `phone android start`.");
+  const phone = android();
+  const flags = rest.filter((argument) => argument.startsWith("--") || argument === "-o");
+  const words = rest.filter((argument, index) => !argument.startsWith("--") && argument !== "-o" && rest[index - 1] !== "-o" && rest[index - 1] !== "--timeout" && rest[index - 1] !== "--ms");
+  const valueOf = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
+  switch (command) {
+    case "snapshot":
+      process.stdout.write(linesOf(readAndroid()) + "\n");
+      return 0;
+    case "tap":
+      if (!words.length) throw new Error("Say what to tap: a reference (@e3), words on the screen, or a point (X Y).");
+      return acted(phone, () => phone.tap(words), { wait });
+    case "type":
+      return typeText(phone, words.join(" "));
+    case "fill":
+      if (words.length < 2) throw new Error('Say the field and the text: `phone android fill @e3 "text"`.');
+      return fill(phone, words.slice(0, -1), words.at(-1));
+    case "scroll": {
+      const [width, height] = androidSize();
+      const up = words[0] === "up";
+      return acted(phone, () => adbShell("input", "swipe", String(width / 2), String(Math.round(height * (up ? 0.35 : 0.7))), String(width / 2), String(Math.round(height * (up ? 0.7 : 0.35))), "300"), { wait });
+    }
+    case "swipe":
+      if (words.length !== 4) throw new Error("A swipe is four numbers: `phone android swipe X1 Y1 X2 Y2`.");
+      return acted(phone, () => adbShell("input", "swipe", ...words, valueOf("--ms") ?? "300"), { wait });
+    case "back":
+      return acted(phone, () => adbShell("input", "keyevent", "4"), { wait });
+    case "home":
+      return acted(phone, () => adbShell("input", "keyevent", "3"), { wait });
+    case "open":
+      if (!words[0]) throw new Error("Say the link to open.");
+      return acted(phone, () => (run("adb", ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${words[0].replace(/'/g, "")}'`]).status ?? 1), { wait });
+    case "wait":
+      return waitFor(phone, words.join(" "), { gone: flags.includes("--gone"), seconds: Number(valueOf("--timeout") ?? 20) });
+    case "screenshot": {
+      const file = valueOf("-o") ?? "/tmp/android-screen.png";
+      const shot = spawnSync("adb", ["exec-out", "screencap", "-p"], { maxBuffer: 64 * 1024 * 1024 });
+      if (shot.status !== 0 || !shot.stdout?.length) throw new Error("The Android phone's screen could not be saved.");
+      writeFileSync(file, shot.stdout);
+      process.stdout.write(file + "\n");
+      return 0;
+    }
+    case "launch":
+      if (!words[0]) throw new Error("Say the app's package, such as com.example.app.");
+      return acted(phone, () => (run("adb", ["shell", "monkey", "-p", words[0], "-c", "android.intent.category.LAUNCHER", "1"]).status ?? 1), { wait });
+    case "terminate":
+      return adbShell("am", "force-stop", words[0] ?? "");
+    case "install":
+      return spawnSync("adb", ["install", "-r", words[0] ?? ""], { stdio: "inherit" }).status ?? 1;
+    case "logs": {
+      const pid = run("adb", ["shell", "pidof", words[0] ?? ""]).stdout.trim().split(/\s+/)[0];
+      return spawnSync("adb", pid ? ["logcat", "-d", "-t", "300", `--pid=${pid}`] : ["logcat", "-d", "-t", "300"], { stdio: "inherit" }).status ?? 1;
+    }
+    default:
+      say(USAGE);
+      return 2;
+  }
+}
+
+/** The commands for using the iPhone that wait for the screen; the rest are agent-sim's own. */
+async function useIphone(command, rest, { wait }) {
+  requireSimulator();
+  const phone = iphone(simulatorEnvironment());
+  const words = rest.filter((argument) => !argument.startsWith("--"));
+  switch (command) {
+    case "tap":
+    case "scroll":
+    case "swipe":
+    case "press":
+    case "open":
+    case "launch":
+      return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
+    case "type":
+      // Key presses are for apps that watch each one; they are sent as they are, and the screen is waited for.
+      if (rest.includes("--keys")) return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
+      return typeText(phone, words.join(" "));
+    case "fill":
+      if (words.length < 2) throw new Error('Say the field and the text: `phone ios fill @e3 "text"`.');
+      return fill(phone, words.slice(0, -1), words.at(-1));
+    default:
+      return simulator([command, ...rest]).status ?? 1;
+  }
 }
 
 // ── The command ─────────────────────────────────────────────────────────────────────────────────────────
@@ -360,14 +466,26 @@ const USAGE = `Use:
   phone ios setup | start | stop
   phone ios build [folder] [--again]
   phone ios run [folder] [--again]
-  phone ios snapshot | tap … | type … | scroll … | screenshot … | open <link> | logs …   (agent-sim's own)
-  phone android start`;
+  phone android start
+
+  On either phone (phone ios …, phone android …):
+  snapshot                              what is on the screen, one line each, with a reference
+  tap @e3 | "words" | X Y               tap, wait until the screen is still, and print it
+  type "text"                           type into the focused field and say what it holds
+  fill @e3 "text"                       tap a field, empty it, type, and say what it holds
+  scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone] [--timeout 20]
+  screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
+  phone android back | home; phone ios press home
+  --no-wait                             return as soon as the tap is sent`;
 
 export async function main(argv) {
   const [platform, command, ...rest] = argv;
   const again = rest.includes("--again");
   const folder = rest.find((argument) => !argument.startsWith("--")) ?? ".";
+  const touch = { wait: !rest.includes("--no-wait") };
+  const given = rest.filter((argument) => argument !== "--no-wait");
   if (platform === "android" && command === "start") return startAndroid();
+  if (platform === "android" && command) return useAndroid(command, given, touch);
   if (platform !== "ios" || !command) {
     say(USAGE);
     return 2;
@@ -383,8 +501,7 @@ export async function main(argv) {
     }
     case "run": return runIphone(folder, { again });
     default:
-      requireSimulator();
-      return simulator([command, ...rest]).status ?? 1;
+      return useIphone(command, given, touch);
   }
 }
 
