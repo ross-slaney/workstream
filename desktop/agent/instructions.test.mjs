@@ -63,3 +63,11 @@ test("the agent is told to start what is slow first and to keep working while it
   assert.match(told, /`phone ios build <the app's folder> --no-wait` sends the source and returns at once/);
   assert.doesNotMatch(projectTools(), /phone ios build/);
 });
+
+test("the agent is told about Return, about what a reading leaves out, and that the surface in use comes to the front", () => {
+  const told = projectTools(["chrome", "iphone", "android"]);
+  assert.match(told, /`press enter` presses Return/);
+  assert.match(told, /leaves out a system dialog and some overlays/);
+  assert.match(told, /comes to the front of the desktop by itself/);
+  assert.match(told, /its developer menu covers the app/);
+});

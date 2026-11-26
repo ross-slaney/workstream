@@ -24,6 +24,17 @@ export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check
 if [ -f /.dockerenv ]; then export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type --disable-dev-shm-usage"; fi
 EOF
 
+# The accounts used on a desktop are a task's test accounts. Chromium does not offer to save their passwords
+# or warn that one was found in a breach: in the first task that signed up in the browser, the "Save
+# password?" bubble covered the page that was being handed over.
+mkdir -p /etc/chromium/policies/managed
+cat > /etc/chromium/policies/managed/workstream.json <<'EOF'
+{
+  "PasswordManagerEnabled": false,
+  "PasswordLeakDetectionEnabled": false
+}
+EOF
+
 # The agent's own window, opened from the panel.
 cat > /usr/share/applications/workstream-agent.desktop <<'EOF'
 [Desktop Entry]
