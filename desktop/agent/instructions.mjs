@@ -4,8 +4,18 @@
 import { phoneInstructions } from "./phones.mjs";
 
 /**
+ * Where the work is done: in the folder the setup prepared. A project's own instructions often say to work in
+ * a git worktree, which keeps tasks apart on a computer they share. Here each task has a desktop to itself,
+ * and a new folder has none of what the setup installed and built: the first task that made one installed
+ * the project's packages a second time and started from a branch the environment was not set to.
+ */
+const ownCheckout =
+  "This desktop is yours alone for this task, and what the environment's setup installed and built is in that folder. Do the work there, on a new branch made from where the checkout is. Do not make a git worktree or a second copy of the repository for the task, even when the repository's own instructions or skills say to work in one: that keeps tasks apart on a computer they share, which this desktop already does, and a new folder has nothing installed or built.";
+
+/**
  * How project work ends, on any repository: on a branch of its own and a pull request, never on the default
- * branch. git and gh sign in to GitHub by themselves (github.mjs, shims/gh), with or without a repository in
+ * branch. When the environment is set to another branch, the pull request goes against that one, since the
+ * work started from it. git and gh sign in to GitHub by themselves (github.mjs, shims/gh), with or without a repository in
  * the environment, so a task about another repository can clone it.
  */
 export const projectWork = (repository) =>
@@ -14,10 +24,10 @@ ${
   repository
     ? `The project is the repository ${repository.url}${repository.branch ? `, on its branch ${repository.branch}` : ""}, cloned into your working folder.`
     : "No repository is cloned on this desktop. git and gh reach GitHub as the person who started this task: when the task is about a repository, clone it into your working folder with `gh repo clone owner/name`."
-} Finish work on any repository as a branch and a pull request:
+}${repository ? ` ${ownCheckout}` : ""} Finish work on any repository as a branch and a pull request:
 
 - Make a new branch for the work before you commit, named for what it does.
-- Commit there, push the branch, and open a pull request with \`gh pr create\`, saying what changed and why. Give the person its address when you finish.
+- Commit there, push the branch, and open a pull request with \`gh pr create\`, saying what changed and why.${repository?.branch ? ` If ${repository.branch} is not the repository's default branch, open the pull request against ${repository.branch}, so it shows only your change.` : ""} Give the person its address when you finish.
 - Never push to the default branch or to the branch you started from, and never force-push a branch you did not make.
 - git and gh sign in to GitHub by themselves, as the person who started this task. If they cannot, they print a line starting with "Workstream:" that says why: tell the person that line. If pushing is refused, say so and leave the work committed on its branch; do not look for another way in.
 `.trim();
@@ -34,6 +44,7 @@ Working on a project:
 ${phoneInstructions(apps)}
 - Inside a container, \`host.docker.internal\` is this desktop, as it is on a Mac: a container reaches a server running on the desktop there, one that listens only on localhost included, and so does a build. Scripts written for Docker Desktop need no change for it.
 - Builds, installs and a first start of a stack can take many minutes. A command you run is stopped after ten minutes unless you give it a longer timeout, which can be up to an hour: give such commands one, or start them in the background with their output in a log file and read the log.
+- Start what takes longest first, and do not sit waiting for it. While a build runs or a stack starts, go on with what does not need it: the change itself, the project's checks, another surface. Come back when its log says it is done. Wait only when nothing else is left to do.
 - On a long task, say in a sentence what you finished and what comes next at each milestone, so the people watching know where you are.
 `.trim();
 

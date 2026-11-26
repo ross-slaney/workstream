@@ -170,7 +170,7 @@ The bake checks it from a network namespace joined to Docker's bridge, which is 
 
 A desktop started again after a stop starts Docker when it has containers, so the ones a project told Docker to restart (a database with a restart policy) come back with it.
 
-The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, and deliver changes on a branch of their own as a pull request opened with `gh`. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
+The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, start what takes longest first and go on with other work while it runs, and deliver changes on a branch of their own as a pull request opened with `gh`. It is told to work in the folder the setup prepared, and not in a git worktree or a second copy, even when the repository's own skill says to use one. A worktree keeps tasks apart on a computer they share, which a desktop for each task already does, and a new folder has nothing the setup installed: the first task that made one installed the project's packages again and branched from a branch the environment was not set to. When the environment is set to a branch that is not the default one, the pull request goes against that branch. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
 
 ## Phones on a desktop
 
@@ -182,7 +182,8 @@ One command is the same for the agent, a terminal and the panel's buttons (`agen
 | --- | --- |
 | `phone android start` | Starts the emulator and waits until Android has booted. The Android app is built on the desktop, by the project's own tools. |
 | `phone ios start` | Boots the iPhone and opens its window. |
-| `phone ios run <folder>` | Gets the project's iPhone app (below), installs it and opens it. |
+| `phone ios build <folder> --no-wait` | Asks for the project's iPhone app (below) and returns while the Mac builds it. The agent is told to do this first when a task will need the iPhone, and to write the change meanwhile: in the first task that needed a build, the agent waited 27 minutes for it and did nothing else. |
+| `phone ios run <folder>` | Gets the project's iPhone app, waiting for what is left of its build, installs it and opens it. |
 | `phone <ios or android> snapshot` | The phone's screen as lines of text, one for each thing on it, with a reference (`@e3`). |
 | `phone <ios or android> tap`, `type`, `fill`, `scroll`, `swipe`, `open`, `wait`, `screenshot`, `launch`, `terminate`, `logs`, `install` | Uses the phone. The words are the same on both. |
 | `surfaces arrange` | Puts the browser and the phones side by side, each fully visible (`agent/surfaces.mjs`). |

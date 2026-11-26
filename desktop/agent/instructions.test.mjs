@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { noSetup, projectTools } from "./instructions.mjs";
+import { noSetup, projectTools, projectWork } from "./instructions.mjs";
 
 test("the agent is told to follow the repository's rules and skills, and how a desktop without an iPhone gets one", () => {
   const told = projectTools();
@@ -42,4 +42,24 @@ test("the agent is told to install the project first when the environment has a 
   assert.match(noSetup({ repository, setupScript: "  " }), /No setup script ran/);
   assert.equal(noSetup({ repository, setupScript: "npm ci" }), "");
   assert.equal(noSetup({ repository: null, setupScript: null }), "");
+});
+
+test("the agent is told to work in the checkout the setup prepared, and against the branch it started from", () => {
+  const told = projectWork({ url: "https://github.com/acme/app", branch: "release/2" });
+  assert.match(told, /what the environment's setup installed and built is in that folder/);
+  assert.match(told, /Do not make a git worktree or a second copy/);
+  assert.match(told, /open the pull request against release\/2/);
+  const noBranch = projectWork({ url: "https://github.com/acme/app" });
+  assert.match(noBranch, /Do not make a git worktree/);
+  assert.doesNotMatch(noBranch, /open the pull request against/);
+  const noRepository = projectWork(null);
+  assert.match(noRepository, /No repository is cloned/);
+  assert.doesNotMatch(noRepository, /worktree/);
+});
+
+test("the agent is told to start what is slow first and to keep working while it runs", () => {
+  assert.match(projectTools(), /Start what takes longest first, and do not sit waiting for it/);
+  const told = projectTools(["chrome", "iphone", "android"]);
+  assert.match(told, /`phone ios build <the app's folder> --no-wait` sends the source and returns at once/);
+  assert.doesNotMatch(projectTools(), /phone ios build/);
 });
