@@ -4,6 +4,7 @@
 //   phone ios setup            install the iPhone simulator (the environment's setup does it, once)
 //   phone ios start            boot the iPhone and show it on the desktop
 //   phone ios build [folder]   get the project's iPhone app: the build the team already has, or a new one made on a Mac
+//                              (--no-wait asks for it and returns while the Mac builds)
 //   phone ios run [folder]     build, install and open the app on the iPhone
 //   phone ios stop             shut the iPhone down
 //   phone android start        start the Android phone and wait until it has booted
@@ -176,8 +177,10 @@ const megabytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 /**
  * The project's iPhone app, built: the folder of the `.app` on this desktop and its bundle identifier.
  * Takes what the team already has for this hash, and otherwise sends the source and waits for the Mac.
+ * Without `wait` it asks, sends the source and answers null while the Mac works, so a task can ask for the
+ * build first and do its other work meanwhile: the wait was 27 idle minutes in the first task that needed one.
  */
-export async function build(folder, { again = false } = {}) {
+export async function build(folder, { again = false, wait = true } = {}) {
   const app = describeApp(folder);
   const kept = path.join(dir, "builds", app.hash);
   const marker = path.join(kept, "build.json");
@@ -198,6 +201,10 @@ export async function build(folder, { again = false } = {}) {
     rmSync(source, { force: true });
   } else if (asked.state !== "done" && asked.state !== "failed") {
     say(`Your team's build of this native code is already under way (${app.hash.slice(0, 12)}). Waiting for it.`);
+  }
+  if (!wait && asked.state !== "done" && asked.state !== "failed") {
+    say("The build is under way on a Mac and takes fifteen to thirty minutes. Go on with other work: `phone ios run` installs the app, and waits only for what is left of the build.");
+    return null;
   }
   const started = Date.now();
   let said = "";
@@ -464,7 +471,7 @@ async function useIphone(command, rest, { wait }) {
 
 const USAGE = `Use:
   phone ios setup | start | stop
-  phone ios build [folder] [--again]
+  phone ios build [folder] [--again] [--no-wait]
   phone ios run [folder] [--again]
   phone android start
 
@@ -476,7 +483,7 @@ const USAGE = `Use:
   scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone] [--timeout 20]
   screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
   phone android back | home; phone ios press home
-  --no-wait                             return as soon as the tap is sent`;
+  --no-wait                             return as soon as the tap is sent (with build: as soon as it is asked for)`;
 
 export async function main(argv) {
   const [platform, command, ...rest] = argv;
@@ -495,8 +502,8 @@ export async function main(argv) {
     case "start": return startIphone();
     case "stop": return simulator(["down"]).status ?? 0;
     case "build": {
-      const built = await build(folder, { again });
-      process.stdout.write(built.app + "\n");
+      const built = await build(folder, { again, wait: touch.wait });
+      if (built) process.stdout.write(built.app + "\n");
       return 0;
     }
     case "run": return runIphone(folder, { again });
