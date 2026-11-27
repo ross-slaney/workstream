@@ -22,11 +22,12 @@ public sealed record KeptStorage(string TeamId, string Kind, string SourceId, de
 {
     /// <summary>
     /// What a task keeps. Its desktop's disk while it has a machine (<see cref="WorkTask.Host"/>), running or
-    /// not, at the size the disk was made with; and its archive, at what is on it.
+    /// not, or is paused on its disk alone (<see cref="WorkTask.Disk"/>), at the size the disk was made with;
+    /// and its archive, at what is on it.
     /// </summary>
     public static IEnumerable<KeptStorage> Of(WorkTask task, int diskGb)
     {
-        if (task.Host is not null) yield return new KeptStorage(task.TeamId, StorageKind.Disk, task.Id, diskGb);
+        if ((task.Host ?? task.Disk) is not null) yield return new KeptStorage(task.TeamId, StorageKind.Disk, task.Id, diskGb);
         if (task.Archive is not null) yield return new KeptStorage(task.TeamId, StorageKind.Archive, task.Id, StorageRun.GbOf(task.ArchiveBytes ?? 0));
     }
 

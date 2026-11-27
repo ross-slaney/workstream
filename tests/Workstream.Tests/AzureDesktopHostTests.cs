@@ -207,4 +207,79 @@ public sealed class AzureDesktopHostTests
         await host.StopAsync(Name, default);
         Assert.AreEqual(0, Posts(azure).Length);
     }
+
+    [TestMethod]
+    public async Task A_paused_machine_is_given_up_with_its_disk_kept_and_a_machine_is_made_from_the_disk_again()
+    {
+        var (host, azure) = Played(hibernate: false);
+        await host.CreateAsync(Spec(), default);
+        await host.StopAsync(Name, default);
+
+        Assert.IsTrue(await host.ReleaseAsync(Name, default));
+        // The machine is gone, so Azure counts no cores for it, and its disk is still there.
+        Assert.IsFalse(azure.Machines.ContainsKey(Name));
+        Assert.IsTrue(azure.Disks.ContainsKey(Name + "-os"));
+        // Told to leave its disk before it was deleted, in that order.
+        var asked = azure.Asked.ToList();
+        var patched = asked.FindIndex(x => x.StartsWith("PATCH ") && x.EndsWith("/virtualMachines/" + Name));
+        var deleted = asked.FindIndex(x => x.StartsWith("DELETE ") && x.Contains("/virtualMachines/" + Name));
+        Assert.IsTrue(patched >= 0 && deleted > patched);
+        Assert.IsFalse(asked.Any(x => x.StartsWith("DELETE ") && x.Contains("/disks/")));
+        // Asked again, as a job tried again would: the disk is the desktop.
+        Assert.IsTrue(await host.ReleaseAsync(Name, default));
+
+        // The machine made from it takes that disk as it is, with the security type the disk was made with.
+        await host.CreateAsync(Spec() with { Kept = true, Key = "another" }, default);
+        var disk = Made(azure)["storageProfile"]!["osDisk"]!;
+        Assert.AreEqual("Attach", disk["createOption"]!.GetValue<string>());
+        StringAssert.EndsWith(disk["managedDisk"]!["id"]!.GetValue<string>(), $"/disks/{Name}-os");
+        Assert.IsNull(Made(azure)["storageProfile"]!["imageReference"]);
+        Assert.AreEqual("TrustedLaunch", Made(azure)["securityProfile"]!["securityType"]!.GetValue<string>());
+        Assert.IsFalse(azure.Asked.Any(x => x.StartsWith("PUT ") && x.Contains("/disks/")));
+        StringAssert.Contains(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(Made(azure)["userData"]!.GetValue<string>())), "WORKSTREAM_KEY=another");
+
+        // Deleting the desktop deletes the machine and the disk.
+        await host.DeleteAsync(Name, default);
+        Assert.IsFalse(azure.Disks.ContainsKey(Name + "-os"));
+    }
+
+    [TestMethod]
+    public async Task A_running_machine_that_is_given_up_is_stopped_first()
+    {
+        var (host, azure) = Played(hibernate: false);
+        await host.CreateAsync(Spec(), default);
+
+        Assert.IsTrue(await host.ReleaseAsync(Name, default));
+        CollectionAssert.AreEqual(new[] { "deallocate" }, Posts(azure));
+        Assert.IsFalse(azure.Machines.ContainsKey(Name));
+        Assert.IsTrue(azure.Disks.ContainsKey(Name + "-os"));
+    }
+
+    [TestMethod]
+    public async Task A_machine_that_hibernated_is_kept_and_one_that_is_gone_with_no_disk_is_not_kept()
+    {
+        var (host, azure) = Played(hibernate: true);
+        await host.CreateAsync(Spec(), default);
+        await host.StopAsync(Name, default);
+        // Its memory is on its disk, and only the same machine wakes up from it.
+        Assert.IsFalse(await host.ReleaseAsync(Name, default));
+        Assert.IsTrue(azure.Machines.ContainsKey(Name));
+        Assert.IsFalse(azure.Asked.Any(x => x.StartsWith("PATCH ") || x.StartsWith("DELETE ")));
+
+        Assert.IsFalse(await host.ReleaseAsync(DesktopHosting.NameFor(Guid.NewGuid().ToString()), default));
+    }
+
+    [TestMethod]
+    public async Task A_desktop_paused_on_its_disk_is_archived_from_the_disk()
+    {
+        var (host, azure) = Played(hibernate: false);
+        await host.CreateAsync(Spec(), default);
+        await host.ReleaseAsync(Name, default);
+        azure.Asked.Clear();
+        // The played Azure has the copy as soon as it is asked for.
+        azure.Snapshots["wsa-played"] = true;
+
+        await host.ArchiveAsync(Name, "wsa-played", default);
+        Assert.IsTrue(azure.Asked.Any(x => x.StartsWith("PUT ") && x.EndsWith("/snapshots/wsa-played")));
+    }
 }
