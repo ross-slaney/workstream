@@ -201,6 +201,11 @@ if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   chmod +x "$ROOT/image/grow-disk.sh"
   install -m 0644 "$ROOT/image/workstream-grow-disk.service" /etc/systemd/system/workstream-grow-disk.service
   systemctl enable workstream-grow-disk.service
+  # Swap kept in memory, compressed, so a stack that holds more memory than it uses does not stop the
+  # machine (image/swap.sh).
+  chmod +x "$ROOT/image/swap.sh"
+  install -m 0644 "$ROOT/image/workstream-swap.service" /etc/systemd/system/workstream-swap.service
+  systemctl enable workstream-swap.service
   # A desktop Azure can hibernate (api/Desktops/DesktopHosts.cs, Hibernate) writes its memory to its own disk
   # when it is stopped, and is back as it was when it is started. Azure asks through the machine's Hyper-V
   # tools; the kernel passes the request on as an event, and nothing in Debian answers it. So: room for the
@@ -216,12 +221,16 @@ if [ ! -f /.dockerenv ] && command -v systemctl >/dev/null 2>&1; then
   cat > /etc/udev/rules.d/90-workstream-hibernate.rules <<'RULE'
 SUBSYSTEM=="vmbus", ACTION=="change", DRIVER=="hv_utils", ENV{EVENT}=="hibernate", RUN+="/usr/bin/systemd-run --no-block /opt/workstream/image/hibernate.sh now"
 RULE
-  # A project's stack watches many files (Metro, dotnet watch, VS Code) and keeps many open. The last line is
-  # for host.docker.internal, below.
+  # A project's stack watches many files (Metro, dotnet watch, VS Code) and keeps many open. Swap here is
+  # memory, not a disk (image/swap.sh): setting idle memory aside costs as little as dropping a file, so the
+  # kernel weighs them alike (swappiness 100) and reads back one page at a time (page-cluster 0). The last
+  # line is for host.docker.internal, below.
   cat > /etc/sysctl.d/90-workstream.conf <<'CONF'
 fs.inotify.max_user_watches = 1048576
 fs.inotify.max_user_instances = 8192
 vm.max_map_count = 262144
+vm.swappiness = 100
+vm.page-cluster = 0
 net.ipv4.conf.all.route_localnet = 1
 CONF
   if [ -d /etc/docker ]; then

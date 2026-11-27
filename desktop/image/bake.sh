@@ -64,6 +64,12 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   bash /opt/workstream/image/check-host-name.sh
   systemctl stop docker.service
   systemctl is-enabled workstream-host-name.service > /dev/null
+  # Swap in memory: the kernel has the module, and the service that makes it works (swap.sh).
+  modinfo zram > /dev/null
+  systemctl is-enabled workstream-swap.service > /dev/null
+  bash /opt/workstream/image/swap.sh
+  grep -q '^/dev/zram0 ' /proc/swaps
+  swapoff /dev/zram0
   # What a desktop Azure hibernates needs: the room made at boot, the rule that answers Azure's request, and
   # the early-boot script that lets only the machine that hibernated wake up from its disk (hibernate.sh).
   command -v filefrag mkswap swapon > /dev/null

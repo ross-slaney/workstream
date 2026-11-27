@@ -172,6 +172,16 @@ A desktop started again after a stop starts Docker when it has containers, so th
 
 The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, start what takes longest first and go on with other work while it runs, and deliver changes on a branch of their own as a pull request opened with `gh`. It is told to work in the folder the setup prepared, and not in a git worktree or a second copy, even when the repository's own skill says to use one. A worktree keeps tasks apart on a computer they share, which a desktop for each task already does, and a new folder has nothing the setup installed: the first task that made one installed the project's packages again and branched from a branch the environment was not set to. When the environment is set to a branch that is not the default one, the pull request goes against that branch. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
 
+### A desktop's memory
+
+A desktop has swap that is kept in memory, compressed (zram, half the machine's memory at most; `image/swap.sh`, made at boot by `workstream-swap.service`). A project's whole stack holds more memory than it uses at any moment: a database, a build's daemons, an Android emulator, an iPhone simulator's hundred programs, a browser, an editor. With no swap the kernel cannot set aside what nobody is using. When memory runs short the only thing it can let go of is the programs' own files, which it then reads back from the disk at once, and the machine stops.
+
+That is what stopped two test tasks on a Large desktop (32 GB), 21 and 13 minutes in, with a stack, an Android build and both phones started together. Azure's figures for the second: the disk read 98 MB a second for ten minutes and wrote almost nothing, its queue was 600 to 880 deep, the processor was 5% busy, and 6.6 GB was still called available. The disk's type made no difference to it: the first stopped on a Standard SSD and the second on a Premium SSD.
+
+The same task carried on from there with zram on: 6 GB of memory was set aside in 1.1 GB, the disk stopped reading, and the processor went back to work.
+
+`vm.swappiness` is 100 and `vm.page-cluster` 0, since swap here is memory and not a disk. A desktop that hibernates writes its memory to a file on its disk as before (`image/hibernate.sh`); what is in zram is part of that memory. A container desktop (development) has its computer's own kernel and swap, and gets none of this.
+
 ### The desktop's disk
 
 A desktop's disk is a Premium SSD (`DiskType` in `api/Desktops/DesktopHosts.cs`). A project's stack writes many small files at once: a database, Docker's layers, a build's caches, an Android phone's own disk, the iPhone simulator. What matters for that is how many writes a second the disk takes, and Azure sets it by the disk's type and size.
@@ -184,7 +194,7 @@ Measured on a Large desktop with `fio` (4 KB random writes, direct, 15 seconds):
 | Premium SSD (P10) | 3,113 while its burst lasts, 500 after | $17.92 |
 | Premium SSD (P10) raised to the P30 performance tier | 3,421 under load; Azure gives it 5,000 without a burst | $122.88, about $0.17 an hour |
 
-On a Standard SSD the first task that ran a stack, an Android build and both phones together stopped 21 minutes in: the load was 25 with the processor 6% busy, and the kernel reported a program waiting twenty minutes in `sync`. The task never finished.
+The first task that ran a stack, an Android build and both phones together stopped 21 minutes in on a Standard SSD, and the disk was changed for that. The cause turned out to be memory ("A desktop's memory", above): the next task stopped the same way on a Premium SSD. The faster disk is kept, since a stack's many small writes are real, but it did not fix that.
 
 A Premium SSD's burst is 3,500 writes a second for thirty minutes from full. It refills while the disk does less than 500, and is full when a machine starts. A task whose heavy writing outlasts it falls back to 500. If that is seen, the next step is the P30 tier while a desktop runs (`az disk update --set tier=P30`, which needs no restart; a tier can be lowered once in twelve hours). Premium SSD v2 gives 3,000 writes a second for the Standard SSD's price, but Azure does not allow it as a machine's own disk.
 
