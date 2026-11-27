@@ -200,6 +200,7 @@ The two phones are driven by different tools (agent-sim for the iPhone, `adb` fo
 - **On the iPhone nothing is typed unless a field is on the screen.** With no field to take them, letters reach the app as key presses, and a development build takes some as shortcuts: `d` opens its developer menu and `r` reloads it. `type --keys` sends key presses on purpose.
 - **A reading lists what the app says is on the screen.** A system dialog (iOS's "Save Password?") is not in it, and neither are some overlays an app draws: on Android one product tip read as a single line. When a reading lists almost nothing, or did not change after a tap, the command says that something the reading cannot see may be on the screen and how to look at the picture and tap a point in it. This is not solved: the agent still has to look at a picture to get past such a screen.
 - **A reading with nothing in it is read again** for a few seconds before it is believed, because right after an app opens the screen is drawn before the reading has anything.
+- **`fill` and `type` look again before they say no field is there.** Right after a tap, while the keyboard comes up, the iPhone's reading can list nothing. Release 0.11.0 refused to type on the first empty reading, so `fill` failed on every field of one app until this was added.
 - **A phone that is on is not started again.** `phone ios start` and `phone ios run` ask `agent-sim status` first. Starting a running phone over took 40 seconds and closed the app that was open.
 
 ### The desktop's windows
