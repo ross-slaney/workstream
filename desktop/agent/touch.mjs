@@ -179,9 +179,25 @@ const holds = (result) => (result.hidden ? `holds ${[...result.value].length} hi
  * Type into the field that has the keyboard, wait until the text is all there, and say what the field holds.
  * `first` is the screen before, when the caller has just read it.
  */
+/**
+ * A reading that has what is looked for, read again for a few seconds while it does not. Right after a tap,
+ * while the keyboard comes up, the iPhone's reading can list nothing: the first agent to meet that was told
+ * no field was on a screen that had three.
+ */
+export async function lookFor(device, wanted, { patience = device.patience ?? 5000 } = {}) {
+  let seen = device.look();
+  for (const started = Date.now(); !wanted(seen) && Date.now() - started < patience; ) {
+    await sleep(Math.max(device.every, 150));
+    seen = device.look();
+  }
+  return seen;
+}
+
 export async function typeText(device, text, first = device.look(), { exact = false } = {}) {
   const body = text.replace(/\n+$/, "");
   const sends = body !== text;
+  // No field in the reading may be a reading taken too soon: look again before believing it.
+  if (device.needsField && body && first.fields.length === 0) first = await lookFor(device, (seen) => seen.fields.length > 0);
   if (device.needsField && body && first.fields.length === 0) {
     out(`Nothing on the ${device.name}'s screen is a text field, so nothing was typed: with no field to take them, the letters reach the app as key presses. Tap the field first, or use \`${device.command} fill @e3 "text"\`. \`${device.command} type --keys "text"\` sends key presses on purpose.`);
     return 1;
@@ -230,7 +246,7 @@ export async function typeText(device, text, first = device.look(), { exact = fa
 
 /** Tap a field, empty it, type the text, and say what the field holds. */
 export async function fill(device, words, text) {
-  let seen = device.look();
+  let seen = await lookFor(device, (read) => targetOf(words, read.fields));
   const field = targetOf(words, seen.fields);
   if (!field || field.ref === undefined) {
     out(`No field on the ${device.name}'s screen matches ${JSON.stringify(words.join(" "))}. \`${device.command} snapshot\` lists fields as textfield.`);
@@ -244,7 +260,8 @@ export async function fill(device, words, text) {
   };
   if (tapEnd() !== 0) return 1;
   await sleep(600);
-  seen = device.look();
+  // The field is in the reading again once the keyboard is up.
+  seen = await lookFor(device, (read) => read.fields.length > 0);
   // Delete what it holds until a reading says it holds nothing. Words that do not go when they are deleted
   // are the field's own, shown while it is empty (screen.mjs, held).
   let own = false;
