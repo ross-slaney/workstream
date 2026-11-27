@@ -381,10 +381,10 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     /// <summary>
     /// A desktop's disk is a Premium SSD. A project's stack writes many small files at once (a database,
     /// Docker's layers, a build's caches, a phone's own disk), and a Standard SSD gave all of them 584 writes a
-    /// second between them: on the first desktop that ran a stack, a build and two phones together, a sync
-    /// waited twenty minutes and the task never finished. A Premium SSD of the same size measured 3,113 while
-    /// its burst lasts, which is thirty minutes from full and refills while the disk is quiet
-    /// (docs/architecture.md, "The desktop's disk").
+    /// second between them. A Premium SSD of the same size measured 3,113 while its burst lasts, which is
+    /// thirty minutes from full and refills while the disk is quiet (docs/architecture.md, "The desktop's
+    /// disk"). It was chosen when a task stopped part way, which turned out to be memory and not the disk
+    /// ("A desktop's memory").
     /// </summary>
     const string DiskType = "Premium_LRS";
     static readonly string[] Scopes = ["https://management.azure.com/.default"];

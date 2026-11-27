@@ -10,8 +10,8 @@
 # firmware (the S4 sleep state). On any other machine both do nothing, so the image is the same for all.
 #
 # The room is a swap file as large as the machine's memory, which differs by size, so it is made here and not
-# in the image. It is only used as swap while the machine hibernates: a desktop runs with no swap, as it
-# always has, and the whole file is free for memory when it is needed.
+# in the image. It is only used as swap while the machine hibernates: the swap a desktop runs with is kept
+# in memory (swap.sh), and the whole file is free for memory when it is needed.
 #
 # The kernel is told what to do directly (/sys/power), not through `systemctl hibernate`. systemd refuses to
 # hibernate when the boot settings this boot started with name another place on the disk than the swap now in

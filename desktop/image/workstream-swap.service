@@ -1,0 +1,13 @@
+[Unit]
+Description=Workstream desktop: compressed swap in memory
+# Before the desktop, so nothing a task starts runs without it.
+Before=workstream-desktop.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/workstream/image/swap.sh
+
+[Install]
+WantedBy=multi-user.target
