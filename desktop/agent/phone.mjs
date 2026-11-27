@@ -17,7 +17,8 @@
 //   phone <ios|android> fill @e3 "text"          tap a field, empty it, type, and say what it holds
 //   phone <ios|android> scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone]
 //   phone <ios|android> screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
-//   phone android back | home;  phone ios press home
+//   phone <ios|android> press enter              the Return key (Android also: back, home, delete, tab)
+//   phone android back | home;  phone ios press home | lock
 //   phone ios <anything else>                    agent-sim's own command
 //
 // An iPhone app is built with Xcode, which a Linux desktop does not have, so `build` sends the app's source to
@@ -38,6 +39,7 @@ import { pathToFileURL } from "node:url";
 import { toldNow } from "./told.mjs";
 import { acted, android, fill, iphone, readAndroid, typeText, waitFor } from "./touch.mjs";
 import { linesOf } from "./screen.mjs";
+import { front } from "./surfaces.mjs";
 
 /** Changes when the Mac's recipe changes what it builds (builder/ios.sh), so old builds are not taken for new ones. */
 export const RECIPE = "1";
@@ -304,10 +306,17 @@ async function place({ title, at }) {
 }
 
 /** Boot the phone, stream it on this desktop only, and open its window where the person can touch it. */
+/** Whether the iPhone is on. `agent-sim status` lists each phone with its state: `p	running	iPhone18,1`. */
+export const iphoneRunning = (status) => /^\S+\s+running\b/m.test(status ?? "");
+
 async function startIphone() {
   requireSimulator();
-  const up = simulator(["up"]);
-  if (up.status !== 0) return up.status ?? 1;
+  // `agent-sim up` starts a phone that is already on over again, which takes 40 seconds and closes its apps:
+  // `phone ios run` did that to a phone the task had started and was using.
+  if (!iphoneRunning(run("agent-sim", ["status"], { env: simulatorEnvironment() }).stdout)) {
+    const up = simulator(["up"]);
+    if (up.status !== 0) return up.status ?? 1;
+  }
   mkdirSync(dir, { recursive: true });
   if (!existsSync(tokenFile)) writeFileSync(tokenFile, createHash("sha256").update(String(Math.random()) + Date.now()).digest("hex").slice(0, 32), { mode: 0o600 });
   const token = readFileSync(tokenFile, "utf8").trim();
@@ -381,17 +390,40 @@ function androidSize() {
   return size ? [Number(size[1]), Number(size[2])] : [1080, 2400];
 }
 
+/** The keys `phone android press` knows, as Android numbers them. */
+export const ANDROID_KEYS = { enter: "66", return: "66", back: "4", home: "3", delete: "67", tab: "61" };
+
+/**
+ * A reading with something in it. Right after an app opens there is a moment when the screen is drawn and
+ * the reading is still empty, so an empty one is read again for a few seconds before it is believed.
+ */
+async function listed(read, { seconds = 6 } = {}) {
+  const started = Date.now();
+  let screen = read();
+  while (!screen.split("\n").some((line) => line.startsWith("@")) && Date.now() - started < seconds * 1000) {
+    await sleep(500);
+    screen = read();
+  }
+  return screen;
+}
+
 /** The commands for using the Android phone, in the iPhone's words. */
 async function useAndroid(command, rest, { wait }) {
   if (!androidBooted()) throw new Error("The Android phone is not on. Start it with `phone android start`.");
   const phone = android();
+  front("android");
   const flags = rest.filter((argument) => argument.startsWith("--") || argument === "-o");
   const words = rest.filter((argument, index) => !argument.startsWith("--") && argument !== "-o" && rest[index - 1] !== "-o" && rest[index - 1] !== "--timeout" && rest[index - 1] !== "--ms");
   const valueOf = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
   switch (command) {
     case "snapshot":
-      process.stdout.write(linesOf(readAndroid()) + "\n");
+      process.stdout.write((await listed(() => linesOf(readAndroid()))) + "\n");
       return 0;
+    case "press": {
+      const key = ANDROID_KEYS[(words[0] ?? "").toLowerCase()];
+      if (!key) throw new Error(`Say the key: ${Object.keys(ANDROID_KEYS).join(", ")}.`);
+      return acted(phone, () => adbShell("input", "keyevent", key), { wait });
+    }
     case "tap":
       if (!words.length) throw new Error("Say what to tap: a reference (@e3), words on the screen, or a point (X Y).");
       return acted(phone, () => phone.tap(words), { wait });
@@ -446,12 +478,23 @@ async function useAndroid(command, rest, { wait }) {
 async function useIphone(command, rest, { wait }) {
   requireSimulator();
   const phone = iphone(simulatorEnvironment());
-  const words = rest.filter((argument) => !argument.startsWith("--"));
+  front("iphone");
+  const words = rest.filter((argument, index) => !argument.startsWith("--") && rest[index - 1] !== "--timeout");
+  const valueOf = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
   switch (command) {
+    case "snapshot":
+      if (rest.length) return simulator([command, ...rest]).status ?? 1;
+      process.stdout.write((await listed(() => phone.look().screen)) + "\n");
+      return 0;
+    case "wait":
+      return waitFor(phone, words.join(" "), { gone: rest.includes("--gone"), seconds: Number(valueOf("--timeout") ?? 20) });
+    case "press":
+      // Return is a key, which agent-sim types; its own `press` is for the phone's buttons.
+      if (/^(enter|return)$/i.test(words[0] ?? "")) return acted(phone, () => phone.enter(), { wait });
+      return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
     case "tap":
     case "scroll":
     case "swipe":
-    case "press":
     case "open":
     case "launch":
       return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
@@ -482,7 +525,8 @@ const USAGE = `Use:
   fill @e3 "text"                       tap a field, empty it, type, and say what it holds
   scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone] [--timeout 20]
   screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
-  phone android back | home; phone ios press home
+  press enter                           the Return key (Android also: back, home, delete, tab)
+  phone android back | home; phone ios press home | lock
   --no-wait                             return as soon as the tap is sent (with build: as soon as it is asked for)`;
 
 export async function main(argv) {

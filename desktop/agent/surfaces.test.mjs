@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { kindOf, layoutOf, said, windowsOf } from "./surfaces.mjs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { front, kindOf, layoutOf, said, windowsOf } from "./surfaces.mjs";
 
 const LISTING = `0x00c00017 -1 0    0    1280 960  desktop Desktop
 0x00a00003 -1 0    915  1280 45   desktop xfce4-panel
@@ -27,10 +30,13 @@ test("the desktop's own windows are left out of what is listed", () => {
 test("with both phones: the browser at the left, the Android phone in the middle, the iPhone at the right, raised in that order", () => {
   const placed = layoutOf(windowsOf(LISTING));
   assert.deepEqual(placed.map((window) => [window.kind, window.x, window.y, window.width, window.height]), [
-    ["browser", 0, 0, 508, 905],
-    ["android", 509, 0, 345, 767],
-    ["iphone", 850, 0, 430, 866],
+    ["browser", 0, 0, 513, 905],
+    ["android", 514, 0, 345, 767],
+    ["iphone", 880, 0, 430, 866],
   ]);
+  // The emulator's buttons are 54 wide at the Android phone's right, and end where the iPhone itself begins:
+  // 33 into its window. In the first task that arranged both phones they stood over the iPhone's edge.
+  assert.equal(514 + 345 + 54, 880 + 33);
   assert.equal(said(placed), "Side by side, from the left: the browser, the Android phone and the iPhone.");
 });
 
@@ -46,4 +52,18 @@ test("with no phone on screen nothing is moved", () => {
   const placed = layoutOf(windowsOf(LISTING).filter((window) => /Chromium|Code/.test(window.title)));
   assert.deepEqual(placed, []);
   assert.match(said(placed), /no phone on screen/);
+});
+
+test("a surface that is already the one in front is not brought forward again", () => {
+  const file = path.join(mkdtempSync(path.join(os.tmpdir(), "front-")), "front");
+  writeFileSync(file, "android");
+  const display = process.env.DISPLAY;
+  process.env.DISPLAY = ":99";
+  try {
+    assert.equal(front("android", { file }), false);
+    assert.equal(readFileSync(file, "utf8"), "android");
+  } finally {
+    if (display === undefined) delete process.env.DISPLAY;
+    else process.env.DISPLAY = display;
+  }
 });

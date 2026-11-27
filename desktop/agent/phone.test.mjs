@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { buildHash, hashFiles, isNativeInput, kindOf, simulatorEnvironment, sourceRootOf } from "./phone.mjs";
+import { ANDROID_KEYS, buildHash, hashFiles, iphoneRunning, isNativeInput, kindOf, simulatorEnvironment, sourceRootOf } from "./phone.mjs";
 
 test("the kind of app is read from what is in its folder", () => {
   assert.equal(kindOf(["package.json", "app.json"], { dependencies: { expo: "^58.0.0", "react-native": "0.88.0" } }), "expo");
@@ -48,4 +48,17 @@ test("the simulator is reached through the person's own systemd, whatever sessio
   assert.equal(env.DBUS_SESSION_BUS_ADDRESS, "unix:path=/run/user/1000/bus");
   assert.ok(env.PATH.endsWith(":/usr/bin"));
   assert.ok(env.PATH.startsWith(path.join(process.env.HOME ?? "", ".local/bin")));
+});
+
+test("an iPhone that is on is not started again", () => {
+  assert.equal(iphoneRunning("p\trunning\tiPhone18,1\n"), true);
+  assert.equal(iphoneRunning("p\tstopped\tiPhone18,1\n"), false);
+  assert.equal(iphoneRunning(""), false);
+  assert.equal(iphoneRunning(undefined), false);
+});
+
+test("Return and the other keys are ones Android knows by number", () => {
+  assert.equal(ANDROID_KEYS.enter, "66");
+  assert.equal(ANDROID_KEYS.return, "66");
+  assert.equal(ANDROID_KEYS.back, "4");
 });

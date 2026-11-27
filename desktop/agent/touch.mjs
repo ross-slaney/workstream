@@ -49,7 +49,12 @@ export function iphone(env) {
     tap: (words) => shown(["tap", ...words]),
     tapAt: (x, y) => sim(["tap", String(Math.round(x)), String(Math.round(y))]).status ?? 1,
     type: (text) => sim(["type", text]).status ?? 1,
+    // Return as a key of its own. Sent in the same call as text, agent-sim types the whole text as key presses.
+    enter: () => sim(["type", "--keys", "\n"]).status ?? 1,
     erase: (count) => sim(["type", "--keys", BACKSPACE.repeat(count)]).status ?? 1,
+    // With no field to take them, typed letters reach the app as key presses, and a development build takes
+    // some of those as shortcuts: "d" opens its developer menu and "r" reloads it.
+    needsField: true,
   };
 }
 
@@ -118,6 +123,7 @@ export function android() {
       }
       return 0;
     },
+    enter: () => adb("input", "keyevent", "66"),
     erase: (count) => {
       // To the end of the text first, then back over it.
       if (adb("input", "keyevent", "123") !== 0) return 1;
@@ -131,9 +137,21 @@ export function android() {
 
 // ── What the commands do, on either phone ───────────────────────────────────────────────────────────────
 
+/** A reading with next to nothing in it: the app's name and at most one thing. */
+export const thin = (screen) => screen.split("\n").filter((line) => line.startsWith("@")).length < 2;
+
+/**
+ * What to do when the reading cannot be what a person sees. A reading lists what the app says is on the
+ * screen. A system dialog, and some overlays an app draws, are not in it: the first task that met them saw a
+ * reading with one line while a tip covered the screen, and was told three times that nothing had changed
+ * when a dialog had closed.
+ */
+const picture = (device) => `\`${device.command} screenshot -o <file>\` saves the picture, and \`${device.command} tap X Y\` taps a point in it`;
+
 const now = (device, screen, settled = true) => {
   out(settled ? `\nThe ${device.name}'s screen now:` : `\nThe ${device.name}'s screen is still changing. For now:`);
   out(screen);
+  if (settled && thin(screen)) out(`\nThis reading lists almost nothing. If the screen is not empty, something the reading cannot see is on it, such as a system dialog or an overlay: ${picture(device)}.`);
 };
 
 /** Print the screen as it is once it has stopped changing after an action. */
@@ -142,7 +160,7 @@ async function after(device, before) {
     before, quiet: device.quiet, every: device.every, empty: (text) => !text.includes("\n"),
   });
   if (changed) now(device, screen, settled);
-  else out(`The ${device.name}'s screen did not change. If something is still loading, \`${device.command} wait "words it will show"\` waits for it.`);
+  else out(`The reading of the ${device.name}'s screen did not change. If something is still loading, \`${device.command} wait "words it will show"\` waits for it. If you tapped something the reading does not list, such as a system dialog or an overlay, the picture may have changed: ${picture(device)}.`);
 }
 
 /** Do something to the phone, then wait for the screen and print it. `wait: false` returns at once. */
@@ -162,16 +180,23 @@ const holds = (result) => (result.hidden ? `holds ${[...result.value].length} hi
  * `first` is the screen before, when the caller has just read it.
  */
 export async function typeText(device, text, first = device.look(), { exact = false } = {}) {
-  const status = device.type(text);
-  if (status !== 0) return status;
   const body = text.replace(/\n+$/, "");
   const sends = body !== text;
+  if (device.needsField && body && first.fields.length === 0) {
+    out(`Nothing on the ${device.name}'s screen is a text field, so nothing was typed: with no field to take them, the letters reach the app as key presses. Tap the field first, or use \`${device.command} fill @e3 "text"\`. \`${device.command} type --keys "text"\` sends key presses on purpose.`);
+    return 1;
+  }
   if (!body || body.includes("\n")) {
+    // Return alone, or text of several lines: sent as it is.
+    const status = body ? device.type(text) : device.enter();
+    if (status !== 0) return status;
     await after(device, first.screen);
     return 0;
   }
+  const status = device.type(body);
+  if (status !== 0) return status;
   // Keys arrive one at a time, slower when the desktop is busy: wait for all of them before anything else is sent.
-  const patience = sends ? 3000 : Math.max(6000, 400 * body.length);
+  const patience = Math.max(6000, 400 * body.length);
   const started = Date.now();
   let result;
   let last;
@@ -181,8 +206,10 @@ export async function typeText(device, text, first = device.look(), { exact = fa
     result = typedInto(first.fields, last.fields, body, { exact });
   } while (!result.ok && Date.now() - started < patience);
   if (sends) {
-    out(result.ok ? `${quoted(result.field)} ${holds(result)}, and Return was pressed.` : "Typed, and Return was pressed.");
-    await after(device, first.screen);
+    // Return goes after the text is all there, as a key of its own.
+    if (device.enter() !== 0) return 1;
+    out(result.ok ? `${quoted(result.field)} ${holds(result).replace(/^holds/, "held")}, and Return was pressed.` : "Typed, and Return was pressed.");
+    await after(device, last.screen);
     return 0;
   }
   let failed = 0;

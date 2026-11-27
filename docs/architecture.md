@@ -185,7 +185,7 @@ One command is the same for the agent, a terminal and the panel's buttons (`agen
 | `phone ios build <folder> --no-wait` | Asks for the project's iPhone app (below) and returns while the Mac builds it. The agent is told to do this first when a task will need the iPhone, and to write the change meanwhile: in the first task that needed a build, the agent waited 27 minutes for it and did nothing else. |
 | `phone ios run <folder>` | Gets the project's iPhone app, waiting for what is left of its build, installs it and opens it. |
 | `phone <ios or android> snapshot` | The phone's screen as lines of text, one for each thing on it, with a reference (`@e3`). |
-| `phone <ios or android> tap`, `type`, `fill`, `scroll`, `swipe`, `open`, `wait`, `screenshot`, `launch`, `terminate`, `logs`, `install` | Uses the phone. The words are the same on both. |
+| `phone <ios or android> tap`, `type`, `fill`, `press enter`, `scroll`, `swipe`, `open`, `wait`, `screenshot`, `launch`, `terminate`, `logs`, `install` | Uses the phone. The words are the same on both. |
 | `surfaces arrange` | Puts the browser and the phones side by side, each fully visible (`agent/surfaces.mjs`). |
 
 ### Using a phone
@@ -196,10 +196,19 @@ The two phones are driven by different tools (agent-sim for the iPhone, `adb` fo
 - **Typing says what the field holds.** `type` returns when the field holds what it held with the text put in, and fails with what it holds instead. This is what stops garbled text: the simulator delivers keys one at a time, and a second command sent while the first one's keys were still arriving had its Shift land on them (`8081` came out as `*)*!`).
 - **`fill` empties the field first.** It taps the end of the field, deletes what it holds until a reading says it is empty, and types. `type` is for the field that already has the keyboard.
 - **References** are to the last reading. Every command that prints the screen gives new ones.
+- **Return is a key of its own.** `press enter` presses it, and `type` with text that ends in a new line types the text, waits until it is all there, and then presses Return. Sent in one call with the text, the iPhone's tool types the whole text as key presses.
+- **On the iPhone nothing is typed unless a field is on the screen.** With no field to take them, letters reach the app as key presses, and a development build takes some as shortcuts: `d` opens its developer menu and `r` reloads it. `type --keys` sends key presses on purpose.
+- **A reading lists what the app says is on the screen.** A system dialog (iOS's "Save Password?") is not in it, and neither are some overlays an app draws: on Android one product tip read as a single line. When a reading lists almost nothing, or did not change after a tap, the command says that something the reading cannot see may be on the screen and how to look at the picture and tap a point in it. This is not solved: the agent still has to look at a picture to get past such a screen.
+- **A reading with nothing in it is read again** for a few seconds before it is believed, because right after an app opens the screen is drawn before the reading has anything.
+- **A phone that is on is not started again.** `phone ios start` and `phone ios run` ask `agent-sim status` first. Starting a running phone over took 40 seconds and closed the app that was open.
 
 ### The desktop's windows
 
-A window opens where its program last had it, and the last one opened covers the others, so a desktop that is handed over with three surfaces can show one of them. `surfaces arrange` places the iPhone at the right, the Android phone beside it and the browser in the rest, and raises them in that order. The screen is 1280 wide and Chromium goes no narrower than 508, so with both phones the browser shows a page at a phone's width. The agent is told to run it when it hands work over.
+A window opens where its program last had it, and the last one opened covers the others, so a desktop that is handed over with three surfaces can show one of them. `surfaces arrange` places the iPhone at the right, the Android phone beside it and the browser in the rest, and raises them in that order. The screen is 1280 wide and Chromium goes no narrower than 508, so with both phones the browser shows a page at a phone's width. With both phones the screen is 30 short of holding everything: the iPhone's window hangs that far off the right edge, which costs only the empty strip beside the phone, and the emulator's strip of buttons stands over the empty strip at the iPhone's left. The agent is told to run it when it hands work over.
+
+While the agent works, the surface it is using comes to the front (`front` in `agent/surfaces.mjs`): the `phone` command brings its phone forward, and the harness brings the browser forward when the agent uses a browser tool. It happens once for each change of surface, so a person who moves a window while the agent stays on one surface is left alone. On the first task that used the new phone commands, the browser covered the Android phone for the eleven minutes the agent used it.
+
+Chromium does not offer to save passwords or warn about breached ones (`/etc/chromium/policies/managed/workstream.json`): the accounts on a desktop are a task's test accounts, and the "Save password?" bubble covered the page that was handed over.
 
 The desktop's browser opens `https://localhost` without Chromium's "not private" page (`--allow-insecure-localhost`, `image/configure.sh`). A project's own server there has a certificate that nothing vouches for, whatever made it, and the page it would otherwise show covered the phones for half an hour on that first task. Only addresses on the desktop itself are opened this way.
 

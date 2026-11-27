@@ -76,6 +76,7 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   # iPhone simulator itself is installed by an environment that wants it.
   command -v phone surfaces ffmpeg wmctrl > /dev/null
   grep -q -- --allow-insecure-localhost /etc/chromium.d/workstream
+  grep -q PasswordManagerEnabled /etc/chromium/policies/managed/workstream.json
   test -f /usr/share/applications/workstream-iphone.desktop -a -f /usr/share/applications/workstream-android.desktop
   sudo -u work -H /home/work/.local/bin/agent-sim --version
   test -f /var/lib/systemd/linger/work

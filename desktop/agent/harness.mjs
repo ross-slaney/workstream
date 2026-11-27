@@ -10,6 +10,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
 import { noteBackground, noteFile } from "./restore.mjs";
 import { noSetup, projectTools, projectWork, setupEnded } from "./instructions.mjs";
+import { front } from "./surfaces.mjs";
 import { desktopTools } from "./tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -165,6 +166,8 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
         for (const block of message.message?.content ?? []) {
           if (block.type === "text" && spoken(block.text)) say("text", spoken(block.text));
           if (block.type === "tool_use") {
+            // The surface being used comes to the front, so whoever watches sees it (surfaces.mjs).
+            if (block.name.startsWith("mcp__browser__")) front("browser");
             const line = describe(block.name, block.input ?? {}, workspace);
             if (line) say("activity", line);
           }
