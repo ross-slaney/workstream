@@ -337,15 +337,16 @@ function Pictures({ pictures }: { pictures: ChatEntry[] }) {
   return (
     <div className="flex items-start gap-2">
       {pictures.map((picture) => (
-        <figure key={picture.id} className="m-0 flex min-w-0 flex-1 flex-col gap-1" style={{ maxWidth: pictures.length === 1 ? "60%" : undefined }}>
+        <figure key={picture.id} className="m-0 flex min-w-0 flex-1 flex-col items-start gap-1">
           {picture.picture ? (
-            <a href={picture.picture} target="_blank" rel="noreferrer" title={t("chat.openPicture")} className="block overflow-hidden rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-              <img src={picture.picture} alt={picture.text} className="block h-auto w-full" />
+            <a href={picture.picture} target="_blank" rel="noreferrer" title={t("chat.openPicture")} className="block max-w-full overflow-hidden rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+              {/* As wide as its share of the row, and no taller than a phone's picture reads well at. */}
+              <img src={picture.picture} alt={picture.text} className="block h-auto max-h-80 w-auto max-w-full" />
             </a>
           ) : (
             <div aria-hidden="true" className="aspect-[9/16] w-full rounded-md border border-border bg-muted" />
           )}
-          <figcaption className="truncate text-[11.5px] leading-snug text-muted-foreground" title={picture.text}>
+          <figcaption className="max-w-full truncate text-[11.5px] leading-snug text-muted-foreground" title={picture.text}>
             {picture.text}
           </figcaption>
         </figure>

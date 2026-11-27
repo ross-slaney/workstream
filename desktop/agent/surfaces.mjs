@@ -28,10 +28,10 @@ import { answerOf, api } from "./api.mjs";
 
 export const SCREEN = { width: 1280, height: 915 };
 /**
- * The iPhone's window (phone.mjs opens it this size), the empty strip it has at each side of the phone, and
- * the narrowest a Chromium window goes.
+ * The iPhone's window (phone.mjs opens it this size), the empty strip it has at each side of the phone, the
+ * strip of its own buttons under the phone, and the narrowest a Chromium window goes.
  */
-const IPHONE = { width: 430, height: 866, margin: 33 };
+const IPHONE = { width: 430, height: 866, margin: 33, foot: 58 };
 const BROWSER_MIN = 508;
 /** The strip of buttons the Android emulator keeps at its right side, in a window of its own. */
 const EMULATOR_BAR = 54;
@@ -164,14 +164,16 @@ export function areaOf(info) {
 
 /**
  * The part of the screen a surface's picture is taken from: its window's own area, without the empty strip
- * the iPhone's window has at each side, and only what is on the screen. Null when none of it is.
+ * the iPhone's window has at each side and the simulator's own buttons under the phone, and only what is on
+ * the screen. Null when none of it is.
  */
 export function pictureOf(kind, area, screen = SCREEN) {
   const inset = kind === "iphone" ? IPHONE.margin : 0;
+  const foot = kind === "iphone" ? IPHONE.foot : 0;
   const x = Math.max(0, area.x + inset);
   const y = Math.max(0, area.y);
   const width = Math.min(screen.width, area.x + area.width - inset) - x;
-  const height = Math.min(screen.height, area.y + area.height) - y;
+  const height = Math.min(screen.height, area.y + area.height - foot) - y;
   return width > 0 && height > 0 ? { x, y, width, height } : null;
 }
 

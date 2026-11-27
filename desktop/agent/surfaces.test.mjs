@@ -87,7 +87,8 @@ test("a picture is of the window's own area that is on the screen", async () => 
   const area = areaOf("  Absolute upper-left X:  880\n  Absolute upper-left Y:  28\n  Relative upper-left X:  0\n  Width: 430\n  Height: 866\n");
   assert.deepEqual(area, { x: 880, y: 28, width: 430, height: 866 });
   // The iPhone's window hangs off the right edge and has an empty strip at each side of the phone.
-  assert.deepEqual(pictureOf("iphone", area), { x: 913, y: 28, width: 364, height: 866 });
+  // and the simulator's own buttons under it.
+  assert.deepEqual(pictureOf("iphone", area), { x: 913, y: 28, width: 364, height: 808 });
   assert.deepEqual(pictureOf("browser", { x: -4, y: 20, width: 517, height: 950 }), { x: 0, y: 20, width: 513, height: 895 });
   assert.equal(pictureOf("android", { x: 1300, y: 0, width: 300, height: 700 }), null);
   assert.equal(areaOf("xwininfo: error"), null);
