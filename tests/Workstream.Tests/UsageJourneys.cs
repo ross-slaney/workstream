@@ -310,11 +310,11 @@ public sealed class UsageJourneys
 
         using var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
         var disks = (await administrator.GetAsync<AdminOverview>("/api/admin/overview")).Machines.Storage.Single(x => x.Kind == StorageKind.Disk);
-        // Every team's disks, this one's among them, at $0.075 a gigabyte a month.
+        // Every team's disks, this one's among them, at $0.14 a gigabyte a month.
         Assert.IsTrue(disks.Kept >= 1);
         Assert.IsTrue(disks.Gb >= 64m);
         Assert.IsTrue(disks.GbMonths >= 64 * HoursThisMonth(73) / 730 - 0.01);
-        Assert.AreEqual(disks.GbMonths * 0.075, (double)disks.Usd, 0.006);
+        Assert.AreEqual(disks.GbMonths * 0.14, (double)disks.Usd, 0.006);
 
         // The team's own page has units only: the answer names no price for desktops or storage.
         var body = await (await ada.GetAsync($"/api/teams/{team.Id}/usage")).Content.ReadAsStringAsync();
@@ -437,9 +437,9 @@ public sealed class StorageTests
         Assert.AreEqual(64, options.DiskGbOf(DesktopSizes.Standard));
         Assert.AreEqual(128, options.DiskGbOf(DesktopSizes.Large));
         Assert.AreEqual(64, options.DiskGbOf("unknown"));
-        // A disk costs what Azure charges for it: $4.80 a month for 64 GiB and $9.60 for 128.
-        Assert.AreEqual(4.80m, options.DiskGbOf(DesktopSizes.Standard) * prices.GbMonthOf(StorageKind.Disk));
-        Assert.AreEqual(9.60m, options.DiskGbOf(DesktopSizes.Large) * prices.GbMonthOf(StorageKind.Disk));
+        // A disk is counted at what Azure charges for the 128 GiB one, $17.92 a month: $0.14 a gigabyte.
+        Assert.AreEqual(8.96m, options.DiskGbOf(DesktopSizes.Standard) * prices.GbMonthOf(StorageKind.Disk));
+        Assert.AreEqual(17.92m, options.DiskGbOf(DesktopSizes.Large) * prices.GbMonthOf(StorageKind.Disk));
         Assert.AreEqual(0.50m, prices.SaveMonthlyOf(10L * 1024 * 1024 * 1024));
         Assert.AreEqual(0m, prices.GbMonthOf("unknown"));
     }

@@ -282,13 +282,13 @@ public sealed class DesktopOptions
             [DesktopSizes.Large] = 0.364m,
         };
         /// <summary>
-        /// A gigabyte kept for a month, by <see cref="StorageKind"/>. A desktop's disk is a Standard SSD, $4.80
-        /// a month for 64 GiB (E6) and $9.60 for 128 GiB (E10), which is $0.075 a gigabyte whichever size it is.
-        /// An archived task and a saved setup are full snapshots on standard storage.
+        /// A gigabyte kept for a month, by <see cref="StorageKind"/>. A desktop's disk is a Premium SSD, $17.92
+        /// a month for 128 GiB (P10), which is $0.14 a gigabyte. The 64 GiB disk (P6) is $9.28, counted here
+        /// at $8.96. An archived task and a saved setup are full snapshots on standard storage.
         /// </summary>
         public Dictionary<string, decimal> StorageGbMonthUsd { get; set; } = new()
         {
-            [StorageKind.Disk] = 0.075m,
+            [StorageKind.Disk] = 0.14m,
             [StorageKind.Archive] = 0.05m,
             [StorageKind.Setup] = 0.05m,
         };
@@ -378,7 +378,15 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     const string ComputeApi = "2024-11-01";
     const string DiskApi = "2024-03-02";
     const string NetworkApi = "2024-05-01";
-    const string DiskType = "StandardSSD_LRS";
+    /// <summary>
+    /// A desktop's disk is a Premium SSD. A project's stack writes many small files at once (a database,
+    /// Docker's layers, a build's caches, a phone's own disk), and a Standard SSD gave all of them 584 writes a
+    /// second between them: on the first desktop that ran a stack, a build and two phones together, a sync
+    /// waited twenty minutes and the task never finished. A Premium SSD of the same size measured 3,113 while
+    /// its burst lasts, which is thirty minutes from full and refills while the disk is quiet
+    /// (docs/architecture.md, "The desktop's disk").
+    /// </summary>
+    const string DiskType = "Premium_LRS";
     static readonly string[] Scopes = ["https://management.azure.com/.default"];
 
     DesktopOptions.AzureOptions Azure => options.Azure;
