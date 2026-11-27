@@ -109,6 +109,8 @@ public sealed class Person : IDisposable
     public Task<HttpResponseMessage> PostAsync(string path, object? body = null) => http.PostAsJsonAsync(path, body ?? new { }, Json);
     public Task<HttpResponseMessage> PutAsync(string path, object body) => http.PutAsJsonAsync(path, body, Json);
     public Task<HttpResponseMessage> DeleteAsync(string path) => http.DeleteAsync(path);
+    /// <summary>A body sent as it is, such as a file.</summary>
+    public Task<HttpResponseMessage> PutAsync(string path, HttpContent content) => http.PutAsync(path, content);
 
     public async Task<T> GetAsync<T>(string path) => await ReadAsync<T>(await GetAsync(path));
     public async Task<T> PostAsync<T>(string path, object? body = null) => await ReadAsync<T>(await PostAsync(path, body));

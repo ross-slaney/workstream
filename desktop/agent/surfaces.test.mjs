@@ -67,3 +67,40 @@ test("a surface that is already the one in front is not brought forward again", 
     else process.env.DISPLAY = display;
   }
 });
+
+test("a picture is taken of each kind of surface, of the one on top", async () => {
+  const { shownOf } = await import("./surfaces.mjs");
+  const windows = [
+    { id: "0x1", x: 0, y: 0, width: 900, height: 800, title: "Docs - Chromium" },
+    { id: "0x2", x: 0, y: 0, width: 900, height: 800, title: "Terminal" },
+  ];
+  // No phone: nothing was placed, and the browser is shown where it is.
+  assert.deepEqual(shownOf([], windows).map((window) => [window.id, window.kind]), [["0x1", "browser"]]);
+  const placed = [
+    { id: "0x1", kind: "browser" }, { id: "0x5", kind: "browser" }, { id: "0x3", kind: "android" }, { id: "0x4", kind: "iphone" },
+  ];
+  assert.deepEqual(shownOf(placed, windows).map((window) => window.id), ["0x5", "0x3", "0x4"]);
+});
+
+test("a picture is of the window's own area that is on the screen", async () => {
+  const { areaOf, pictureOf } = await import("./surfaces.mjs");
+  const area = areaOf("  Absolute upper-left X:  880\n  Absolute upper-left Y:  28\n  Relative upper-left X:  0\n  Width: 430\n  Height: 866\n");
+  assert.deepEqual(area, { x: 880, y: 28, width: 430, height: 866 });
+  // The iPhone's window hangs off the right edge and has an empty strip at each side of the phone.
+  // and the simulator's own buttons under it.
+  assert.deepEqual(pictureOf("iphone", area), { x: 913, y: 28, width: 364, height: 808 });
+  assert.deepEqual(pictureOf("browser", { x: -4, y: 20, width: 517, height: 950 }), { x: 0, y: 20, width: 513, height: 895 });
+  assert.equal(pictureOf("android", { x: 1300, y: 0, width: 300, height: 700 }), null);
+  assert.equal(areaOf("xwininfo: error"), null);
+});
+
+test("the agent is told where the pictures are and to write from them", async () => {
+  const { shownWords } = await import("./surfaces.mjs");
+  const pictures = [{ kind: "browser", file: "/home/work/.workstream/shown/browser.jpg" }, { kind: "iphone", file: "/home/work/.workstream/shown/iphone.jpg" }];
+  const sent = shownWords(pictures, { sent: true });
+  assert.match(sent, /was added to the conversation/);
+  assert.match(sent, /- The iPhone: \/home\/work\/\.workstream\/shown\/iphone\.jpg/);
+  assert.match(sent, /Read each of these picture files/);
+  assert.match(shownWords(pictures, { sent: false, problem: "Workstream answered 500." }), /could not be added to the conversation \(Workstream answered 500\.\)/);
+  assert.match(shownWords([], { sent: true }), /no picture to take/);
+});

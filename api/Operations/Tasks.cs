@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.Extensions;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using Workstream.Api.Builds;
 using Workstream.Api.Desktops;
 using Workstream.Api.Domain;
 using Workstream.Api.Email;
@@ -372,5 +373,59 @@ public static partial class Operations
             .OrderBy(x => x.Id)
             .ToPageAsync(desktop.PrincipalId, Permissions.TaskRunAgent, 20, null, ct);
         return Outcome<DesktopReply>.Ok(new DesktopReply([.. prompts.Data.Select(x => new DesktopPrompt(x.Id, x.Text))], task.Interrupts, task.Title));
+    }
+
+    /// <summary>
+    /// A picture of one of the desktop's surfaces, into its own task's conversation: what the agent hands over
+    /// with its report. The desktop's key reaches its task and nothing else, so this is the one conversation it
+    /// can add to. Sent again with the same key, it is kept once.
+    /// </summary>
+    public static async Task<Outcome<TaskMessage>> AddPictureAsync(Caller desktop, string key, string? caption, Stream picture, long? length,
+        WorkstreamDbContext db, IBuildFiles files, CancellationToken ct)
+    {
+        if (await DesktopTaskAsync(desktop, db, ct) is not { } task) return Outcome<TaskMessage>.NotFound();
+        if (length is null or <= 0 or > TaskMessage.MaxPictureBytes) return Outcome<TaskMessage>.Invalid($"A picture is sent with its length, and is at most {TaskMessage.MaxPictureBytes / (1024 * 1024)} MB.");
+        if (!Guid.TryParseExact(key, "D", out _)) return Outcome<TaskMessage>.Invalid("A picture needs an id made by the desktop: a UUID.");
+        if (await db.TaskMessages.AsNoTracking().SingleOrDefaultAsync(x => x.ResourceId == task.ResourceId && x.ClientKey == key, ct) is { } known) return Outcome<TaskMessage>.Ok(known);
+        if (await db.TaskMessages.CountAsync(x => x.ResourceId == task.ResourceId && x.Kind == MessageKind.Picture, ct) >= TaskMessage.MaxPictures)
+            return Outcome<TaskMessage>.Invalid($"A task's conversation keeps at most {TaskMessage.MaxPictures} pictures.");
+
+        // Read whole, so what is kept is exactly what was checked: no more than its length says, and a JPEG.
+        var bytes = new byte[length.Value];
+        var read = 0;
+        while (read < bytes.Length)
+        {
+            var took = await picture.ReadAsync(bytes.AsMemory(read), ct);
+            if (took == 0) break;
+            read += took;
+        }
+        if (read != bytes.Length) return Outcome<TaskMessage>.Invalid("The picture was shorter than its length said.");
+        TaskMessage message;
+        try
+        {
+            message = TaskMessage.Picture(task, desktop.PrincipalId, caption, bytes, key, DateTimeOffset.UtcNow);
+        }
+        catch (DomainRuleException rule)
+        {
+            return Outcome<TaskMessage>.Invalid(rule);
+        }
+        // The file first: a message whose picture is missing would show nothing, and a file with no message is found by nobody.
+        using (var content = new MemoryStream(bytes, writable: false)) await files.WriteAsync(TaskMessage.PictureFile(task.Id, key), content, bytes.Length, ct);
+        db.TaskMessages.Add(message);
+        task.Active(message.CreatedAt);
+        await db.SaveChangesAsync(ct);
+        return Outcome<TaskMessage>.Ok(message);
+    }
+
+    /// <summary>A picture in a task's conversation, for anyone who may see the task (<c>TASK_VIEW</c>). The caller disposes it.</summary>
+    public static async Task<Outcome<BuildFile>> PictureAsync(Caller caller, string taskId, long messageId, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBuildFiles files, CancellationToken ct)
+    {
+        var seen = await ViewTaskAsync(caller, taskId, db, fga, ct);
+        if (!seen.IsOk) return seen.As<BuildFile>();
+        var message = await db.TaskMessages.AsNoTracking().SingleOrDefaultAsync(x => x.Id == messageId && x.ResourceId == seen.Value!.ResourceId && x.Kind == MessageKind.Picture, ct);
+        if (message is null) return Outcome<BuildFile>.NotFound();
+        return await files.ReadAsync(TaskMessage.PictureFile(taskId, message.ClientKey), ct) is { } file
+            ? Outcome<BuildFile>.Ok(new BuildFile(file.Content, file.Length))
+            : Outcome<BuildFile>.NotFound();
     }
 }

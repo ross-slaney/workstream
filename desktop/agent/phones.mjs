@@ -55,7 +55,7 @@ export function phoneInstructions(apps) {
     usingPhones(apps),
   );
   if (wantsIphone(apps) || wantsAndroid(apps)) {
-    lines.push("- When a task changes what people see, check it on every surface this desktop has (the browser and each phone) by using it there: open the screen you changed, tap through it, and say what you saw on each. Leave each one showing the result, then run `surfaces arrange`, which puts the browser and the phones side by side so the person sees all of them at once.");
+    lines.push("- When a task changes what people see, check it on every surface this desktop has (the browser and each phone) by using it there: open the screen you changed, tap through it, and say what you saw on each. Leave each one showing the result, then run `surfaces show`: it puts the browser and the phones side by side, so the person sees all of them at once, and adds a picture of each to the conversation. Read the pictures it names before you write your report, and say for each surface what its picture shows.");
   }
   return lines.join("\n");
 }

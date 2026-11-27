@@ -164,7 +164,8 @@ public sealed class TaskEmails(IServiceScopeFactory scopes, ISqlOSEmailSender se
         var now = clock.GetUtcNow();
         if (!task.MayEmail(now, Turns.EmailGap)) return 0;
         // The turn ended on the agent's words, and nobody has answered them yet.
-        var last = await db.TaskMessages.AsNoTracking().Where(x => x.TaskId == taskId).OrderByDescending(x => x.Id).FirstOrDefaultAsync(ct);
+        // A picture the desktop added after the report is part of the same hand-over, not something said since.
+        var last = await db.TaskMessages.AsNoTracking().Where(x => x.TaskId == taskId && x.Kind != MessageKind.Picture).OrderByDescending(x => x.Id).FirstOrDefaultAsync(ct);
         if (last is not { Author: MessageAuthor.Agent, Kind: MessageKind.Text }) return 0;
 
         var writers = await db.TaskMessages.AsNoTracking().Where(x => x.TaskId == taskId && x.Author == MessageAuthor.Person).Select(x => x.AuthorId).Distinct().ToListAsync(ct);

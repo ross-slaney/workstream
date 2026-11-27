@@ -187,6 +187,7 @@ One command is the same for the agent, a terminal and the panel's buttons (`agen
 | `phone <ios or android> snapshot` | The phone's screen as lines of text, one for each thing on it, with a reference (`@e3`). |
 | `phone <ios or android> tap`, `type`, `fill`, `press enter`, `scroll`, `swipe`, `open`, `wait`, `screenshot`, `launch`, `terminate`, `logs`, `install` | Uses the phone. The words are the same on both. |
 | `surfaces arrange` | Puts the browser and the phones side by side, each fully visible (`agent/surfaces.mjs`). |
+| `surfaces show` | The same, then takes a picture of each surface and adds the pictures to the task's conversation. The agent runs it when it hands work over. |
 
 ### Using a phone
 
@@ -205,6 +206,14 @@ The two phones are driven by different tools (agent-sim for the iPhone, `adb` fo
 ### The desktop's windows
 
 A window opens where its program last had it, and the last one opened covers the others, so a desktop that is handed over with three surfaces can show one of them. `surfaces arrange` places the iPhone at the right, the Android phone beside it and the browser in the rest, and raises them in that order. The screen is 1280 wide and Chromium goes no narrower than 508, so with both phones the browser shows a page at a phone's width. With both phones the screen is 30 short of holding everything: the iPhone's window hangs that far off the right edge, which costs only the empty strip beside the phone, and the emulator's strip of buttons stands over the empty strip at the iPhone's left. The agent is told to run it when it hands work over.
+
+### The hand-over
+
+A report is often read away from the desktop: in the email that says the agent finished, or hours later when the desktop is paused. So work that used a surface is handed over with a picture of each. `surfaces show` arranges the windows, takes a picture of each surface from the screen itself (`scrot`, of the window's own area as `xwininfo` gives it, so the picture is what a person at the desktop sees), keeps each as a file in `~/.workstream/shown`, and sends each to the API, which adds it to the conversation (core-model.md, "The conversation"). A desktop with no phone on screen shows its browser. The command then tells the agent to read the picture files and write its report from what they show: in the first task that used a phone, the report described a screen the iPhone did not show.
+
+The agent is told to do this, and the harness makes sure of it (`agent/handover.mjs`). It notes each surface a turn uses: a browser tool, or a `phone ios` or `phone android` command. When the agent goes to stop with a surface used since the last `surfaces show`, the harness's Stop hook asks it, once a turn, to run the command, look at the pictures, and correct its message if a picture shows something else. A turn that used no surface ends as before.
+
+The web app draws pictures that follow each other in one row, each under what it shows, and opens one at its full size on a click. It reads each picture with the person's token and shows it from memory, because an image cannot send a token.
 
 While the agent works, the surface it is using comes to the front (`front` in `agent/surfaces.mjs`): the `phone` command brings its phone forward, and the harness brings the browser forward when the agent uses a browser tool. It happens once for each change of surface, so a person who moves a window while the agent stays on one surface is left alone. On the first task that used the new phone commands, the browser covered the Android phone for the eleven minutes the agent used it.
 
