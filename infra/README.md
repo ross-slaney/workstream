@@ -194,7 +194,7 @@ The prices are Azure's list prices in West US 3, kept in one place (`DesktopOpti
 | | |
 | --- | --- |
 | A task's desktop, running | $0.091 (Small), $0.182 (Standard) or $0.364 (Large) an hour |
-| A desktop's disk, running or paused, until it is archived or its task is deleted | $4.80 a month (Standard SSD, 64 GB: Small and Standard) or $9.60 (128 GB: Large) |
+| A desktop's disk, running or paused, until it is archived or its task is deleted | $9.28 a month (Premium SSD, 64 GB: Small and Standard) or $17.92 (128 GB: Large) |
 | An archived desktop's archive, in place of its disk | $0.05 a month for each GB that was on the disk (a full snapshot on standard storage, billed on the used size) |
 | A spare, while someone is in a team's workspace | the same hourly price as a desktop of its size |
 | A machine preparing an environment's setup | the same hourly price as a desktop of its size, until its disk is saved |

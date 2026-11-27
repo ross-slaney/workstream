@@ -172,6 +172,24 @@ A desktop started again after a stop starts Docker when it has containers, so th
 
 The agent is told how to work on a project the way a developer does (`agent/instructions.mjs`): follow the repository's `CLAUDE.md` and `AGENTS.md`, use its skills for running the stack or implementing an issue rather than working the steps out, give long builds a long timeout, start what takes longest first and go on with other work while it runs, and deliver changes on a branch of their own as a pull request opened with `gh`. It is told to work in the folder the setup prepared, and not in a git worktree or a second copy, even when the repository's own skill says to use one. A worktree keeps tasks apart on a computer they share, which a desktop for each task already does, and a new folder has nothing the setup installed: the first task that made one installed the project's packages again and branched from a branch the environment was not set to. When the environment is set to a branch that is not the default one, the pull request goes against that branch. git and gh sign in through the team's GitHub connection or a pasted `GITHUB_TOKEN` (`agent/github.mjs`, "GitHub" below).
 
+### The desktop's disk
+
+A desktop's disk is a Premium SSD (`DiskType` in `api/Desktops/DesktopHosts.cs`). A project's stack writes many small files at once: a database, Docker's layers, a build's caches, an Android phone's own disk, the iPhone simulator. What matters for that is how many writes a second the disk takes, and Azure sets it by the disk's type and size.
+
+Measured on a Large desktop with `fio` (4 KB random writes, direct, 15 seconds):
+
+| Disk, 128 GiB | Writes a second | A month |
+| --- | --- | --- |
+| Standard SSD (E10), until release 0.12.0 | 584 | $9.60 |
+| Premium SSD (P10) | 3,113 while its burst lasts, 500 after | $17.92 |
+| Premium SSD (P10) raised to the P30 performance tier | 3,421 under load; Azure gives it 5,000 without a burst | $122.88, about $0.17 an hour |
+
+On a Standard SSD the first task that ran a stack, an Android build and both phones together stopped 21 minutes in: the load was 25 with the processor 6% busy, and the kernel reported a program waiting twenty minutes in `sync`. The task never finished.
+
+A Premium SSD's burst is 3,500 writes a second for thirty minutes from full. It refills while the disk does less than 500, and is full when a machine starts. A task whose heavy writing outlasts it falls back to 500. If that is seen, the next step is the P30 tier while a desktop runs (`az disk update --set tier=P30`, which needs no restart; a tier can be lowered once in twelve hours). Premium SSD v2 gives 3,000 writes a second for the Standard SSD's price, but Azure does not allow it as a machine's own disk.
+
+A desktop made before the change keeps its Standard SSD until its task is deleted. A saved setup is a snapshot, so a task that starts from one gets a Premium SSD.
+
 ## Phones on a desktop
 
 An environment can give its desktops two more apps (`desktop/apps.json`): `android`, the Android phone above in a window of its own, and `iphone`, an iPhone simulator. Each has a button on the panel, comes up with the desktop, and is there for the person to click and type on. The agent uses them the way a person does: it opens the app, reads the screen and taps through what it changed, and is told to check a change on every surface the desktop has (`agent/phones.mjs`).
@@ -280,7 +298,7 @@ The rates are one table, `DesktopOptions.Prices` (`Workstream:Desktops:Prices`),
 | Line | Rate |
 | --- | --- |
 | A running machine, by size | $0.091 (small), $0.182 (standard), $0.364 (large) an hour |
-| A desktop's disk (`disk`) | $0.075 a gigabyte a month: a Standard SSD, $4.80 for 64 GiB and $9.60 for 128 |
+| A desktop's disk (`disk`) | $0.14 a gigabyte a month: a Premium SSD, $17.92 for 128 GiB. The 64 GiB disk is $9.28 and is counted at $8.96 |
 | An archived task (`archive`), a saved setup (`setup`) | $0.05 a gigabyte a month: a full snapshot on standard storage |
 | A minute of the Mac, for an iPhone build | $0.062 (`Workstream:Builds:MacMinuteUsd`): GitHub's price for its standard Mac runner in a private repository. In a public one, as Workstream's is, GitHub does not charge for it. |
 
