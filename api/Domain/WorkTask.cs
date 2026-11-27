@@ -352,6 +352,12 @@ public enum MessageKind
     Text,
     /// <summary>Something the agent did, in a line: a command it ran, a file it changed, a page it opened.</summary>
     Activity,
+    /// <summary>
+    /// A picture the desktop took of one of its surfaces (the browser, a phone) when the agent handed work over.
+    /// <see cref="TaskMessage.Text"/> says what it is a picture of; the picture is a file
+    /// (<see cref="TaskMessage.PictureFile"/>), read with <c>TASK_VIEW</c> like the rest of the conversation.
+    /// </summary>
+    Picture,
 }
 
 /// <summary>
@@ -359,10 +365,15 @@ public enum MessageKind
 /// the task writes one and <c>TASK_VIEW</c> reads them. <see cref="ResourceId"/> is the task's node, so the
 /// conversation is one authorized page over this table. <see cref="Id"/> is also the conversation's order.
 /// </summary>
-public sealed class TaskMessage : IHasResourceId
+public sealed partial class TaskMessage : IHasResourceId
 {
     public const int MaxPersonLength = 20_000;
     public const int MaxAgentLength = 100_000;
+    public const int MaxCaptionLength = 80;
+    /// <summary>A picture of a desktop's whole screen is about 150 KB.</summary>
+    public const int MaxPictureBytes = 2 * 1024 * 1024;
+    /// <summary>How many pictures one conversation keeps. A desktop is untrusted, so what it may store has an end.</summary>
+    public const int MaxPictures = 500;
 
     /// <summary>For EF Core.</summary>
     TaskMessage()
@@ -402,6 +413,26 @@ public sealed class TaskMessage : IHasResourceId
             CreatedAt = now,
         };
     }
+}
+
+public sealed partial class TaskMessage
+{
+    /// <summary>
+    /// A picture from the task's desktop: a JPEG no larger than <see cref="MaxPictureBytes"/>, with a line
+    /// saying what it shows. Its bytes are kept as a file named by <see cref="PictureFile"/>.
+    /// </summary>
+    public static TaskMessage Picture(WorkTask task, string desktopId, string? caption, ReadOnlySpan<byte> jpeg, string clientKey, DateTimeOffset now)
+    {
+        if (jpeg.Length is 0 or > MaxPictureBytes) throw new DomainRuleException($"A picture is at most {MaxPictureBytes / (1024 * 1024)} MB.");
+        // Every JPEG starts with these three bytes. Nothing else is kept or served as a picture.
+        if (jpeg.Length < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 || jpeg[2] != 0xFF) throw new DomainRuleException("A picture is a JPEG.");
+        var says = (caption ?? "").Trim();
+        if (says.Length is 0 or > MaxCaptionLength) throw new DomainRuleException($"A picture says what it shows, in at most {MaxCaptionLength} characters.");
+        return Write(task, desktopId, MessageAuthor.Agent, MessageKind.Picture, says, clientKey, now);
+    }
+
+    /// <summary>Where a picture's bytes are kept (<c>IBuildFiles</c>): under its task, by the key its sender made.</summary>
+    public static string PictureFile(string taskId, string clientKey) => $"pictures/{taskId}/{Rules.ClientId(clientKey, "A picture")}.jpg";
 }
 
 /// <summary>What a machine was running for. Each is a line of what the desktops cost.</summary>

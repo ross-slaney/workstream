@@ -5,6 +5,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Extensions;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using Workstream.Api.Builds;
 using Workstream.Api.Domain;
 using static Workstream.Api.WorkstreamAuthorization;
 
@@ -698,6 +699,9 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
             var messages = await db.TaskMessages.Where(x => x.TaskId == taskId).OrderBy(x => x.Id).Take(500).ToListAsync(ct);
             if (messages.Count == 0) break;
+            // A picture's file goes with its message.
+            var files = scope.ServiceProvider.GetRequiredService<IBuildFiles>();
+            foreach (var picture in messages.Where(x => x.Kind == MessageKind.Picture)) await files.DeleteAsync(TaskMessage.PictureFile(taskId, picture.ClientKey), ct);
             db.TaskMessages.RemoveRange(messages);
             await db.SaveChangesAsync(ct);
         }

@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
+import { newTurn, note, owed } from "./handover.mjs";
 import { noteBackground, noteFile } from "./restore.mjs";
 import { noSetup, projectTools, projectWork, setupEnded } from "./instructions.mjs";
 import { front } from "./surfaces.mjs";
@@ -25,7 +26,7 @@ You are the agent on a Workstream desktop: a Linux computer (Debian with the XFC
 - Files you change open in VS Code as you change them. Your working folder is ${workspace}.
 - Start long-running programs (a dev server, a watcher) in the background and say where they listen. Leave them running when you finish, with the result open in the browser, so the person can try it.
 - You have sudo without a password. Install what the task needs.
-- When you finish, say what you did and what is on screen for the person to look at.
+- When you finish, say what you did and what is on screen for the person to look at. If you used the browser or a phone, run \`surfaces show\` first: it adds a picture of each to the conversation, because the person may read your report later, away from the desktop. Read the pictures it names and write the report from what they show.
 - The person reads your messages in a narrow panel beside the desktop. Write plain, short paragraphs.
 - When this desktop is stopped and started again, Workstream reruns the commands you left running in the background and reopens the browser's pages and VS Code.
 
@@ -72,6 +73,8 @@ const longCommands = { BASH_DEFAULT_TIMEOUT_MS: String(10 * 60_000), BASH_MAX_TI
  */
 export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log, restored = null, setupResult = null }) {
   let current = null;
+  // Which surfaces this turn used and has not shown the person yet (handover.mjs).
+  let turn = newTurn();
 
   // gh's wrapper first on the PATH (shims/gh), so the agent's gh signs itself in.
   const environment = { ...process.env, PATH: `${path.join(here, "shims")}:${process.env.PATH}`, ...setup.variables, ...modelEnvironment(setup, key), ...longCommands };
@@ -100,6 +103,8 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
       PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [showBrowser] }],
       // And what is left running, and open, is kept to bring back after a stop (restore.mjs).
       PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }, { matcher: "Bash", hooks: [keepBackground] }],
+      // And a turn that used a surface ends with a picture of each in the conversation.
+      Stop: [{ hooks: [handOver] }],
     },
     resume: state.sessionId ?? undefined,
     stderr: (line) => log("harness:", line.trimEnd()),
@@ -131,6 +136,16 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     return {};
   }
 
+  /**
+   * When the agent goes to stop: if it used a surface and has not shown the surfaces since, it is asked to,
+   * once a turn. `stop_hook_active` says this stop already follows such an ask.
+   */
+  async function handOver(input) {
+    if (input.stop_hook_active) return {};
+    const reason = owed(turn);
+    return reason ? { decision: "block", reason } : {};
+  }
+
   /** One session: prompts in as people write them, messages out as the agent works. Ends only when it breaks. */
   async function session() {
     const ending = new AbortController();
@@ -138,6 +153,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
       while (true) {
         const text = await prompts.take(ending.signal);
         setWorking(true);
+        turn = newTurn();
         yield { type: "user", message: { role: "user", content: [{ type: "text", text }] }, parent_tool_use_id: null, session_id: state.sessionId ?? "" };
       }
     }
@@ -161,6 +177,8 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
         }
         break;
       case "assistant":
+        // A surface is used whoever uses it: the agent or a helper it started (handover.mjs).
+        for (const block of message.message?.content ?? []) if (block.type === "tool_use") note(turn, block.name, block.input ?? {});
         // A helper's own messages stay with the helper; its result reaches the conversation through the agent.
         if (message.parent_tool_use_id) break;
         for (const block of message.message?.content ?? []) {

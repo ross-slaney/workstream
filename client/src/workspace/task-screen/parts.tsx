@@ -8,6 +8,7 @@ import { useTheme } from "@/components/theme/theme";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { DesktopState, StartStep, Task, TaskGitHub, TaskSetup } from "@/lib/workstream/api";
+import { rowsOf } from "./pictures";
 import type { ChatEntry, TaskScreenProps } from "./props";
 import { chatNoteOf, restingOf, type Resting } from "./resting";
 import { RichText } from "./rich-text";
@@ -194,9 +195,9 @@ export function Chat(p: TaskScreenProps) {
         className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3 py-3"
       >
         {p.entries.length === 0 ? <p className="m-auto max-w-[260px] text-center text-[13px] text-muted-foreground">{t("chat.empty")}</p> : null}
-        {p.entries.map((entry) => (
-          <Entry key={entry.id} entry={entry} onRetry={() => p.onRetry(entry.id)} />
-        ))}
+        {rowsOf(p.entries).map((row) =>
+          row.kind === "pictures" ? <Pictures key={row.id} pictures={row.pictures} /> : <Entry key={row.id} entry={row.entry} onRetry={() => p.onRetry(row.entry.id)} />,
+        )}
       </div>
       {p.github?.signInNeeded && task ? <GitHubNote github={p.github} onSignIn={p.onSignInWithGitHub} /> : null}
       {p.setup && task ? <SetupNote setup={p.setup} running={settingUp} /> : null}
@@ -323,6 +324,32 @@ function SetupNote({ setup, running }: { setup: TaskSetup; running: boolean }) {
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The pictures the desktop took when the agent handed work over, side by side: one of each surface, as it
+ * was then. Each opens at its full size.
+ */
+function Pictures({ pictures }: { pictures: ChatEntry[] }) {
+  const t = useT("workspace");
+  return (
+    <div className="flex items-start gap-2">
+      {pictures.map((picture) => (
+        <figure key={picture.id} className="m-0 flex min-w-0 flex-1 flex-col gap-1" style={{ maxWidth: pictures.length === 1 ? "60%" : undefined }}>
+          {picture.picture ? (
+            <a href={picture.picture} target="_blank" rel="noreferrer" title={t("chat.openPicture")} className="block overflow-hidden rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+              <img src={picture.picture} alt={picture.text} className="block h-auto w-full" />
+            </a>
+          ) : (
+            <div aria-hidden="true" className="aspect-[9/16] w-full rounded-md border border-border bg-muted" />
+          )}
+          <figcaption className="truncate text-[11.5px] leading-snug text-muted-foreground" title={picture.text}>
+            {picture.text}
+          </figcaption>
+        </figure>
+      ))}
     </div>
   );
 }

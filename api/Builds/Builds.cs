@@ -64,7 +64,10 @@ public sealed class BuildOptions
     }
 }
 
-/// <summary>Where a build's files are kept: the source a desktop sent, the app the Mac made, and the Mac's log.</summary>
+/// <summary>
+/// Where the files that come from desktops are kept: a build's source, the app the Mac made of it and the Mac's
+/// log, and the pictures a desktop adds to its task's conversation (<c>TaskMessage.PictureFile</c>).
+/// </summary>
 public interface IBuildFiles
 {
     /// <summary>Keep a file of this length, replacing one of the same name.</summary>

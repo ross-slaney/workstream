@@ -2,6 +2,7 @@ using Hangfire;
 using Microsoft.AspNetCore.DataProtection;
 using SqlOS.Email.Interfaces;
 using SqlOS.Fga.Interfaces;
+using Workstream.Api.Builds;
 using Workstream.Api.Desktops;
 using Workstream.Api.Domain;
 using Workstream.Api.Model;
@@ -65,6 +66,7 @@ public static partial class WorkstreamApi
         api.MapPost("/tasks/{id}/interrupt", Interrupt).WithName("interrupt_agent").WithTags("Tasks");
         api.MapGet("/tasks/{id}/messages", ListMessages).WithName("list_messages").WithTags("Tasks").Produces<ConversationDto>();
         api.MapPost("/tasks/{id}/messages", SayMessage).WithName("say").WithTags("Tasks").Produces<MessageDto>(201).ProducesProblem(402).ProducesProblem(409);
+        api.MapGet("/tasks/{id}/pictures/{messageId:long}", GetPicture).WithName("get_picture").WithTags("Tasks").Produces(200, contentType: "image/jpeg");
 
         api.MapGet("/shared-tasks", ListSharedTasks).WithName("list_shared_tasks").WithTags("Sharing").Produces<ListPage<TaskDto>>();
         api.MapGet("/tasks/{id}/access", GetTaskAccess).WithName("list_task_access").WithTags("Sharing").Produces<TaskAccessList>().ProducesProblem(403);
@@ -79,6 +81,8 @@ public static partial class WorkstreamApi
         desktop.MapGet("/setup", GetDesktopSetup).ExcludeFromDescription();
         desktop.MapPost("/setup", ReportSetup).ExcludeFromDescription();
         desktop.MapPost("/exchange", Exchange).ExcludeFromDescription();
+        // A picture of a surface, into the conversation of the desktop's own task.
+        desktop.MapPut("/pictures/{key}", PutPicture).ExcludeFromDescription();
         // The GitHub token of the person who started the desktop's task (WorkstreamApi.GitHub.cs).
         desktop.MapGet("/github/token", GetDesktopGitHubToken).ExcludeFromDescription();
         // Who its commits are by: the same person, as their GitHub account says.
@@ -146,7 +150,7 @@ public static partial class WorkstreamApi
 
     static MessageDto ToDto(TaskMessage x, IReadOnlyDictionary<string, string> names, string callerId) => new(
         x.Id, x.Author == MessageAuthor.Agent ? "agent" : "person", names.GetValueOrDefault(x.AuthorId), x.AuthorId == callerId,
-        x.Kind == MessageKind.Activity ? "activity" : "text", x.Text, x.CreatedAt);
+        x.Kind switch { MessageKind.Activity => "activity", MessageKind.Picture => "picture", _ => "text" }, x.Text, x.CreatedAt);
 
     /// <summary>
     /// The conversation after <paramref name="after"/>, oldest first, with the task as it is now. A screen
@@ -227,6 +231,25 @@ public static partial class WorkstreamApi
     {
         var outcome = await Operations.ReportSetupAsync(Caller.Desktop(http), body, db, jobs, desktops, ct);
         return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
+    }
+
+    static async Task<IResult> PutPicture(string key, string? caption, HttpContext http, WorkstreamDbContext db, IBuildFiles files, CancellationToken ct)
+    {
+        var outcome = await Operations.AddPictureAsync(Caller.Desktop(http), key, caption, http.Request.Body, http.Request.ContentLength, db, files, ct);
+        return outcome.IsOk ? Results.NoContent() : ToResult(outcome);
+    }
+
+    /// <summary>
+    /// A picture never changes, so the browser keeps it. It is served as a JPEG and as nothing else, whatever
+    /// the desktop that sent it put in it.
+    /// </summary>
+    static async Task<IResult> GetPicture(string id, long messageId, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBuildFiles files, CancellationToken ct)
+    {
+        var outcome = await Operations.PictureAsync(CallerOf(http), id, messageId, db, fga, files, ct);
+        if (!outcome.IsOk) return ToResult(outcome);
+        http.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+        http.Response.Headers.XContentTypeOptions = "nosniff";
+        return FileResult(http, outcome.Value!, "image/jpeg");
     }
 
     static async Task<IResult> Exchange(DesktopExchange body, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, IBackgroundJobClient jobs, CancellationToken ct)

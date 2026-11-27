@@ -109,6 +109,7 @@
     "atDesktop": "From the desktop",
     "waitingForDesktop": "The agent will read this when the desktop is ready.",
     "notSent": "Not sent. Try again.",
+    "openPicture": "Open the picture at its full size",
     "agentStarting": "The agent is starting. It reads what you asked for in a moment.",
     "desktopPausing": "The desktop is being paused. The agent reads a message you send now when the desktop is resumed.",
     "desktopPaused": "The desktop is paused. Send a message and it resumes; the agent reads it when it is up.",

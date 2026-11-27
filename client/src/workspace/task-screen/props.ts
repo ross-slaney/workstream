@@ -8,8 +8,11 @@ export type ChatEntry = {
   author: "person" | "agent";
   /** Who wrote it, when the server knows a name: a teammate. Null for the agent and for someone typing at the desktop. */
   authorName: string | null;
-  kind: "text" | "activity";
+  /** `picture`: a picture the desktop took of one of its surfaces, and `text` says of which. */
+  kind: "text" | "activity" | "picture";
   text: string;
+  /** A picture's address for an image to show, once it has been read; null until then. */
+  picture?: string | null;
   /** Written by the person looking at the screen. */
   mine: boolean;
   /** Not on the server yet, or refused. */

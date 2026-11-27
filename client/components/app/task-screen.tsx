@@ -8,6 +8,7 @@ import { useT } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { useOnlineRead } from "@/hooks/use-online-read";
+import { usePictures } from "@/hooks/use-pictures";
 import { workstream, type Message, type Task, type TaskAccess, type TaskSetup, type TaskShared } from "@/lib/workstream/api";
 import { ShareDialog } from "@/src/workspace/share-dialog";
 import { TaskScreen, type ChatEntry } from "@/src/workspace/task-screen";
@@ -124,6 +125,7 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
     [taskId, take],
   );
 
+  const pictures = usePictures(taskId, messages);
   const entries = useMemo<ChatEntry[]>(
     () => [
       ...messages.map((message) => ({
@@ -133,13 +135,14 @@ export function TaskScreenController({ taskId, onClose, onChanged }: { taskId: s
         kind: message.kind,
         text: message.text,
         mine: message.mine,
+        picture: message.kind === "picture" ? (pictures.get(message.id) ?? null) : undefined,
       })),
       ...unsent.map((entry) => ({
         id: entry.key, author: "person" as const, authorName: session?.name ?? null, kind: "text" as const, text: entry.text, mine: true,
         pending: entry.failed ? ("failed" as const) : ("sending" as const),
       })),
     ],
-    [messages, unsent, session?.name],
+    [messages, unsent, session?.name, pictures],
   );
 
   const act = (run: () => Promise<Task | void>) =>

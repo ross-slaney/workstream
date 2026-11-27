@@ -1,4 +1,4 @@
-import { apiJson, apiSend } from "@/lib/api/client";
+import { apiFetch, apiJson, apiSend } from "@/lib/api/client";
 
 /*
  * Every call the app makes to the Workstream API, and the shapes it answers with. One function per route
@@ -158,8 +158,12 @@ export type Task = {
   stateChangedAt: string;
 };
 
-/** `mine` says the reader wrote it; a person's message with no name was typed at the desktop itself. */
-export type Message = { id: number; author: "person" | "agent"; authorName: string | null; mine: boolean; kind: "text" | "activity"; text: string; createdAt: string };
+/**
+ * `mine` says the reader wrote it; a person's message with no name was typed at the desktop itself. A `picture`
+ * is one the desktop took of a surface when the agent handed work over: `text` says of which, and the picture
+ * itself is read with `workstream.picture`.
+ */
+export type Message = { id: number; author: "person" | "agent"; authorName: string | null; mine: boolean; kind: "text" | "activity" | "picture"; text: string; createdAt: string };
 
 /** What the reader may do with a task: write to its agent, use its desktop's mouse and keyboard, and rename, stop, delete and share it. */
 export type TaskAccess = { prompt: boolean; drive: boolean; manage: boolean };
@@ -301,6 +305,8 @@ export const workstream = {
   interrupt: (taskId: string) => apiSend<void>("POST", `/api/tasks/${id(taskId)}/interrupt`),
   conversation: (taskId: string, after: number) => apiJson<Conversation>(`/api/tasks/${id(taskId)}/messages?after=${after}`),
   taskGitHub: (taskId: string) => apiJson<TaskGitHub>(`/api/tasks/${id(taskId)}/github`),
+  /** A picture in the conversation, as its bytes: an image cannot send the person's token, so it is read here. */
+  picture: (taskId: string, messageId: number) => apiFetch(`/api/tasks/${id(taskId)}/pictures/${messageId}`).then((response) => response.blob()),
   say: (taskId: string, text: string, key: string) => apiSend<Message>("POST", `/api/tasks/${id(taskId)}/messages`, { text, key }),
 
   /** Tasks of other teams shared with the person. */

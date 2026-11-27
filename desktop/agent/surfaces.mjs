@@ -3,6 +3,12 @@
 // phone. The `surfaces` command, for the agent and for a person at the desktop.
 //
 //   surfaces arrange   put the browser and the phones side by side, each fully visible, on top of the rest
+//   surfaces show      the same, then take a picture of each and add the pictures to the task's conversation
+//
+// `show` is how work is handed over. The person may read the agent's report in an email or hours later, when
+// the desktop is paused, so the report comes with a picture of each surface as it was. The agent looks at the
+// same pictures before it writes: in the first task that used a phone, the report said the iPhone showed
+// something it did not.
 //
 // While the agent works, the surface it is using comes to the front by itself (`front`, called by the phone
 // command and by the harness when the agent uses the browser), so the person watching sees what is being
@@ -13,10 +19,12 @@
 // (session.sh) and the panel takes the bottom 45.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, openAsBlob, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { answerOf, api } from "./api.mjs";
 
 export const SCREEN = { width: 1280, height: 915 };
 /**
@@ -110,10 +118,12 @@ export function front(kind, { file = frontFile } = {}) {
   }
 }
 
-function arrange() {
+/** Put the surfaces side by side. Answers what was placed, each with its kind. */
+function place() {
   const listing = wmctrl(["-lG"]);
   if (listing.status !== 0) throw new Error("The desktop's windows could not be listed. Is this a Workstream desktop's session?");
-  const placed = layoutOf(windowsOf(listing.stdout));
+  const windows = windowsOf(listing.stdout);
+  const placed = layoutOf(windows);
   for (const window of placed) {
     wmctrl(["-i", "-r", window.id, "-b", "remove,maximized_vert,maximized_horz"]);
     wmctrl(["-i", "-r", window.id, "-e", `0,${window.x},${window.y},${window.width},${window.height}`]);
@@ -125,13 +135,107 @@ function arrange() {
   } catch {
     // Nothing to forget.
   }
-  process.stdout.write(said(placed) + "\n");
+  return { placed, windows };
+}
+
+function arrange() {
+  process.stdout.write(said(place().placed) + "\n");
   return 0;
+}
+
+/**
+ * The surfaces to take a picture of, one of each kind: what was put side by side, or, on a desktop with no
+ * phone on screen, the browser where it is.
+ */
+export function shownOf(placed, windows) {
+  const all = placed.length ? placed : windows.filter((window) => kindOf(window.title) === "browser").map((window) => ({ ...window, kind: "browser" }));
+  return ["browser", "android", "iphone"].map((kind) => all.findLast((window) => window.kind === kind)).filter(Boolean);
+}
+
+/** Where a window's own area is on the screen, from `xwininfo -id`: without its title bar and borders. */
+export function areaOf(info) {
+  const read = (label) => {
+    const match = new RegExp(`${label}:\\s+(-?\\d+)`).exec(info ?? "");
+    return match ? Number(match[1]) : null;
+  };
+  const area = { x: read("Absolute upper-left X"), y: read("Absolute upper-left Y"), width: read("Width"), height: read("Height") };
+  return Object.values(area).every((value) => value !== null) ? area : null;
+}
+
+/**
+ * The part of the screen a surface's picture is taken from: its window's own area, without the empty strip
+ * the iPhone's window has at each side, and only what is on the screen. Null when none of it is.
+ */
+export function pictureOf(kind, area, screen = SCREEN) {
+  const inset = kind === "iphone" ? IPHONE.margin : 0;
+  const x = Math.max(0, area.x + inset);
+  const y = Math.max(0, area.y);
+  const width = Math.min(screen.width, area.x + area.width - inset) - x;
+  const height = Math.min(screen.height, area.y + area.height) - y;
+  return width > 0 && height > 0 ? { x, y, width, height } : null;
+}
+
+const CAPTIONS = { browser: "The browser", android: "The Android phone", iphone: "The iPhone" };
+const shownFolder = path.join(os.homedir(), ".workstream", "shown");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** What the agent is told after the pictures are taken: where they are and what to do with them. */
+export function shownWords(pictures, { sent, problem }) {
+  if (!pictures.length) return "No surface is on this desktop's screen, so there is no picture to take. Open what you are handing over in the browser or on a phone, then run `surfaces show` again.";
+  const lines = [
+    sent
+      ? "A picture of each surface, as it is now, was added to the conversation for the person:"
+      : `A picture of each surface was taken, but could not be added to the conversation (${problem}). Tell the person that, and that the surfaces are on the desktop:`,
+    ...pictures.map((picture) => `- ${CAPTIONS[picture.kind]}: ${picture.file}`),
+    "Read each of these picture files now, and write your report from what they show, not from what you remember doing. If a picture does not show what you mean to hand over, put that right and run `surfaces show` again.",
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * Hand-over: every surface side by side, a picture of each kept in a file and added to the task's
+ * conversation. The pictures are of the screen itself, so they show exactly what the person would see.
+ */
+async function show({ send = sendPicture, folder = shownFolder } = {}) {
+  const { placed, windows } = place();
+  const shown = shownOf(placed, windows);
+  // With no phone nothing was moved, so the browser is brought forward here.
+  if (!placed.length) for (const window of shown) wmctrl(["-i", "-a", window.id]);
+  // The windows are drawn where they were put a moment after they are moved.
+  await sleep(1200);
+  mkdirSync(folder, { recursive: true });
+  const pictures = [];
+  for (const window of shown) {
+    const area = areaOf(spawnSync("xwininfo", ["-id", window.id], { encoding: "utf8" }).stdout);
+    const part = area && pictureOf(window.kind, area);
+    if (!part) continue;
+    const file = path.join(folder, `${window.kind}.jpg`);
+    const shot = spawnSync("scrot", ["--overwrite", "--quality", "85", "--autoselect", `${part.x},${part.y},${part.width},${part.height}`, file], { encoding: "utf8", timeout: 15_000 });
+    if (shot.status === 0 && existsSync(file)) pictures.push({ kind: window.kind, file });
+  }
+  let problem = null;
+  for (const picture of pictures) {
+    try {
+      await send(picture.file, CAPTIONS[picture.kind]);
+    } catch (error) {
+      problem = error.message;
+      break;
+    }
+  }
+  if (placed.length) process.stdout.write(said(placed) + "\n");
+  process.stdout.write(shownWords(pictures, { sent: !problem, problem }) + "\n");
+  return pictures.length && !problem ? 0 : 1;
+}
+
+/** One picture into the task's conversation, under what it is a picture of. */
+async function sendPicture(file, caption) {
+  await answerOf(await api("PUT", `/api/desktop/pictures/${randomUUID()}?caption=${encodeURIComponent(caption)}`, { file: await openAsBlob(file), type: "image/jpeg" }));
 }
 
 export function main(argv) {
   if (argv[0] === "arrange") return arrange();
-  process.stderr.write("Use:\n  surfaces arrange   put the browser and the phones side by side\n");
+  if (argv[0] === "show") return show();
+  process.stderr.write("Use:\n  surfaces arrange   put the browser and the phones side by side\n  surfaces show      the same, then add a picture of each to the conversation: run it when you hand work over\n");
   return 2;
 }
 
@@ -141,7 +245,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
   try {
     process.env.DISPLAY ??= ":1";
-    process.exitCode = main(process.argv.slice(2));
+    process.exitCode = await main(process.argv.slice(2));
   } catch (error) {
     process.stderr.write(`surfaces: ${error.message}\n`);
     process.exitCode = 1;

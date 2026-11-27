@@ -36,7 +36,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
-import { toldNow } from "./told.mjs";
+import { answerOf, api } from "./api.mjs";
 import { acted, android, fill, iphone, readAndroid, typeText, waitFor } from "./touch.mjs";
 import { linesOf } from "./screen.mjs";
 import { front } from "./surfaces.mjs";
@@ -141,29 +141,6 @@ export function describeApp(folder) {
   const fingerprint = kind === "expo" ? expoFingerprint(appFolder) : null;
   const inputs = fingerprint ?? hashFiles(files.filter(isNativeInput), (file) => readFileSync(path.join(root, file)));
   return { kind, root, directory, files, hash: buildHash({ kind, directory, inputs }) };
-}
-
-// ── Workstream's API, with the desktop's key ────────────────────────────────────────────────────────────
-
-async function api(method, route, { body, file } = {}) {
-  const { api: origin, key } = await toldNow();
-  if (!origin || !key) throw new Error("This desktop was not told its Workstream API, so it cannot ask for a build.");
-  const headers = { authorization: `Bearer ${key}` };
-  if (body) headers["content-type"] = "application/json";
-  // A file goes as a blob, which has a length: the API takes a build's source only with its length said.
-  if (file) headers["content-type"] = "application/gzip";
-  const response = await fetch(`${origin}${route}`, {
-    method, headers, body: file ?? (body ? JSON.stringify(body) : undefined),
-    signal: AbortSignal.timeout(file ? 30 * 60_000 : 60_000),
-  });
-  return response;
-}
-
-/** The answer's JSON, or an error with the API's own words. */
-async function answerOf(response) {
-  if (response.ok) return response.json();
-  const problem = await response.json().catch(() => null);
-  throw new Error(typeof problem?.title === "string" && problem.title ? problem.title : `Workstream answered ${response.status}.`);
 }
 
 /** The source as one archive: the files git knows of, from the source's root. */
