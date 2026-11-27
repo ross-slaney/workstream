@@ -629,4 +629,183 @@ public sealed class PauseJourneys
         Assert.AreEqual(HttpStatusCode.Unauthorized, (await http.PutAsync($"/api/teams/{team.Id}/desktop-times", System.Net.Http.Json.JsonContent.Create(new SetDesktopTimes(60, 7)))).StatusCode);
         Assert.AreEqual(30, (await ada.GetAsync<TeamDto>($"/api/teams/{team.Id}")).PauseAfterMinutes);
     }
+
+    /// <summary>A task whose desktop is up on a host that gives up a paused machine and keeps its disk, as Azure does.</summary>
+    static async Task<(TaskDto Task, Desktop Desktop)> ReadyOnAHostThatGivesUpAsync(Person person, string teamId, string environmentId)
+    {
+        var task = await StartAsync(person, teamId, environmentId);
+        Stack.Desktops.GivesUp[task.Id] = true;
+        var desktop = await Desktop.StartAsync(task.Id);
+        await desktop.ExchangeAsync();
+        return (task, desktop);
+    }
+
+    [TestMethod]
+    public async Task A_paused_desktop_gives_up_its_machine_and_comes_back_on_its_own_disk()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var (task, desktop) = await ReadyOnAHostThatGivesUpAsync(ada, team.Id, environment);
+        using var _ = desktop;
+        var (machine, firstKey) = (desktop.Host, desktop.Key);
+        await desktop.ExchangeAsync(false, 0, Desktop.Agent("The heading is Example Domain."));
+
+        await PauseAsync(ada, task.Id);
+        // The machine is gone, so it counts for nothing at the host, and the desktop is its disk.
+        var paused = await RowAsync(task.Id);
+        Assert.IsNull(paused.Host);
+        Assert.AreEqual(machine, paused.Disk);
+        Assert.IsFalse(Stack.Desktops.Made.ContainsKey(machine));
+        Assert.IsTrue(Stack.Desktops.Disks.ContainsKey(machine));
+        CollectionAssert.DoesNotContain(Stack.Desktops.Deleted.ToList(), machine);
+        // No machine holds the key any more.
+        await desktop.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.Unauthorized);
+        Assert.AreEqual(0, (await ada.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).RunningDesktops);
+        // The disk is still kept, and still counted as the team's.
+        using (var scope = Stack.Services.CreateScope())
+        {
+            var kept = KeptStorage.Of(paused, 64).Single();
+            Assert.AreEqual(StorageKind.Disk, kept.Kind);
+        }
+
+        // Resuming makes a machine from that disk, under the same name, with a key of its own.
+        Assert.AreEqual("starting", (await ada.PostAsync<TaskDto>($"/api/tasks/{task.Id}/start")).State);
+        using var back = await Desktop.StartAsync(task.Id);
+        var spec = Stack.Desktops.For(task.Id);
+        Assert.IsTrue(spec.Kept);
+        Assert.AreEqual(machine, spec.Name);
+        Assert.IsNull(spec.Save);
+        Assert.IsNull(spec.Archive);
+        Assert.AreNotEqual(firstKey, back.Key);
+        await back.ExchangeAsync();
+        Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
+        var resumed = await RowAsync(task.Id);
+        Assert.AreEqual(machine, resumed.Host);
+        Assert.IsNull(resumed.Disk);
+        Assert.IsFalse(Stack.Desktops.Disks.ContainsKey(machine));
+        // The conversation is as it was.
+        var conversation = await ada.GetAsync<ConversationDto>($"/api/tasks/{task.Id}/messages?after=0");
+        Assert.IsTrue(conversation.Messages.Any(x => x.Text == "The heading is Example Domain."));
+
+        // And it pauses and comes back again the same way.
+        await PauseAsync(ada, task.Id);
+        Assert.AreEqual(machine, (await RowAsync(task.Id)).Disk);
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        using var again = await Desktop.StartAsync(task.Id);
+        await again.ExchangeAsync();
+        Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
+    }
+
+    [TestMethod]
+    public async Task A_desktop_that_cannot_come_back_on_its_disk_keeps_the_disk()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var (task, desktop) = await ReadyOnAHostThatGivesUpAsync(ada, team.Id, environment);
+        var machine = desktop.Host;
+        desktop.Dispose();
+        await PauseAsync(ada, task.Id);
+
+        // The host makes the machine from the disk and then cannot start it.
+        Stack.Desktops.Broken[machine] = "Allocation failed. We do not have sufficient capacity for the requested VM size in this region.";
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        await Stack.Jobs.StartAsync(task.Id, CancellationToken.None);
+        Assert.AreEqual("failed", (await TaskAsync(ada, task.Id)).State);
+        var failed = await RowAsync(task.Id);
+        // The half-made machine is given up again, never deleted: the disk is the desktop.
+        Assert.IsNull(failed.Host);
+        Assert.AreEqual(machine, failed.Disk);
+        Assert.IsTrue(Stack.Desktops.Disks.ContainsKey(machine));
+        Assert.IsFalse(Stack.Desktops.Made.ContainsKey(machine));
+        CollectionAssert.DoesNotContain(Stack.Desktops.Deleted.ToList(), machine);
+
+        // The host has no room at all for the next try: the disk is not touched.
+        Stack.Desktops.Broken.TryRemove(machine, out var _);
+        Stack.Desktops.Refuse[task.Id] = true;
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        await Stack.Jobs.StartAsync(task.Id, CancellationToken.None);
+        Assert.AreEqual("failed", (await TaskAsync(ada, task.Id)).State);
+        Assert.AreEqual(machine, (await RowAsync(task.Id)).Disk);
+        Assert.IsTrue(Stack.Desktops.Disks.ContainsKey(machine));
+
+        // Starting again makes a machine from the same disk.
+        Stack.Desktops.Refuse.TryRemove(task.Id, out var _);
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        using var back = await Desktop.StartAsync(task.Id);
+        Assert.IsTrue(Stack.Desktops.For(task.Id).Kept);
+        await back.ExchangeAsync();
+        Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
+        Assert.AreEqual(machine, (await RowAsync(task.Id)).Host);
+    }
+
+    [TestMethod]
+    public async Task A_desktop_paused_on_its_disk_is_archived_and_deleted_like_any_other()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var (task, desktop) = await ReadyOnAHostThatGivesUpAsync(ada, team.Id, environment);
+        var machine = desktop.Host;
+        desktop.Dispose();
+        await PauseAsync(ada, task.Id);
+
+        // After the team's days the disk is copied to an archive and deleted.
+        await InStateForAsync(task.Id, TimeSpan.FromDays(8));
+        await SweepAsync();
+        Assert.AreEqual("archived", (await TaskAsync(ada, task.Id)).State);
+        var archived = await RowAsync(task.Id);
+        Assert.IsNull(archived.Disk);
+        Assert.IsNull(archived.Host);
+        Assert.AreEqual(machine, Stack.Desktops.Archives[archived.Archive!].Machine);
+        Assert.IsFalse(Stack.Desktops.Disks.ContainsKey(machine));
+
+        // It comes back from the archive, as any archived desktop does, and is paused on its disk again.
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        using var back = await Desktop.StartAsync(task.Id);
+        Assert.AreEqual(archived.Archive, Stack.Desktops.For(task.Id).Archive);
+        Assert.IsFalse(Stack.Desktops.For(task.Id).Kept);
+        await back.ExchangeAsync();
+        await PauseAsync(ada, task.Id);
+        var again = (await RowAsync(task.Id)).Disk!;
+        Assert.IsTrue(Stack.Desktops.Disks.ContainsKey(again));
+
+        // Deleting the task deletes the disk it was kept on.
+        await ada.DeleteAsync($"/api/tasks/{task.Id}").IsAsync(HttpStatusCode.NoContent);
+        await Stack.Jobs.DeleteAsync(task.Id, CancellationToken.None);
+        Assert.IsFalse(Stack.Desktops.Disks.ContainsKey(again));
+        CollectionAssert.Contains(Stack.Desktops.Deleted.ToList(), again);
+    }
+
+    [TestMethod]
+    public async Task A_task_that_started_on_a_spare_comes_back_on_the_disk_it_was_paused_on()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        await ada.PostAsync($"/api/teams/{team.Id}/spare", new WantSpare(null)).IsAsync(HttpStatusCode.NoContent);
+        string spareId;
+        using (var scope = Stack.Services.CreateScope())
+        {
+            spareId = (await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Spares.AsNoTracking().SingleAsync(x => x.TeamId == team.Id)).Id;
+        }
+        Stack.Desktops.GivesUp[spareId] = true;
+        await Stack.Jobs.StartSpareAsync(spareId, CancellationToken.None);
+        using var spare = Desktop.Of(spareId);
+        await spare.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.NotFound);
+        var task = await StartAsync(ada, team.Id, environment);
+        Stack.Desktops.GivesUp[task.Id] = true;
+        await spare.ExchangeAsync();
+        var machine = (await RowAsync(task.Id)).Host!;
+        Assert.AreEqual(spare.Host, machine);
+
+        await PauseAsync(ada, task.Id);
+        Assert.AreEqual(machine, (await RowAsync(task.Id)).Disk);
+        // The spare's key was the machine's, and the machine is gone.
+        await spare.GetAsync("/api/desktop/setup").IsAsync(HttpStatusCode.Unauthorized);
+
+        // The machine that takes the disk has the disk's name, which is the spare's and not the task's own.
+        await ada.PostAsync($"/api/tasks/{task.Id}/start").IsAsync(HttpStatusCode.OK);
+        using var back = await Desktop.StartAsync(task.Id);
+        var spec = Stack.Desktops.For(task.Id);
+        Assert.IsTrue(spec.Kept);
+        Assert.AreEqual(machine, spec.Name);
+        Assert.AreNotEqual(DesktopHosting.NameFor(task.Id), spec.Name);
+        await back.ExchangeAsync();
+        Assert.AreEqual("ready", (await TaskAsync(ada, task.Id)).State);
+        Assert.AreEqual(task.Id, (await back.SetupAsync()).TaskId);
+    }
 }

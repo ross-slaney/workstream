@@ -96,6 +96,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             task.Property(x => x.Failure).HasMaxLength(500);
             task.Property(x => x.Size).HasMaxLength(20);
             task.Property(x => x.Host).HasMaxLength(100);
+            task.Property(x => x.Disk).HasMaxLength(100);
             task.Property(x => x.Address).HasMaxLength(100);
             task.Property(x => x.Archive).HasMaxLength(100);
             task.Ignore(x => x.CanResume);

@@ -27,7 +27,7 @@ public static partial class Operations
         string? cursor = null;
         do
         {
-            var page = await db.Tasks.AsNoTracking().Where(x => x.Host != null || x.Archive != null).OrderBy(x => x.Id)
+            var page = await db.Tasks.AsNoTracking().Where(x => x.Host != null || x.Disk != null || x.Archive != null).OrderBy(x => x.Id)
                 .ToPageAsync(PlatformSeed.OperatorSubjectId, Permissions.TaskOperateDesktop, StoragePageSize, cursor, ct);
             kept.AddRange(page.Data.SelectMany(task => KeptStorage.Of(task, options.DiskGbOf(task.Size))));
             cursor = page.NextCursor;

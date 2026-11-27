@@ -27,9 +27,30 @@ public sealed class FakeDesktops : IDesktopHost
     /// <summary>Where every played machine's display is: one listener that greets as a display does.</summary>
     public PlayedDisplay Display { get; } = new();
 
+    /// <summary>
+    /// Desktops (by the task's id) whose paused machine this host gives up, keeping its disk, as Azure does.
+    /// Any other is kept as a stopped machine, as Docker keeps one.
+    /// </summary>
+    public ConcurrentDictionary<string, bool> GivesUp { get; } = new();
+    /// <summary>The disks kept for machines that were given up, by the machine's name.</summary>
+    public ConcurrentDictionary<string, DesktopSpec> Disks { get; } = new();
+
+    public Task<bool> ReleaseAsync(string host, CancellationToken ct)
+    {
+        // Gone already: the disk is the desktop if it is still there.
+        if (!Made.TryGetValue(host, out var spec)) return Task.FromResult(Disks.ContainsKey(host));
+        if (!GivesUp.ContainsKey(spec.DesktopId)) return Task.FromResult(false);
+        Running.TryRemove(host, out _);
+        Made.TryRemove(host, out _);
+        Disks[host] = spec;
+        return Task.FromResult(true);
+    }
+
     public Task<DesktopPlace> CreateAsync(DesktopSpec spec, CancellationToken ct)
     {
         if (Refuse.ContainsKey(spec.DesktopId)) throw new InvalidOperationException("No capacity.");
+        // A machine takes a kept disk only while the disk is there, and a kept disk is taken as it is.
+        if (spec.Kept && !Disks.TryRemove(spec.Name, out _)) throw new InvalidOperationException($"The disk of {spec.Name} is not there.");
         // As Azure: a disk is made from a saved setup only while the setup is there.
         if (spec.Save is not null && !Saves.ContainsKey(spec.Save)) throw new InvalidOperationException($"The saved setup {spec.Save} is not there.");
         // The same for an archive: a machine comes back only from one the host still holds.
@@ -61,6 +82,8 @@ public sealed class FakeDesktops : IDesktopHost
     {
         Running.TryRemove(host, out _);
         Made.TryRemove(host, out _);
+        // A machine's disk goes with it, and so does the disk of one that was given up.
+        Disks.TryRemove(host, out _);
         Deleted.Add(host);
         return Task.CompletedTask;
     }
@@ -100,7 +123,7 @@ public sealed class FakeDesktops : IDesktopHost
     public Task<long?> ArchiveAsync(string host, string name, CancellationToken ct)
     {
         if (RefuseArchive.ContainsKey(host)) throw new InvalidOperationException("The disk could not be copied.");
-        if (!Made.ContainsKey(host)) throw new InvalidOperationException($"The machine {host} is gone.");
+        if (!Made.ContainsKey(host) && !Disks.ContainsKey(host)) throw new InvalidOperationException($"The machine {host} is gone.");
         if (Running.GetValueOrDefault(host)) throw new InvalidOperationException("Only a stopped machine's disk can be archived.");
         Archives[name] = (host, DateTimeOffset.UtcNow);
         return Task.FromResult<long?>(ArchiveBytes);

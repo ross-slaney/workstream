@@ -102,6 +102,14 @@ public sealed class WorkTask : ISqlOSResourceEntity
     /// when there is none. It is kept until the machine made from it has shown its screen.
     /// </summary>
     public string? Archive { get; private set; }
+    /// <summary>
+    /// The disk a paused desktop is kept on once its machine has been given up, by the name of the machine it
+    /// was on. A host's limit on machines counts one for as long as it exists, running or not, so a paused
+    /// desktop keeps only its disk where the host can make a machine from it again
+    /// (<see cref="Desktops.IDesktopHost.ReleaseAsync"/>). Null while the desktop has a machine
+    /// (<see cref="Host"/>), and once it is archived.
+    /// </summary>
+    public string? Disk { get; private set; }
     /// <summary>How much the archive holds, in bytes: what was on the disk when it was copied, which is what keeping it costs.</summary>
     public long? ArchiveBytes { get; private set; }
 
@@ -153,6 +161,19 @@ public sealed class WorkTask : ISqlOSResourceEntity
     {
         Host = host;
         Address = address;
+        // The machine has the kept disk now.
+        Disk = null;
+    }
+
+    /// <summary>
+    /// The paused desktop's machine was given up and its disk kept, or a machine made from the kept disk did
+    /// not start and was removed again: the desktop is its disk, and the next start makes a machine from it.
+    /// </summary>
+    public void MachineReleased(string machine)
+    {
+        Disk = Rules.Text(machine, "A machine's name", 100);
+        Host = null;
+        Address = null;
     }
 
     /// <summary>
@@ -244,7 +265,7 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public bool IsIdle(DateTimeOffset now, TimeSpan after) => State == DesktopState.Ready && now - ActiveAt > after;
 
     /// <summary>Whether the desktop is paused, with a machine, and has been for longer than <paramref name="after"/>: its disk is then archived.</summary>
-    public bool IsDueForArchive(DateTimeOffset now, TimeSpan after) => State == DesktopState.Stopped && Host is not null && now - StateChangedAt > after;
+    public bool IsDueForArchive(DateTimeOffset now, TimeSpan after) => State == DesktopState.Stopped && (Host ?? Disk) is not null && now - StateChangedAt > after;
 
     /// <summary>
     /// The disk is being copied to an archive. When the desktop was paused is kept (<see cref="StateChangedAt"/>),
@@ -252,7 +273,7 @@ public sealed class WorkTask : ISqlOSResourceEntity
     /// </summary>
     public void Archiving()
     {
-        if (State != DesktopState.Stopped || Host is null) throw new DomainRuleException("Only a paused desktop can be archived.");
+        if (State != DesktopState.Stopped || (Host ?? Disk) is null) throw new DomainRuleException("Only a paused desktop can be archived.");
         State = DesktopState.Archiving;
     }
 
@@ -273,6 +294,7 @@ public sealed class WorkTask : ISqlOSResourceEntity
         Archive = archive;
         ArchiveBytes = DiskBytes ?? hostBytes;
         Host = null;
+        Disk = null;
         Address = null;
         Become(DesktopState.Archived, now);
     }
@@ -291,7 +313,7 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public bool CanResume => State is DesktopState.Stopped or DesktopState.Archived;
 
     /// <summary>What the next start begins from: the task's own paused machine, its archive, or a new machine.</summary>
-    public string StartsFrom => Host is not null ? StartSource.Stopped : Archive is not null ? StartSource.Archive : StartSource.Image;
+    public string StartsFrom => (Host ?? Disk) is not null ? StartSource.Stopped : Archive is not null ? StartSource.Archive : StartSource.Image;
 
     public void StartAgain(DateTimeOffset now)
     {

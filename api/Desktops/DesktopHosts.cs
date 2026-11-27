@@ -21,7 +21,7 @@ namespace Workstream.Api.Desktops;
 /// </summary>
 /// <see cref="Iphone"/> asks for the image that already has the iPhone simulator on it, for a machine of an
 /// environment with the iPhone that starts from the image: its setup then has nothing to install.
-public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task, string? Save = null, string? Archive = null, bool Iphone = false)
+public sealed record DesktopSpec(string Name, string DesktopId, string TeamId, string Size, string ApiUrl, string Key, string Purpose = MachinePurpose.Task, string? Save = null, string? Archive = null, bool Iphone = false, bool Kept = false)
 {
     /// <summary>
     /// What the desktop is told, as its agent reads it (desktop/agent/told.mjs): on a machine this is its user
@@ -57,6 +57,14 @@ public interface IDesktopHost
     Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct);
     /// <summary>Release the machine but keep its disk.</summary>
     Task StopAsync(string host, CancellationToken ct);
+    /// <summary>
+    /// Give up a machine and keep its disk, so that a paused desktop holds no machine at all: the host stops it
+    /// first if it is running. A machine made with <see cref="DesktopSpec.Kept"/> under the same name takes the
+    /// disk again. True when the machine is gone and its disk is kept. False when this host keeps a stopped
+    /// machine as it is (Docker, and a machine that hibernated, which wakes up only as itself); nothing is
+    /// changed then.
+    /// </summary>
+    Task<bool> ReleaseAsync(string host, CancellationToken ct);
     /// <summary>Remove the machine and everything made with it. A machine that is not there is already deleted.</summary>
     Task DeleteAsync(string host, CancellationToken ct);
     /// <summary>Every machine this host holds: what the sweep compares with the tasks to find strays.</summary>
@@ -350,6 +358,7 @@ public sealed class NoDesktopHost : IDesktopHost
     public Task<MachineState> StateAsync(string host, CancellationToken ct) => Task.FromResult(new MachineState(false, Words));
     public Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct) => Task.FromResult(false);
     public Task StopAsync(string host, CancellationToken ct) => Task.CompletedTask;
+    public Task<bool> ReleaseAsync(string host, CancellationToken ct) => Task.FromResult(false);
     public Task DeleteAsync(string host, CancellationToken ct) => Task.CompletedTask;
     public Task<IReadOnlyList<HostedMachine>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostedMachine>>([]);
     public Task SaveAsync(string host, string name, CancellationToken ct) => throw new InvalidOperationException(Words);
@@ -401,7 +410,8 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     {
         if (!Azure.Sizes.TryGetValue(spec.Size, out var vmSize)) throw new InvalidOperationException($"No machine size is configured for '{spec.Size}'.");
         // The snapshot the machine's disk is made from: the task's own archive, or its environment's saved setup.
-        var source = spec.Archive ?? spec.Save;
+        // A paused desktop's own disk, kept when its machine was given up (ReleaseAsync), is taken as it is.
+        var source = spec.Kept ? null : spec.Archive ?? spec.Save;
         var body = new JsonObject
         {
             ["location"] = Azure.Location,
@@ -409,7 +419,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
             ["properties"] = new JsonObject
             {
                 ["hardwareProfile"] = new JsonObject { ["vmSize"] = vmSize },
-                ["storageProfile"] = source is null
+                ["storageProfile"] = source is null && !spec.Kept
                     ? new JsonObject
                     {
                         ["imageReference"] = new JsonObject { ["id"] = spec.Iphone && Azure.IphoneImageId.Length > 0 ? Azure.IphoneImageId : Azure.ImageId },
@@ -423,6 +433,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
                         },
                     }
                     // From a saved setup or the task's archive: a disk made from it first (about two seconds), which the machine takes as its own.
+                    // From the desktop's kept disk: the disk is there already.
                     : new JsonObject
                     {
                         ["osDisk"] = new JsonObject
@@ -461,7 +472,7 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         // disk keeps the security type it was made with, and Azure takes it only on a machine of the same
         // kind, so a desktop archived before the deployment hibernated comes back as it was, and the other
         // way round.
-        var trusted = source is null ? !Azure.Hibernate : await TrustedAsync(source, ct);
+        var trusted = spec.Kept ? await TrustedAsync(DiskOf(spec.Name), ct) : source is null ? !Azure.Hibernate : await TrustedAsync(Snapshot(source), ct);
         // A machine preparing a saved setup is never started again, and its disk is copied for other machines:
         // it is not one that hibernates, so no memory of it is ever on a disk a task starts from.
         var hibernates = Azure.Hibernate && !trusted && spec.Purpose != MachinePurpose.Prepare;
@@ -490,9 +501,9 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     }
 
     /// <summary>Whether a saved setup or an archive is of a disk made with Trusted Launch, which the disk made from it then has too.</summary>
-    async Task<bool> TrustedAsync(string snapshot, CancellationToken ct)
+    async Task<bool> TrustedAsync(string diskOrSnapshot, CancellationToken ct)
     {
-        using var response = await SendAsync(HttpMethod.Get, $"{Snapshot(snapshot)}?api-version={DiskApi}", null, ct);
+        using var response = await SendAsync(HttpMethod.Get, $"{diskOrSnapshot}?api-version={DiskApi}", null, ct);
         return JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["properties"]?["securityProfile"]?["securityType"]?.GetValue<string>() == "TrustedLaunch";
     }
 
@@ -574,6 +585,38 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
         await UntilAsync(host, Released, "stop", ct);
     }
 
+    /// <summary>
+    /// Azure counts a machine's cores against the subscription's limit for as long as the machine exists,
+    /// released or not: five paused 8-core desktops filled a limit of 40 and nothing else could be made. So a
+    /// paused desktop keeps only its disk. The machine is told to leave its disk behind, and is deleted with
+    /// its network interface; making one from the disk again measured 16 seconds to running, against 12 to
+    /// start a released machine. A machine made to hibernate is kept: its memory is on its disk, and only the
+    /// same machine wakes up from it.
+    /// </summary>
+    public async Task<bool> ReleaseAsync(string host, CancellationToken ct)
+    {
+        var machine = await ReadAsync(host, ct);
+        // Gone already: an earlier try got that far. The disk is the desktop if it is still there.
+        if (machine is null) return await ThereAsync($"{DiskOf(host)}?api-version={DiskApi}", ct);
+        if (machine["properties"]?["additionalCapabilities"]?["hibernationEnabled"]?.GetValue<bool>() == true) return false;
+        if (!Released(machine)) await StopAsync(host, ct);
+        var keep = new JsonObject { ["properties"] = new JsonObject { ["storageProfile"] = new JsonObject { ["osDisk"] = new JsonObject { ["deleteOption"] = "Detach" } } } };
+        (await SendAsync(HttpMethod.Patch, $"{Machine(host)}?api-version={ComputeApi}", keep, ct)).Dispose();
+        // Not deleted before Azure says the disk stays: a machine deleted while it still says "Delete" takes its disk.
+        await UntilAsync(host, current => current is null || current["properties"]?["storageProfile"]?["osDisk"]?["deleteOption"]?.GetValue<string>() == "Detach"
+            && current["properties"]?["provisioningState"]?.GetValue<string>() == "Succeeded", "keep its disk", ct);
+        (await SendAsync(HttpMethod.Delete, $"{Machine(host)}?api-version={ComputeApi}", null, ct, missingIsDone: true)).Dispose();
+        await UntilAsync(host, current => current is null, "be given up", ct);
+        return true;
+    }
+
+    /// <summary>Whether Azure has this resource.</summary>
+    async Task<bool> ThereAsync(string url, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get, url, null, ct, missingIsDone: true);
+        return response.StatusCode != System.Net.HttpStatusCode.NotFound;
+    }
+
     /// <summary>Azure has released the machine, or it is gone. A hibernated machine is released too: its memory is on its disk.</summary>
     static bool Released(JsonNode? machine) => machine is null || Has(machine["properties"]?["instanceView"]?["statuses"]?.AsArray() ?? [], "PowerState/deallocated");
 
@@ -639,9 +682,12 @@ public sealed class AzureDesktopHost(HttpClient http, TokenCredential credential
     /// <summary>A full copy of a stopped machine's disk, as a snapshot under this name.</summary>
     async Task SnapshotAsync(string host, string name, string purpose, string what, CancellationToken ct)
     {
-        var machine = await ReadAsync(host, ct) ?? throw new InvalidOperationException($"The machine {host} is gone.");
-        var disk = machine["properties"]?["storageProfile"]?["osDisk"]?["managedDisk"]?["id"]?.GetValue<string>()
-            ?? throw new InvalidOperationException($"The machine {host} has no disk.");
+        // A paused desktop whose machine was given up is its disk alone (ReleaseAsync).
+        var machine = await ReadAsync(host, ct);
+        var disk = machine is null
+            ? await ThereAsync($"{DiskOf(host)}?api-version={DiskApi}", ct) ? IdOf(DiskOf(host)) : throw new InvalidOperationException($"The machine {host} is gone.")
+            : machine["properties"]?["storageProfile"]?["osDisk"]?["managedDisk"]?["id"]?.GetValue<string>()
+                ?? throw new InvalidOperationException($"The machine {host} has no disk.");
         // A full copy on the cheapest storage: it is read once for each machine made from it, and billed for what is on it.
         var body = new JsonObject
         {
@@ -874,6 +920,9 @@ public sealed class DockerDesktopHost(DesktopOptions options) : IDesktopHost
     public Task<bool> DisplayAnswersAsync(DesktopPlace place, CancellationToken ct) => Display.AnswersAsync(place.Address, ct);
 
     public Task StopAsync(string host, CancellationToken ct) => RunAsync(["stop", "-t", "5", host], ct, tolerate: true);
+
+    /// <summary>A stopped container is its own disk, and holds nothing else.</summary>
+    public Task<bool> ReleaseAsync(string host, CancellationToken ct) => Task.FromResult(false);
 
     public Task DeleteAsync(string host, CancellationToken ct) => RunAsync(["rm", "-f", host], ct, tolerate: true);
 

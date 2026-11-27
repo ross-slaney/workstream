@@ -55,12 +55,14 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
                 var key = await DesktopKeys.IssueAsync(db, scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>(), task.Id, task.TeamId, ct);
                 await DesktopKeys.GrantAsync(db, task.Id, task, ct);
                 await db.SaveChangesAsync(ct);
-                // An archived desktop comes back from its own archive and nothing else: the new machine's disk
-                // is a copy of the one that was archived. Any other new machine starts from the environment's
-                // saved setup, or the image.
-                spec = new DesktopSpec(DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key,
-                    Save: task.Archive is null ? await SaveForAsync(scope, db, task, ct) : null, Archive: task.Archive,
-                    Iphone: await HasIphoneAsync(db, task.EnvironmentId, ct));
+                // A paused desktop whose machine was given up comes back on its own disk, under the name the
+                // disk was kept by. An archived desktop comes back from its own archive and nothing else: the new
+                // machine's disk is a copy of the one that was archived. Any other new machine starts from the
+                // environment's saved setup, or the image.
+                var onDisk = task.Disk is not null;
+                spec = new DesktopSpec(task.Disk ?? DesktopHosting.NameFor(task.Id), task.Id, task.TeamId, task.Size, options.ApiUrl, key,
+                    Save: onDisk || task.Archive is not null ? null : await SaveForAsync(scope, db, task, ct), Archive: onDisk ? null : task.Archive,
+                    Iphone: await HasIphoneAsync(db, task.EnvironmentId, ct), Kept: onDisk);
             }
         }
         var machine = spec?.Name ?? existing!;
@@ -68,6 +70,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         // A desktop that failed costs nothing: whatever part of a new machine was made is removed, and a
         // machine that would not start again is released. Starting the task again begins from there: a task
         // whose new machine was removed has none, so the next start makes one, from its archive when it has one.
+        // A machine made from the desktop's kept disk is given up again and never deleted: deleting a machine
+        // deletes its disk, and that disk is the desktop.
         async Task FailAsync(Exception error)
         {
             log.LogError(error, "The desktop of task {TaskId} did not start.", taskId);
@@ -75,12 +79,14 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             {
                 if (task.State != DesktopState.Starting) return;
                 task.Fail(WordsFor(error), now);
-                if (spec is not null) task.MachineRemoved();
+                if (spec is { Kept: true }) task.MachineReleased(machine);
+                else if (spec is not null) task.MachineRemoved();
                 await EndRunAsync(db, task.Id, now, ct);
             }, ct);
             try
             {
-                if (spec is not null) await host.DeleteAsync(machine, ct);
+                if (spec is { Kept: true }) await host.ReleaseAsync(machine, ct);
+                else if (spec is not null) await host.DeleteAsync(machine, ct);
                 else await host.StopAsync(machine, ct);
             }
             catch (Exception cleanup) when (cleanup is not OperationCanceledException)
@@ -590,7 +596,10 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
 
     /// <summary>
     /// Pause the desktop of a task a person, or the sweep, asked to pause: the machine is released
-    /// (<see cref="IDesktopHost.StopAsync"/>) and its disk is kept.
+    /// (<see cref="IDesktopHost.StopAsync"/>) and its disk is kept. Where the host can make a machine from that
+    /// disk again, the machine is given up altogether (<see cref="IDesktopHost.ReleaseAsync"/>), so a paused
+    /// desktop does not count against the host's limit on machines. No machine holds the desktop's key then,
+    /// so it is ended, and the machine the desktop comes back on is given a new one, as after an archive.
     /// </summary>
     [AutomaticRetry(Attempts = 2)]
     public async Task StopAsync(string taskId, CancellationToken ct)
@@ -603,11 +612,21 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             if (task is null) return;
             machine = task.Host;
         }
-        if (machine is not null) await host.StopAsync(machine, ct);
+        var released = false;
+        if (machine is not null)
+        {
+            await host.StopAsync(machine, ct);
+            released = await host.ReleaseAsync(machine, ct);
+        }
         await ChangeAsync(taskId, async (db, task, now) =>
         {
             if (task.State != DesktopState.Stopping) return;
             task.Stopped(now);
+            if (released)
+            {
+                task.MachineReleased(machine!);
+                await DesktopKeys.RetireForTaskAsync(db, task, ct);
+            }
             await EndRunAsync(db, task.Id, now, ct);
         }, ct);
     }
@@ -627,13 +646,14 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
         {
             var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
             var task = await db.Tasks.SingleOrDefaultAsync(x => x.Id == taskId, ct);
-            if (task is not { State: DesktopState.Stopped or DesktopState.Archiving, Host: not null }) return;
+            if (task is not { State: DesktopState.Stopped or DesktopState.Archiving } || (task.Host ?? task.Disk) is null) return;
             if (!await scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>().Allows(Operator, Permissions.TaskOperateDesktop, task.ResourceId))
             {
                 log.LogError("The desktop operator may not act on task {TaskId}.", taskId);
                 return;
             }
-            machine = task.Host;
+            // The paused desktop's machine, or the disk it is kept on when the machine was given up.
+            machine = (task.Host ?? task.Disk)!;
             if (task.State == DesktopState.Stopped)
             {
                 task.Archiving();
@@ -689,7 +709,8 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             var task = await db.Tasks.AsNoTracking().SingleOrDefaultAsync(x => x.Id == taskId, ct);
             if (task is not { State: DesktopState.Deleting }) return;
             // The name is the same every time, so a machine still being made by a start job is found too.
-            await host.DeleteAsync(task.Host ?? DesktopHosting.NameFor(taskId), ct);
+            // A paused desktop kept on its disk alone goes by the name the disk was kept by.
+            await host.DeleteAsync(task.Host ?? task.Disk ?? DesktopHosting.NameFor(taskId), ct);
             if (task.Archive is not null) await host.DeleteArchiveAsync(task.Archive, ct);
         }
         // The conversation goes in pieces, tracked, so SqlOS's page entries go with the rows.
@@ -756,7 +777,7 @@ public sealed class DesktopJobs(IServiceScopeFactory scopes, IDesktopHost host, 
             {
                 // An archived desktop has no machine: one still there under its name was left by a delete that
                 // failed, and goes as a stray.
-                if (task.State != DesktopState.Archived) owned.Add(task.Host ?? DesktopHosting.NameFor(task.Id));
+                if (task.State != DesktopState.Archived) owned.Add(task.Host ?? task.Disk ?? DesktopHosting.NameFor(task.Id));
                 if (task.Archive is not null) archives.Add(task.Archive);
                 var (pauseAfter, archiveAfter) = times.GetValueOrDefault(task.TeamId,
                     (TimeSpan.FromMinutes(Team.DefaultPauseAfterMinutes), TimeSpan.FromDays(Team.DefaultArchiveAfterDays)));

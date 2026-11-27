@@ -56,7 +56,11 @@ public sealed class FakeAzure : HttpMessageHandler
         {
             if (request.Method == HttpMethod.Put) Disks[name] = body!;
             if (request.Method == HttpMethod.Delete) return Disks.TryRemove(name, out _) ? Json(new JsonObject()) : Missing();
-            return Disks.TryGetValue(name, out var disk) ? Json(new JsonObject { ["properties"] = new JsonObject { ["provisioningState"] = "Succeeded" }, ["made"] = disk.DeepClone() }) : Missing();
+            if (!Disks.TryGetValue(name, out var disk)) return Missing();
+            // A disk says the security type it was made with, as a snapshot does.
+            var says = new JsonObject { ["provisioningState"] = "Succeeded" };
+            if (disk["properties"]?["securityProfile"] is { } security) says["securityProfile"] = security.DeepClone();
+            return Json(new JsonObject { ["properties"] = says, ["made"] = disk.DeepClone() });
         }
         if (kind == "snapshots")
         {
@@ -74,12 +78,28 @@ public sealed class FakeAzure : HttpMessageHandler
         if (request.Method == HttpMethod.Put)
         {
             Machines[name] = new PlayedMachine { Body = body! };
+            // A machine made from an image gets a disk of its own, of the machine's security type.
+            if (body!["properties"]?["storageProfile"]?["osDisk"]?["createOption"]?.GetValue<string>() == "FromImage")
+            {
+                var made = new JsonObject();
+                if (body["properties"]?["securityProfile"]?["securityType"] is { } type) made["securityProfile"] = new JsonObject { ["securityType"] = type.GetValue<string>() };
+                Disks[name + "-os"] = new JsonObject { ["properties"] = made };
+            }
             return Json(new JsonObject());
         }
         if (!Machines.TryGetValue(name, out var machine)) return Missing();
+        if (request.Method == HttpMethod.Patch)
+        {
+            // The one change a desktop host makes to a machine: whether its disk goes with it.
+            if (body!["properties"]?["storageProfile"]?["osDisk"]?["deleteOption"] is { } option)
+                machine.Body["properties"]!["storageProfile"]!["osDisk"]!["deleteOption"] = option.GetValue<string>();
+            return Json(new JsonObject());
+        }
         if (request.Method == HttpMethod.Delete)
         {
             Machines.TryRemove(name, out _);
+            // A machine takes its disk with it unless it was told to leave it.
+            if (machine.Body["properties"]?["storageProfile"]?["osDisk"]?["deleteOption"]?.GetValue<string>() != "Detach") Disks.TryRemove(name + "-os", out _);
             return Json(new JsonObject());
         }
         if (request.Method == HttpMethod.Post && action == "deallocate")
