@@ -37,8 +37,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { answerOf, api } from "./api.mjs";
-import { acted, android, ANDROID_KEYS, fill, iphone, press, readAndroid, typeText, waitFor } from "./touch.mjs";
-import { linesOf } from "./screen.mjs";
+import { acted, android, ANDROID_KEYS, fill, iphone, press, snapshot, tap, typeText, waitFor } from "./touch.mjs";
 import { front } from "./surfaces.mjs";
 
 /** Changes when the Mac's recipe changes what it builds (builder/ios.sh), so old builds are not taken for new ones. */
@@ -377,7 +376,7 @@ function androidSize() {
 export { ANDROID_KEYS };
 
 /** The flags that take a value, which is not one of the command's words. */
-const VALUED = ["-o", "--timeout", "--ms", "--times", "--amount"];
+const VALUED = ["-o", "--timeout", "--ms", "--times", "--amount", "--hold-ms"];
 
 /** A command's words: what was given that is neither a flag nor a flag's value. */
 export const wordsOf = (rest) => rest.filter((argument, index) => !argument.startsWith("--") && argument !== "-o" && !VALUED.includes(rest[index - 1]));
@@ -393,20 +392,6 @@ export function textOf(words, rest) {
 }
 
 const timesOf = (rest) => (rest.includes("--times") ? Number(rest[rest.indexOf("--times") + 1]) : 1);
-
-/**
- * A reading with something in it. Right after an app opens there is a moment when the screen is drawn and
- * the reading is still empty, so an empty one is read again for a few seconds before it is believed.
- */
-async function listed(read, { seconds = 6 } = {}) {
-  const started = Date.now();
-  let screen = read();
-  while (!screen.split("\n").some((line) => line.startsWith("@")) && Date.now() - started < seconds * 1000) {
-    await sleep(500);
-    screen = read();
-  }
-  return screen;
-}
 
 /** `type`: the text into the field that has the keyboard, with what to know about how it was written. */
 async function typed(phone, words, rest) {
@@ -426,8 +411,7 @@ async function useAndroid(command, rest, { wait }) {
   const valueOf = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
   switch (command) {
     case "snapshot":
-      process.stdout.write((await listed(() => linesOf(readAndroid()))) + "\n");
-      return 0;
+      return snapshot(phone);
     case "press": {
       const status = await press(phone, words[0], { times: timesOf(rest), wait });
       if (status === null) throw new Error(`Say the key: ${Object.keys(ANDROID_KEYS).join(", ")}.`);
@@ -435,7 +419,7 @@ async function useAndroid(command, rest, { wait }) {
     }
     case "tap":
       if (!words.length) throw new Error("Say what to tap: a reference (@e3), words on the screen, or a point (X Y).");
-      return acted(phone, () => phone.tap(words), { wait });
+      return acted(phone, () => tap(phone, words), { wait });
     case "type":
       return typed(phone, words, rest);
     case "fill":
@@ -493,8 +477,7 @@ async function useIphone(command, rest, { wait }) {
   switch (command) {
     case "snapshot":
       if (rest.length) return simulator([command, ...rest]).status ?? 1;
-      process.stdout.write((await listed(() => phone.look().screen)) + "\n");
-      return 0;
+      return snapshot(phone);
     case "wait":
       return waitFor(phone, words.join(" "), { gone: rest.includes("--gone"), seconds: Number(valueOf("--timeout") ?? 20) });
     case "press": {
@@ -509,6 +492,10 @@ async function useIphone(command, rest, { wait }) {
       return acted(phone, () => simulator([command, app, ...rest.filter((argument) => argument !== words[0])]).status ?? 1, { wait });
     }
     case "tap":
+      // A reference is tapped where the reading that was printed had it (touch.mjs); the rest is agent-sim's own.
+      if (!words.length) throw new Error("Say what to tap: a reference (@e3), words on the screen, or a point (X Y).");
+      if (rest.includes("--hold-ms")) return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
+      return acted(phone, () => tap(phone, words), { wait });
     case "scroll":
     case "swipe":
     case "open":
