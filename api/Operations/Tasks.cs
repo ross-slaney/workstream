@@ -22,8 +22,15 @@ public sealed record StartFrom(IDataProtectionProvider Protection, Workstream.Ap
 /// <summary>
 /// What the agent said or did since the desktop's last exchange, and where the desktop is in the conversation.
 /// <see cref="DiskBytes"/> is how much is on the desktop's disk, which it says every few minutes.
+/// <see cref="Running"/> is the command the agent is in the middle of, when it is in one.
 /// </summary>
-public sealed record DesktopExchange(bool Working, long After, IReadOnlyList<DesktopMessage>? Messages, long? DiskBytes = null);
+public sealed record DesktopExchange(bool Working, long After, IReadOnlyList<DesktopMessage>? Messages, long? DiskBytes = null, DesktopRunning? Running = null);
+
+/// <summary>
+/// What the agent is running now and for how many seconds it has run, counted on the desktop so that its clock
+/// need not agree with the API's (desktop/agent/running.mjs).
+/// </summary>
+public sealed record DesktopRunning(string? Text, int Seconds);
 
 /// <summary>A message from the desktop: the agent's (<c>agent</c>) or someone typing in the agent's window on the desktop (<c>person</c>).</summary>
 public sealed record DesktopMessage(string Key, string Author, string Kind, string Text);
@@ -354,6 +361,7 @@ public static partial class Operations
             task.Active(now);
         }
         var turnEnded = task.EndsTurn(body.Working);
+        task.Running(body.Running?.Text, body.Running?.Seconds ?? 0, now);
         if (task.DesktopSeen(body.Working, now, body.DiskBytes))
         {
             // The first exchange of this start: how long the agent took is kept with the run.

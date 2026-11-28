@@ -50,6 +50,7 @@ public enum StartStep
 public sealed class WorkTask : ISqlOSResourceEntity
 {
     public const int MaxTitleLength = 120;
+    public const int MaxRunningLength = 200;
 
     /// <summary>For EF Core.</summary>
     WorkTask()
@@ -90,6 +91,14 @@ public sealed class WorkTask : ISqlOSResourceEntity
     public DateTimeOffset ActiveAt { get; private set; }
     /// <summary>Whether the agent is in the middle of something, as the desktop last said.</summary>
     public bool AgentWorking { get; private set; }
+    /// <summary>
+    /// The command the agent is in the middle of, as the desktop last said: its first line. Null between
+    /// commands. A build or a first start runs for minutes and may print nothing, and this is how someone
+    /// watching knows what is running.
+    /// </summary>
+    public string? RunningText { get; private set; }
+    /// <summary>When that command started, by the API's clock.</summary>
+    public DateTimeOffset? RunningSince { get; private set; }
     /// <summary>How many times a person has asked the agent to stop what it is doing. The desktop acts when it changes.</summary>
     public int Interrupts { get; private set; }
     /// <summary>When the task last emailed people that it was finished or needed them. Null until it first did.</summary>
@@ -226,6 +235,31 @@ public sealed class WorkTask : ISqlOSResourceEntity
         Become(DesktopState.Ready, now);
         return true;
     }
+
+    /// <summary>
+    /// The desktop said what its agent is running and for how many seconds, or that it is between commands.
+    /// The same command keeps the start it was first given unless the desktop's count has moved away from it:
+    /// each exchange would otherwise move the start by however long that exchange took to arrive.
+    /// </summary>
+    public void Running(string? text, int seconds, DateTimeOffset now)
+    {
+        text = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        if (text is null)
+        {
+            RunningText = null;
+            RunningSince = null;
+            return;
+        }
+        if (text.Length > MaxRunningLength) text = text[..MaxRunningLength];
+        var since = now - TimeSpan.FromSeconds(Math.Clamp(seconds, 0, 7 * 24 * 3600));
+        if (RunningText == text && RunningSince is { } kept && (kept - since).Duration() < TimeSpan.FromSeconds(5)) return;
+        RunningText = text;
+        RunningSince = since;
+    }
+
+    /// <summary>What to show as running: only while the desktop is up and its agent is at work.</summary>
+    public (string Text, DateTimeOffset Since)? RunningNow =>
+        State == DesktopState.Ready && AgentWorking && RunningText is { } text && RunningSince is { } since ? (text, since) : null;
 
     /// <summary>
     /// Whether the desktop's exchange, saying the agent is or is not working, ends the agent's turn: it was

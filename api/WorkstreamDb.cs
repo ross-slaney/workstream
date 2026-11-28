@@ -94,6 +94,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             task.Property(x => x.CreatedBy).HasMaxLength(450);
             task.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
             task.Property(x => x.Failure).HasMaxLength(500);
+            task.Property(x => x.RunningText).HasMaxLength(WorkTask.MaxRunningLength);
             task.Property(x => x.Size).HasMaxLength(20);
             task.Property(x => x.Host).HasMaxLength(100);
             task.Property(x => x.Disk).HasMaxLength(100);

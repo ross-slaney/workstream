@@ -131,8 +131,10 @@ async function exchange() {
   const sending = outbox.slice(0, 50);
   const sayDisk = Date.now() - diskSaidAt >= SAY_DISK_EVERY;
   const diskBytes = sayDisk ? usedBytes(await run("df", ["-B1", "--output=used", "/"]).then((result) => result.stdout, () => "")) : 0;
+  // What the agent is running now, and for how long, for the task's page to show (running.mjs).
+  const running = working ? (harness?.running() ?? null) : null;
   const reply = await call("POST", "/api/desktop/exchange", {
-    working: working || preparing, after: state.after, messages: sending, ...(diskBytes > 0 ? { diskBytes } : {}),
+    working: working || preparing, after: state.after, messages: sending, ...(diskBytes > 0 ? { diskBytes } : {}), ...(running ? { running } : {}),
   });
   if (sayDisk) diskSaidAt = Date.now();
   outbox.splice(0, sending.length);

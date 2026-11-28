@@ -16,10 +16,13 @@ namespace Workstream.Api;
 /// as pausing and paused), <c>archiving</c>, <c>archived</c>, <c>failed</c> or <c>deleting</c>.
 /// <see cref="Step"/> says how far a starting desktop has come: <c>machine</c> (being made or turned on),
 /// <c>boot</c> (on and starting up) or <c>agent</c> (its screen can be watched; the agent has not joined yet).
+/// <see cref="Running"/> is the command the agent is in the middle of and when it started; null between commands.
 /// </summary>
 public sealed record TaskDto(
     string Id, string TeamId, string EnvironmentId, string Title, string CreatedBy, string? CreatedByName, DateTimeOffset CreatedAt,
-    string State, string Step, string? Failure, string Size, bool AgentWorking, DateTimeOffset StateChangedAt);
+    string State, string Step, string? Failure, string Size, bool AgentWorking, DateTimeOffset StateChangedAt, RunningDto? Running = null);
+
+public sealed record RunningDto(string Text, DateTimeOffset Since);
 
 public sealed record RenameTask(string Title);
 
@@ -91,7 +94,8 @@ public static partial class WorkstreamApi
 
     static TaskDto ToDto(WorkTask x, IReadOnlyDictionary<string, string> names) => new(
         x.Id, x.TeamId, x.EnvironmentId, x.Title, x.CreatedBy, names.GetValueOrDefault(x.CreatedBy), x.CreatedAt,
-        x.State.ToString().ToLowerInvariant(), x.Step.ToString().ToLowerInvariant(), x.Failure, x.Size, x.AgentWorking, x.StateChangedAt);
+        x.State.ToString().ToLowerInvariant(), x.Step.ToString().ToLowerInvariant(), x.Failure, x.Size, x.AgentWorking, x.StateChangedAt,
+        x.RunningNow is { } running ? new RunningDto(running.Text, running.Since) : null);
 
     static async Task<IResult> TaskResultAsync(Outcome<WorkTask> outcome, WorkstreamDbContext db, CancellationToken ct, bool created = false)
     {

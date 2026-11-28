@@ -55,6 +55,10 @@ public sealed class Desktop : IDisposable
     public Task<DesktopReply> ExchangeAsync(bool working = false, long after = 0, params DesktopMessage[] messages) =>
         ReadAsync<DesktopReply>(http.PostAsJsonAsync("/api/desktop/exchange", new DesktopExchange(working, after, messages), Person.Json));
 
+    /// <summary>The same, in the middle of a command that has run for some seconds.</summary>
+    public Task<DesktopReply> ExchangeRunningAsync(string? text, int seconds, bool working = true) =>
+        ReadAsync<DesktopReply>(http.PostAsJsonAsync("/api/desktop/exchange", new DesktopExchange(working, 0, null, null, text is null ? null : new DesktopRunning(text, seconds)), Person.Json));
+
     public Task<HttpResponseMessage> GetAsync(string path) => http.GetAsync(path);
 
     public Task<HttpResponseMessage> PostAsync(string path, object body) => http.PostAsJsonAsync(path, body, Person.Json);
