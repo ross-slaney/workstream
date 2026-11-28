@@ -100,14 +100,22 @@ export function restorePlan(state) {
 
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-/** The one line the agent is told about it, so it knows the desktop was stopped and what is running again. */
-export function restoredLine(plan, workspace) {
-  if (!plan) return null;
+/**
+ * The one line the agent is told about it, so it knows the desktop was stopped and what is running again.
+ * `stopped` says the desktop stopped in the middle of a conversation: the agent is told then even when nothing
+ * was kept to bring back, because a program it started in the foreground (a script that puts itself in the
+ * background, say) is gone all the same.
+ */
+export function restoredLine(plan, workspace, stopped = false) {
+  if (!plan && !stopped) return null;
+  const told = "This desktop was stopped and started again, which ends every program and empties /tmp.";
+  if (!plan) return `${told} Workstream had kept no command of yours to run again, so nothing you started is running. Start again what the work needs.`;
   const parts = [];
   if (plan.commands.length) parts.push(`reran ${count(plan.commands.length, "command", "commands")} you had left running, in the terminal window titled "Restored" (${plan.commands.map((x) => `\`${x.command.split("\n")[0].slice(0, 80)}\`${x.cwd ? ` in ${x.cwd}` : ""}`).join("; ")})`);
   if (plan.tabs.length) parts.push(`reopened ${count(plan.tabs.length, "page", "pages")} in the browser (${plan.tabs.join(", ")})`);
   parts.push(`opened VS Code on ${workspace}${plan.files.length ? ` with ${count(plan.files.length, "file", "files")}` : ""}`);
-  return `This desktop was stopped and started again, which ends every program. Workstream ${parts.join(", ")}. Check that they are up before you rely on them.`;
+  const rest = plan.commands.length ? "Any other program you started is gone" : "It had kept no command of yours to run again, so every program you started is gone";
+  return `${told} Workstream ${parts.join(", ")}. Check that they are up before you rely on them. ${rest}. Start again what the work needs.`;
 }
 
 const shellQuote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
