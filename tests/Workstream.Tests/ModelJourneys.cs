@@ -1,5 +1,8 @@
 using System.Net;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Workstream.Api;
+using Workstream.Api.Domain;
 
 namespace Workstream.Tests;
 
@@ -104,5 +107,146 @@ public sealed class ModelJourneys
         anonymous.DefaultRequestHeaders.TryAddWithoutValidation("x-api-key", "wsd_" + new string('0', 96));
         await anonymous.PostAsync("/api/model/anthropic/v1/messages", System.Net.Http.Json.JsonContent.Create(body)).IsAsync(HttpStatusCode.Unauthorized);
         Assert.AreEqual(0, Stack.Model.Calls.Count);
+    }
+
+    static async Task<Desktop> DesktopOfANewTaskAsync(Person person, TeamDto team, string? prompt = "Say done.")
+    {
+        var environment = (await person.GetAsync<ListPage<EnvironmentDto>>($"/api/teams/{team.Id}/environments")).Data.First();
+        var task = await person.PostAsync<TaskDto>($"/api/teams/{team.Id}/tasks", new StartTask(Guid.NewGuid().ToString("D"), environment.Id, null, prompt, Guid.NewGuid().ToString("D")));
+        return await Desktop.StartAsync(task.Id);
+    }
+
+    static Task<ModelReport> ReportAsync(Person person, string teamId) => person.GetAsync<ModelReport>($"/api/teams/{teamId}/usage/models");
+
+    [TestMethod]
+    public async Task Each_call_is_counted_to_its_person_and_its_tool_and_an_administrator_sees_everyones()
+    {
+        var (ada, team, adas) = await WorkingAsync();
+        var address = Person.NewEmail();
+        var invitation = await ada.PostAsync<PendingInvitation>($"/api/teams/{team.Id}/invitations", new Invite(address));
+        using var lin = await Person.SignUpAsync("Lin Clark", address, Answers.TokenOf(invitation));
+        using var lins = await DesktopOfANewTaskAsync(lin, team);
+
+        // Ada's desktop: Workstream's own agent calls once, and OpenCode in a terminal calls once on Sonnet.
+        Stack.Model.Calls.Clear();
+        Stack.Model.Answer = () => FakeModel.Json(FakeModel.Message("claude-opus-5-5", input: 1000, output: 500));
+        (await adas.AskModelAsync()).Dispose();
+        Stack.Model.Answer = () => FakeModel.Json(FakeModel.Message("claude-sonnet-5-5", input: 1000, output: 500));
+        (await adas.AskModelAsync(tool: "OpenCode/1.19.6 (linux)")).Dispose();
+        // What the desktop says about its tool stays here: the model is not told.
+        Assert.IsFalse(Stack.Model.Calls.Any(call => call.Headers.Keys.Any(name => name.Equals("x-workstream-tool", StringComparison.OrdinalIgnoreCase))));
+        // Lin's desktop: one call on Opus.
+        Stack.Model.Answer = () => FakeModel.Json(FakeModel.Message("claude-opus-5-5", input: 1000, output: 500));
+        (await lins.AskModelAsync()).Dispose();
+
+        // The administrator sees the whole team: Opus is $0.014 a call, Sonnet $0.007.
+        var everyones = await ReportAsync(ada, team.Id);
+        Assert.IsTrue(everyones.Everyone);
+        Assert.AreEqual(0.035m, everyones.CostUsd);
+        Assert.AreEqual(3, everyones.Calls);
+        Assert.AreEqual(2, everyones.People.Count);
+        var adasUse = everyones.People.Single(x => x.UserId == ada.UserId);
+        Assert.AreEqual("Ada Lovelace", adasUse.Name);
+        Assert.AreEqual(0.021m, adasUse.CostUsd);
+        Assert.AreEqual(2, adasUse.Calls);
+        Assert.AreEqual(1, adasUse.Tasks);
+        Assert.AreEqual(ada.UserId, everyones.People[0].UserId, "Whoever used most comes first.");
+        var linsUse = everyones.People.Single(x => x.UserId == lin.UserId);
+        Assert.AreEqual("Lin Clark", linsUse.Name);
+        Assert.AreEqual(0.014m, linsUse.CostUsd);
+        CollectionAssert.AreEquivalent(new[] { "workstream", "opencode" }, everyones.Tools.Select(x => x.Tool).ToList());
+        Assert.AreEqual(0.028m, everyones.Tools.Single(x => x.Tool == "workstream").CostUsd);
+        Assert.AreEqual(1, everyones.Tools.Single(x => x.Tool == "opencode").Calls);
+        Assert.AreEqual(2, everyones.Models.Single(x => x.Model == "claude-opus-5-5").Calls);
+        Assert.AreEqual(1000, everyones.Models.Single(x => x.Model == "claude-sonnet-5-5").InputTokens);
+        // A day for each day of the month so far, with today's use on the last.
+        Assert.AreEqual(DateTimeOffset.UtcNow.Day, everyones.Days.Count);
+        Assert.AreEqual(0.035m, everyones.Days[^1].CostUsd);
+        Assert.AreEqual(2, everyones.Tasks.Count);
+        Assert.AreEqual("Ada Lovelace", everyones.Tasks[0].UserName);
+        Assert.AreEqual("Say done.", everyones.Tasks[0].Title);
+
+        // A member sees their own use and nobody else's.
+        var own = await ReportAsync(lin, team.Id);
+        Assert.IsFalse(own.Everyone);
+        Assert.AreEqual(0.014m, own.CostUsd);
+        Assert.AreEqual(lin.UserId, own.People.Single().UserId);
+        Assert.AreEqual("workstream", own.Tools.Single().Tool);
+        Assert.AreEqual(1, own.Tasks.Count);
+        // The team's total is still theirs to see, as before.
+        Assert.AreEqual(0.035m, (await lin.GetAsync<TeamUsage>($"/api/teams/{team.Id}/usage")).ModelSpentUsd);
+
+        // Nobody outside the team: a stranger, the system administrator, a desktop with its key, and nobody.
+        using var stranger = await Person.SignUpAsync("Grace Hopper");
+        await stranger.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.NotFound);
+        using var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
+        await administrator.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.NotFound);
+        using var keyed = new HttpClient { BaseAddress = Stack.Origin };
+        keyed.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adas.Key);
+        await keyed.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.Unauthorized);
+        using var anonymous = new HttpClient { BaseAddress = Stack.Origin };
+        await anonymous.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
+    public async Task A_deleted_tasks_calls_stay_with_the_person_who_made_them()
+    {
+        var (ada, team, desktop) = await WorkingAsync();
+        Stack.Model.Answer = () => FakeModel.Json(FakeModel.Message("claude-opus-5-5", input: 1000, output: 500));
+        (await desktop.AskModelAsync(tool: "opencode")).Dispose();
+        var taskId = (await ReportAsync(ada, team.Id)).Tasks.Single().TaskId;
+        // The task's row is gone, as it is once a deleted task's desktop is removed: the call names a task
+        // nothing knows any more, and still says whose it was.
+        var gone = Guid.NewGuid().ToString("D");
+        using (var scope = Stack.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>().ModelUsage.Where(x => x.TaskId == taskId).ExecuteUpdateAsync(x => x.SetProperty(use => use.TaskId, gone));
+        }
+        var report = await ReportAsync(ada, team.Id);
+        Assert.AreEqual(0.014m, report.People.Single(x => x.UserId == ada.UserId).CostUsd);
+        Assert.IsNull(report.Tasks.Single().Title);
+        Assert.AreEqual("Ada Lovelace", report.Tasks.Single().UserName);
+    }
+
+    [TestMethod]
+    public async Task A_model_call_counts_as_use_of_the_desktop()
+    {
+        var (_, _, desktop) = await WorkingAsync();
+        string taskId;
+        using (var scope = Stack.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
+            taskId = (await db.Tasks.AsNoTracking().OrderByDescending(x => x.CreatedAt).FirstAsync()).Id;
+            var longAgo = DateTimeOffset.UtcNow.AddMinutes(-20);
+            await db.Tasks.Where(x => x.Id == taskId).ExecuteUpdateAsync(x => x.SetProperty(task => task.ActiveAt, longAgo));
+        }
+        // A tool the person left working in a terminal: nobody touches the desktop, and its agent is idle.
+        Stack.Model.Answer = () => FakeModel.Json(FakeModel.Message("claude-opus-5-5", input: 1000, output: 500));
+        (await desktop.AskModelAsync(tool: "opencode")).Dispose();
+        using var after = Stack.Services.CreateScope();
+        var row = await after.ServiceProvider.GetRequiredService<WorkstreamDbContext>().Tasks.AsNoTracking().SingleAsync(x => x.Id == taskId);
+        Assert.IsTrue(DateTimeOffset.UtcNow - row.ActiveAt < TimeSpan.FromMinutes(1), "The desktop was used just now.");
+    }
+
+    [TestMethod]
+    public void A_tools_name_is_the_first_word_of_what_it_called_itself()
+    {
+        Assert.AreEqual("opencode", ModelUsage.ToolNamed("opencode/1.19.6 ai-sdk/anthropic/2.0"));
+        Assert.AreEqual("claude-cli", ModelUsage.ToolNamed("Claude-CLI/2.1.0 (external, cli)"));
+        Assert.AreEqual("workstream", ModelUsage.ToolNamed(null));
+        Assert.AreEqual("workstream", ModelUsage.ToolNamed("  "));
+        Assert.AreEqual("workstream", ModelUsage.ToolNamed("<<>>"), "Nothing is left of it.");
+        Assert.AreEqual("my_tool.v2", ModelUsage.ToolNamed("My_Tool.v2;x"));
+        Assert.AreEqual(ModelUsage.MaxToolLength, ModelUsage.ToolNamed(new string('a', 200)).Length);
+    }
+
+    [TestMethod]
+    public async Task A_desktop_opened_with_nothing_asked_is_told_so_until_someone_writes()
+    {
+        var (ada, team) = await Person.WithTeamAsync();
+        using var opened = await DesktopOfANewTaskAsync(ada, team, prompt: null);
+        Assert.IsTrue((await opened.SetupAsync()).Opened);
+        using var asked = await DesktopOfANewTaskAsync(ada, team);
+        Assert.IsFalse((await asked.SetupAsync()).Opened);
     }
 }

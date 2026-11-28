@@ -70,7 +70,7 @@ public sealed class Desktop : IDisposable
 
     /// <summary>A model call, as the agent's harness makes it: Anthropic's Messages API at the gateway's address.</summary>
     /// <param name="chunked">Send the body without saying its length, as some clients do.</param>
-    public Task<HttpResponseMessage> AskModelAsync(bool stream = false, string key = "x-api-key", bool chunked = false)
+    public Task<HttpResponseMessage> AskModelAsync(bool stream = false, string key = "x-api-key", bool chunked = false, string? tool = null)
     {
         var body = new { model = "claude-opus-5-5", max_tokens = 64, stream, messages = new[] { new { role = "user", content = "Say done." } } };
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/model/anthropic/v1/messages")
@@ -81,6 +81,8 @@ public sealed class Desktop : IDisposable
         // The harness sends its key as Anthropic's clients do; the gateway reads either header.
         request.Headers.TryAddWithoutValidation(key, Key);
         request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+        // A tool on the desktop reaches the gateway through the desktop's model address, which says which tool it is.
+        if (tool is not null) request.Headers.TryAddWithoutValidation(Workstream.Api.Model.ModelGateway.ToolHeader, tool);
         return bare.SendAsync(request);
     }
 

@@ -9,7 +9,9 @@
 //      repository, the apps on the panel, the setup script in a terminal window;
 //   4. runs the agent (harness.mjs) and feeds it what people write;
 //   5. serves the agent's own window on the desktop (window.mjs), which shows the same conversation;
-//   6. after a stop, brings back what was running and what was open (restore.mjs).
+//   6. after a stop, brings back what was running and what was open (restore.mjs);
+//   7. answers on the desktop's own model address (model.mjs), so a tool a person runs here, OpenCode first
+//      (opencode.mjs), reaches the team's models with no sign-in and no key of its own.
 //
 // A machine made to prepare an environment does none of that. The API tells it so (`prepare` in its setup):
 // it clones the repository and runs the setup script once, says how that went, and leaves nothing of a task
@@ -28,6 +30,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { authorFor } from "./github.mjs";
+import { startModelAddress } from "./model.mjs";
+import { openCodeFile, openCodeSettings, openCodeVariables, welcome } from "./opencode.mjs";
 import { panelFor } from "./panel.mjs";
 import { phoneStarts, setupScriptFor } from "./phones.mjs";
 import { startedFromLine, tail, usedBytes } from "./prepared.mjs";
@@ -189,8 +193,9 @@ const shims = path.join(root, "agent", "shims");
  * github.mjs for a token whenever it needs one, and gh asks it through its wrapper. The token is the GitHub
  * token of the person who started the task, or the GITHUB_TOKEN the environment was given.
  */
-async function writeVariables(variables, { asTheStarter = false } = {}) {
-  const lines = [`export PATH=${shellQuote(shims)}:"$PATH"`, ...Object.entries(variables).map(([name, value]) => `export ${name}=${shellQuote(value)}`)];
+async function writeVariables(variables, { asTheStarter = false, tools = {} } = {}) {
+  // The tools' own first, so an environment that sets one of the same name has the last word.
+  const lines = [`export PATH=${shellQuote(shims)}:"$PATH"`, ...Object.entries({ ...tools, ...variables }).map(([name, value]) => `export ${name}=${shellQuote(value)}`)];
   await writeFile(path.join(dir, "env.sh"), lines.join("\n") + "\n", { mode: 0o600 });
   const config = (...args) => run("git", ["config", "--global", ...args]).catch((error) => log("git config failed:", error.message));
   await config("--replace-all", "credential.https://github.com.helper", `!node ${path.join(root, "agent", "github.mjs")} credential`);
@@ -299,9 +304,29 @@ async function startFromSave(saved, setup, target) {
   say("activity", startedFromLine({ preparedAt: saved.preparedAt, commit: saved.commit, branch: branch ?? setup.repository?.branch ?? null, newer }));
 }
 
+/**
+ * The team's models for any tool on this desktop: the desktop's model address answers (model.mjs), OpenCode's
+ * settings point at it (opencode.mjs), and every program started from here on is told where both are.
+ * Answers the variables, for the shells.
+ */
+async function modelTools(setup) {
+  if (!setup.model) return {};
+  startModelAddress({ gateway: setup.model.baseUrl, key, log });
+  await writeFile(openCodeFile(dir), JSON.stringify(openCodeSettings(setup.model), null, 2));
+  const variables = openCodeVariables(dir);
+  Object.assign(process.env, variables);
+  return variables;
+}
+
+/** A terminal in the working folder, for a person who opened the desktop to work on it themselves: it says what is ready, then is theirs. */
+function openTerminal(workspace, variables) {
+  const command = `printf '%s\n' ${shellQuote(welcome)}; exec bash`;
+  start("xfce4-terminal", ["--title", "Terminal", "--geometry", "110x30", "--working-directory", workspace, "-x", "bash", "-c", command], variables);
+}
+
 /** The part of preparing that needs no window: the variables and the repository. Answers the folder the agent works in. */
 async function prepareFiles(setup, saved) {
-  await writeVariables(setup.variables, { asTheStarter: true });
+  await writeVariables(setup.variables, { asTheStarter: true, tools: await modelTools(setup) });
   let workspace = path.join(home, "work");
   await mkdir(workspace, { recursive: true });
   if (saved) await startFromSave(saved, setup, setup.repository ? repositoryFolder(setup.repository) : workspace);
@@ -348,6 +373,8 @@ async function prepareWindows(setup, workspace) {
   if (!(await browserAnswers())) start("chromium", ["about:blank"], setup.variables);
   if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
   startPhones(setup);
+  // Opened by a person to work on, with nothing asked of the agent: their terminal is waiting for them.
+  if (setup.opened) openTerminal(workspace, setup.variables);
   watchTabs();
 }
 

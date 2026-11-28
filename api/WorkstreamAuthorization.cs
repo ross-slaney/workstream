@@ -21,6 +21,8 @@ public static class WorkstreamAuthorization
 
         public const string TeamView = "TEAM_VIEW";
         public const string TeamViewUsage = "TEAM_VIEW_USAGE";
+        /// <summary>See what each person in the team used. Without it a person sees the team's totals and their own use.</summary>
+        public const string TeamViewPeopleUsage = "TEAM_VIEW_PEOPLE_USAGE";
         public const string TeamManageMembers = "TEAM_MANAGE_MEMBERS";
         public const string TeamManageSettings = "TEAM_MANAGE_SETTINGS";
         public const string TeamCreateEnvironment = "TEAM_CREATE_ENVIRONMENT";
@@ -58,7 +60,7 @@ public static class WorkstreamAuthorization
         public static readonly string[] All =
         [
             AdminView,
-            TeamView, TeamViewUsage, TeamManageMembers, TeamManageSettings, TeamCreateEnvironment, TeamCreateTask,
+            TeamView, TeamViewUsage, TeamViewPeopleUsage, TeamManageMembers, TeamManageSettings, TeamCreateEnvironment, TeamCreateTask,
             EnvironmentView, EnvironmentEdit,
             TaskView, TaskPrompt, TaskDrive, TaskManage, TaskRunAgent, TaskOperateDesktop, TeamOperateSpare, TaskNotify,
             EnvironmentRunSetup, EnvironmentOperateSetup,
@@ -95,6 +97,7 @@ public static class WorkstreamAuthorization
 
         seed.Permission(Permissions.TeamView, "See the team", ResourceTypes.Team);
         seed.Permission(Permissions.TeamViewUsage, "See the team's usage", ResourceTypes.Team);
+        seed.Permission(Permissions.TeamViewPeopleUsage, "See what each person in the team used", ResourceTypes.Team);
         seed.Permission(Permissions.TeamManageMembers, "Invite, remove and change people", ResourceTypes.Team);
         seed.Permission(Permissions.TeamManageSettings, "Change the team's settings", ResourceTypes.Team);
         seed.Permission(Permissions.TeamCreateEnvironment, "Add an environment", ResourceTypes.Team);
@@ -129,7 +132,7 @@ public static class WorkstreamAuthorization
             Permissions.TeamView, Permissions.TeamViewUsage, Permissions.TeamCreateEnvironment, Permissions.TeamCreateTask,
             Permissions.EnvironmentView, Permissions.EnvironmentEdit,
             Permissions.TaskView, Permissions.TaskPrompt, Permissions.TaskDrive, Permissions.TaskManage);
-        seed.Role(Roles.TeamAdmin, "Team administrator").Can(Permissions.TeamManageMembers, Permissions.TeamManageSettings);
+        seed.Role(Roles.TeamAdmin, "Team administrator").Can(Permissions.TeamManageMembers, Permissions.TeamManageSettings, Permissions.TeamViewPeopleUsage);
         seed.Role(Roles.TaskDesktop, "The task's desktop").Can(Permissions.TaskRunAgent);
         // A task shared with someone outside the team, granted on the task alone with an end the sharer chose.
         // Nothing here reaches the team, its environments or its other tasks, and none of them manages the task.

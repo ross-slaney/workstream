@@ -49,7 +49,7 @@ trap 'echo "The image was not built. Its last lines:" >&3; tail -c 2500 "$log" >
   rm -rf /home/work/.workstream/* /home/work/.cache/sessions /tmp/.X1-lock /tmp/.X11-unix/X1
 
   # What a desktop cannot do without.
-  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof nft > /dev/null
+  command -v Xtigervnc chromium code node docker dotnet gh xdotool sqlcmd growpart lsof nft opencode > /dev/null
   test -d /opt/workstream/agent/node_modules/@anthropic-ai/claude-agent-sdk
   systemctl is-enabled workstream-desktop.service workstream-grow-disk.service > /dev/null
   sudo -u work -H dotnet dev-certs https --check

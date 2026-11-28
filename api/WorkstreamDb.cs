@@ -148,6 +148,7 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             run.Property(x => x.Id).HasMaxLength(36);
             run.Property(x => x.TaskId).HasMaxLength(36);
             run.Property(x => x.TeamId).HasMaxLength(100);
+            run.Property(x => x.UserId).HasMaxLength(450);
             run.Property(x => x.Size).HasMaxLength(20);
             // Rows from before a run said what it was for were all tasks' runs, made from the image.
             run.Property(x => x.Purpose).HasMaxLength(20).HasDefaultValue(MachinePurpose.Task);
@@ -230,6 +231,9 @@ public sealed class WorkstreamDbContext(DbContextOptions<WorkstreamDbContext> op
             usage.Property(x => x.Id).UseIdentityColumn();
             usage.Property(x => x.TeamId).HasMaxLength(100);
             usage.Property(x => x.TaskId).HasMaxLength(36);
+            usage.Property(x => x.UserId).HasMaxLength(450);
+            // Rows from before a call said which tool made it were all Workstream's own agent's.
+            usage.Property(x => x.Tool).HasMaxLength(Domain.ModelUsage.MaxToolLength).HasDefaultValue(Domain.ModelUsage.WorkstreamAgent);
             usage.Property(x => x.Model).HasMaxLength(100);
             usage.Property(x => x.CostUsd).HasPrecision(18, 6);
             usage.HasIndex(x => new { x.TeamId, x.At });

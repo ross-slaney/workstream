@@ -26,6 +26,30 @@ public sealed record TeamUsage(
     DateTimeOffset Since, decimal ModelSpentUsd, decimal ModelAllowanceUsd,
     IReadOnlyList<SizeHours> DesktopHours, IReadOnlyList<StorageUse> Storage, int RunningDesktops, int MaxRunningDesktops, double MacBuildMinutes = 0);
 
+/// <summary>What one person used this month: what their desktops' model calls cost, how many calls and tasks, and their desktops' hours. A name is empty when nobody is known for it.</summary>
+public sealed record PersonUse(string UserId, string Name, decimal CostUsd, int Calls, int Tasks, double DesktopHours);
+
+/// <summary>What one tool's model calls cost this month. <c>workstream</c> is Workstream's own agent; any other is a tool on a desktop, such as <c>opencode</c>.</summary>
+public sealed record ToolUse(string Tool, decimal CostUsd, int Calls);
+
+/// <summary>What one model was used for this month. <see cref="InputTokens"/> is everything sent, cached or not.</summary>
+public sealed record ModelUse(string Model, decimal CostUsd, int Calls, long InputTokens, long OutputTokens);
+
+/// <summary>One day (UTC) of the month.</summary>
+public sealed record DayUse(DateOnly Day, decimal CostUsd, int Calls);
+
+/// <summary>One task's model calls this month. A deleted task has no title.</summary>
+public sealed record TaskUse(string TaskId, string? Title, string UserName, decimal CostUsd, int Calls);
+
+/// <summary>
+/// Who and what used the team's models this calendar month (UTC): by person, by tool, by model, by day, and
+/// the ten tasks that cost most. <see cref="Everyone"/> says whose use it is: the whole team's for someone who
+/// may see each person's (<c>TEAM_VIEW_PEOPLE_USAGE</c>), otherwise the caller's own.
+/// </summary>
+public sealed record ModelReport(
+    DateTimeOffset Since, bool Everyone, decimal CostUsd, int Calls,
+    IReadOnlyList<PersonUse> People, IReadOnlyList<ToolUse> Tools, IReadOnlyList<ModelUse> Models, IReadOnlyList<DayUse> Days, IReadOnlyList<TaskUse> Tasks);
+
 /// <summary>How many desktops were running at a moment.</summary>
 public sealed record RunningPoint(DateTimeOffset At, int Running);
 
@@ -109,6 +133,68 @@ public static partial class Operations
         return Outcome<TeamUsage>.Ok(new TeamUsage(
             since, await ModelSpentAsync(db, teamId, since, ct), team.ModelAllowanceUsd, hours, storage,
             await RunningDesktopsAsync(db, teamId, ct), team.MaxRunningDesktops, await MacMinutesAsync(db, teamId, since, ct)));
+    }
+
+    /// <summary>
+    /// Who and what used the team's models this month. One check on the team, then sums over its rows, which
+    /// SqlOS has no authorized form of. Someone who may see each person's use gets the whole team's; anyone
+    /// else who may see the team's usage gets their own. A call is its person's by what the call wrote down,
+    /// or, for a call from before that was kept, by who started its task.
+    /// </summary>
+    public static async Task<Outcome<ModelReport>> ModelReportAsync(Caller caller, string teamId, WorkstreamDbContext db, ISqlOSFgaAuthService fga, TimeProvider clock, CancellationToken ct)
+    {
+        var allowed = await TeamWithAsync(caller, teamId, Permissions.TeamViewUsage, "You can't see this team's usage.", db, fga, ct);
+        if (!allowed.IsOk) return allowed.As<ModelReport>();
+        var everyone = await fga.Allows(caller.PrincipalId, Permissions.TeamViewPeopleUsage, allowed.Value!.ResourceId);
+        var now = clock.GetUtcNow();
+        var since = MonthStart(now);
+
+        var calls = await (
+            from use in db.ModelUsage.AsNoTracking().Where(x => x.TeamId == teamId && x.At >= since)
+            join task in db.Tasks.AsNoTracking() on use.TaskId equals task.Id into found
+            from task in found.DefaultIfEmpty()
+            group use by new { use.TaskId, Title = (string?)task.Title, UserId = use.UserId ?? task.CreatedBy, use.Tool, use.Model, use.At.Year, use.At.Month, use.At.Day } into line
+            select new
+            {
+                line.Key.TaskId, line.Key.Title, line.Key.UserId, line.Key.Tool, line.Key.Model, line.Key.Year, line.Key.Month, line.Key.Day,
+                Cost = line.Sum(x => x.CostUsd), Calls = line.Count(),
+                Input = line.Sum(x => x.InputTokens + x.CacheReadTokens + x.CacheWriteTokens), Output = line.Sum(x => x.OutputTokens),
+            }).ToListAsync(ct);
+        var runs = await (
+            from run in db.DesktopRuns.AsNoTracking().Where(x => x.TeamId == teamId && x.Purpose == MachinePurpose.Task && (x.EndedAt == null || x.EndedAt >= since))
+            join task in db.Tasks.AsNoTracking() on run.TaskId equals task.Id into found
+            from task in found.DefaultIfEmpty()
+            select new { run.TaskId, UserId = run.UserId ?? task.CreatedBy, run.StartedAt, run.EndedAt }).ToListAsync(ct);
+        if (!everyone)
+        {
+            calls = [.. calls.Where(x => x.UserId == caller.PrincipalId)];
+            runs = [.. runs.Where(x => x.UserId == caller.PrincipalId)];
+        }
+
+        var names = await NamesAsync(db, calls.Select(x => x.UserId).Concat(runs.Select(x => x.UserId)).Where(x => x is not null).Select(x => x!), ct);
+        string NameOf(string? userId) => userId is not null && names.TryGetValue(userId, out var name) ? name : "";
+
+        var people = calls.Select(x => x.UserId ?? "").Concat(runs.Select(x => x.UserId ?? "")).Distinct().Select(userId =>
+        {
+            var theirs = calls.Where(x => (x.UserId ?? "") == userId).ToList();
+            var ran = runs.Where(x => (x.UserId ?? "") == userId).ToList();
+            return new PersonUse(
+                userId, NameOf(userId), theirs.Sum(x => x.Cost), theirs.Sum(x => x.Calls), theirs.Select(x => x.TaskId).Concat(ran.Select(x => x.TaskId)).Distinct().Count(),
+                Math.Round(HoursOf(ran.Select(x => (x.StartedAt, x.EndedAt)), since, now), 2));
+        }).OrderByDescending(x => x.CostUsd).ThenByDescending(x => x.DesktopHours).ThenBy(x => x.Name).ToList();
+        var tools = calls.GroupBy(x => x.Tool).Select(x => new ToolUse(x.Key, x.Sum(y => y.Cost), x.Sum(y => y.Calls)))
+            .OrderByDescending(x => x.CostUsd).ThenBy(x => x.Tool).ToList();
+        var models = calls.GroupBy(x => x.Model).Select(x => new ModelUse(x.Key, x.Sum(y => y.Cost), x.Sum(y => y.Calls), x.Sum(y => y.Input), x.Sum(y => y.Output)))
+            .OrderByDescending(x => x.CostUsd).ThenBy(x => x.Model).ToList();
+        // Every day of the month so far, so a day nothing was used is a day of nothing and not a gap.
+        var byDay = calls.GroupBy(x => new DateOnly(x.Year, x.Month, x.Day)).ToDictionary(x => x.Key, x => (Cost: x.Sum(y => y.Cost), Calls: x.Sum(y => y.Calls)));
+        var first = DateOnly.FromDateTime(since.UtcDateTime);
+        var days = Enumerable.Range(0, DateOnly.FromDateTime(now.UtcDateTime).DayNumber - first.DayNumber + 1).Select(first.AddDays)
+            .Select(day => byDay.TryGetValue(day, out var used) ? new DayUse(day, used.Cost, used.Calls) : new DayUse(day, 0m, 0)).ToList();
+        var tasks = calls.GroupBy(x => x.TaskId).Select(x => new TaskUse(x.Key, x.First().Title, NameOf(x.First().UserId), x.Sum(y => y.Cost), x.Sum(y => y.Calls)))
+            .OrderByDescending(x => x.CostUsd).ThenBy(x => x.TaskId).Take(10).ToList();
+
+        return Outcome<ModelReport>.Ok(new ModelReport(since, everyone, calls.Sum(x => x.Cost), calls.Sum(x => x.Calls), people, tools, models, days, tasks));
     }
 
     /// <summary>Sizes from the smallest up, and kinds in the order the product lists them; anything unknown goes last.</summary>
