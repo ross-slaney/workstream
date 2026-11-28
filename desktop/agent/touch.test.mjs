@@ -12,7 +12,7 @@ function pretend({ fields = [{ ref: "e2", role: "textfield", label: "New step", 
     device: {
       name: "pretend phone", command: "phone pretend", quiet: 1, every: 1, needsField, patience: 40,
       look: () => ({
-        screen: ["app pretend", ...fields.map((field) => `@${field.ref} textfield "${field.label}" value="${value}"`), '@e9 button "Add"'].join("\n"),
+        screen: ["app pretend", ...fields.map((field) => `@${field.ref} textfield "${field.label}" value="${value}"`), '@e8 text "Steps"', '@e9 button "Add"'].join("\n"),
         fields: fields.map((field) => ({ ...field, value })),
       }),
       type: (text) => {
