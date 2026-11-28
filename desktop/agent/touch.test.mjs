@@ -364,3 +364,15 @@ test("fill by reference finds the field the printed reading meant, wherever it i
 function spawnSyncSleep(ms) {
   spawnSync("sleep", [String(ms / 1000)]);
 }
+
+test("typing goes ahead when the reading lists words and no fields in places that cannot be right", async () => {
+  // As one app's sign-in screen read on the iPhone: its words at the very top, and neither of its fields.
+  const wrong = [el("e1", "text", "Genius", 26, 11), el("e2", "heading", "Sign in", 184, 20), el("e3", "text", "Work email", 184, 10)].map((element) => ({ ...element, frame: [0, 0, 300, 40] }));
+  const phone = showing([reading(wrong)]);
+  const sent = [];
+  Object.assign(phone.device, { needsField: true, type: (text) => (sent.push(text), 0), enter: () => 0 });
+  const { status, text } = await printed(() => typeText(phone.device, "dana.field@example.test"));
+  assert.equal(status, 0);
+  assert.deepEqual(sent, ["dana.field@example.test"]);
+  assert.match(text, /could not be checked/);
+});

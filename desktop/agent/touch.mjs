@@ -426,11 +426,17 @@ export async function typeText(device, text, first = device.look(), { exact = fa
   const sends = body !== text;
   // No field in the reading may be a reading taken too soon: look again before believing it.
   if (device.needsField && body && first.fields.length === 0) first = await lookFor(device, (seen) => seen.fields.length > 0);
-  if (device.needsField && body && first.fields.length === 0 && first.unread) {
-    // A reading that is missing cannot say that no field has the keyboard. Typed all the same, and shown.
-    if (device.type(body) !== 0 || (sends && device.enter() !== 0)) return 1;
+  if (device.needsField && body && first.fields.length === 0 && doubt(first)) {
+    // A reading that cannot be relied on cannot say that no field has the keyboard: one app's listed its
+    // words and none of its fields. Typed all the same, and shown.
+    if (device.type(body) !== 0) return 1;
+    if (sends) {
+      // The text is put in at once, and drawn a moment later: Return goes after it.
+      await sleep(Math.max(device.every, 150));
+      if (device.enter() !== 0) return 1;
+    }
     out(`Typed${sends ? ", and Return was pressed" : ""}. What the field holds could not be checked.`);
-    await pictured(device, first.unread);
+    await pictured(device, doubt(first));
     return 0;
   }
   if (device.needsField && body && first.fields.length === 0) {
