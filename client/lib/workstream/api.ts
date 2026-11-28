@@ -71,7 +71,11 @@ export type SavedRepositoryFile = { kind: "commit" | "pull_request"; url: string
 /** Whether a task's desktop reaches GitHub as the person who started it. */
 export type TaskGitHub = { signInNeeded: boolean; startedByYou: boolean; startedByName: string | null };
 
-export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean };
+/**
+ * Something a desktop can come with. A surface is where the product being worked on runs and is seen and used
+ * (the browser, a phone); an app is what the person and the agent work with (the editor, a terminal).
+ */
+export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean; kind: "surface" | "app" };
 
 export type DesktopSize = "small" | "standard" | "large";
 

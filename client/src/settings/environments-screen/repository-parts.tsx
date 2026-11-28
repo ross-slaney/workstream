@@ -241,7 +241,8 @@ const EXAMPLE_FILE = `size: standard              # small | standard | large
 setup: |                    # runs once on a new desktop, in the repository's folder
   npm ci
   docker pull postgres:17
-apps: [chrome, vscode, terminal]
+surfaces: [chrome]          # where your product runs: chrome, android, iphone
+apps: [vscode, terminal]    # what you and the agent work with
 variables: [DATABASE_URL]   # names only; set their values here in Workstream
 instructions: |             # added to what the agent is told
   Run npm test before you say you are done.`;
