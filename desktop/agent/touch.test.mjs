@@ -376,3 +376,13 @@ test("typing goes ahead when the reading lists words and no fields in places tha
   assert.deepEqual(sent, ["dana.field@example.test"]);
   assert.match(text, /could not be checked/);
 });
+
+test("a reading that cannot be relied on is not read again to look for a field before typing", async () => {
+  const blind = { screen: "app pretend (not answering yet)", elements: [], fields: [], unread: "the app in front is not answering it" };
+  const phone = showing([blind]);
+  Object.assign(phone.device, { needsField: true, patience: 5000, type: () => 0, enter: () => 0 });
+  const started = Date.now();
+  await printed(() => typeText(phone.device, "hello", blind));
+  assert.equal(phone.looks(), 0);
+  assert.ok(Date.now() - started < 2000);
+});

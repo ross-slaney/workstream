@@ -185,6 +185,9 @@ export function android() {
       return 0;
     },
     enter: () => adb("input", "keyevent", "66"),
+    // As on the iPhone: with no field to take them, letters reach the app as key presses. A development build
+    // took one as the shortcut to its developer menu, which then asked for a permission in Android's settings.
+    needsField: true,
     // To the end of the text first, then back over it.
     erase: (count) => (adb("input", "keyevent", "123") !== 0 ? 1 : press("67", count)),
     keys: ANDROID_KEYS,
@@ -425,7 +428,8 @@ export async function typeText(device, text, first = device.look(), { exact = fa
   const body = text.replace(/\n+$/, "");
   const sends = body !== text;
   // No field in the reading may be a reading taken too soon: look again before believing it.
-  if (device.needsField && body && first.fields.length === 0) first = await lookFor(device, (seen) => seen.fields.length > 0);
+  // (A reading that cannot be relied on is not waited on: it is not going to list the field.)
+  if (device.needsField && body && first.fields.length === 0 && !doubt(first)) first = await lookFor(device, (seen) => seen.fields.length > 0);
   if (device.needsField && body && first.fields.length === 0 && doubt(first)) {
     // A reading that cannot be relied on cannot say that no field has the keyboard: one app's listed its
     // words and none of its fields. Typed all the same, and shown.

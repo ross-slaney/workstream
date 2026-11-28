@@ -421,6 +421,8 @@ async function useAndroid(command, rest, { wait }) {
       if (!words.length) throw new Error("Say what to tap: a reference (@e3), words on the screen, or a point (X Y).");
       return acted(phone, () => tap(phone, words), { wait });
     case "type":
+      // Key presses on purpose, for an app that takes them with no field: sent as they are.
+      if (rest.includes("--keys")) return acted(phone, () => phone.type(textOf(words, rest).text), { wait });
       return typed(phone, words, rest);
     case "fill":
       if (words.length < 2) throw new Error('Say the field and the text: `phone android fill @e3 "text"`.');
