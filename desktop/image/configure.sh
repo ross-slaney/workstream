@@ -18,9 +18,10 @@ getent group kvm >/dev/null && usermod -aG kvm work
 # none to give (said without the warning bar Chromium would otherwise show about it). A project's own server
 # on https://localhost has a certificate nothing vouches for, whatever made it (mkcert, a framework's
 # development certificate, a self-signed one): Chromium opens those without its "not private" page. Only
-# this desktop itself is ever reached that way.
+# this desktop itself is ever reached that way. A stop ends Chromium without warning, and the agent opens the
+# pages again itself (restore.mjs), so Chromium's own "Restore pages?" question is not shown.
 cat > /etc/chromium.d/workstream <<'EOF'
-export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check --password-store=basic --disable-features=Translate --allow-insecure-localhost --remote-debugging-port=9222 --user-data-dir=/home/work/.workstream/browser"
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check --password-store=basic --disable-features=Translate --allow-insecure-localhost --hide-crash-restore-bubble --remote-debugging-port=9222 --user-data-dir=/home/work/.workstream/browser"
 if [ -f /.dockerenv ]; then export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type --disable-dev-shm-usage"; fi
 EOF
 
