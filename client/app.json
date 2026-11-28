@@ -2,7 +2,7 @@
   "expo": {
     "name": "Workstream",
     "slug": "workstream",
-    "version": "0.12.3",
+    "version": "0.12.4",
     "scheme": "workstream",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
