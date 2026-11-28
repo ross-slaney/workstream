@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { ANDROID_KEYS, buildHash, hashFiles, iphoneRunning, isNativeInput, kindOf, simulatorEnvironment, sourceRootOf } from "./phone.mjs";
+import { ANDROID_KEYS, textOf, wordsOf, buildHash, hashFiles, iphoneRunning, isNativeInput, kindOf, simulatorEnvironment, sourceRootOf } from "./phone.mjs";
 
 test("the kind of app is read from what is in its folder", () => {
   assert.equal(kindOf(["package.json", "app.json"], { dependencies: { expo: "^58.0.0", "react-native": "0.88.0" } }), "expo");
@@ -61,4 +61,28 @@ test("Return and the other keys are ones Android knows by number", () => {
   assert.equal(ANDROID_KEYS.enter, "66");
   assert.equal(ANDROID_KEYS.return, "66");
   assert.equal(ANDROID_KEYS.back, "4");
+});
+
+test("a command's words leave out its flags and the values the flags take", () => {
+  assert.deepEqual(wordsOf(["delete", "--times", "45"]), ["delete"]);
+  assert.deepEqual(wordsOf(["Mark", "done", "--timeout", "30", "--gone"]), ["Mark", "done"]);
+  assert.deepEqual(wordsOf(["-o", "/tmp/a.png"]), []);
+  assert.deepEqual(wordsOf(["10", "20", "10", "400", "--ms", "500"]), ["10", "20", "10", "400"]);
+});
+
+test("--enter presses Return after the text, once", () => {
+  assert.deepEqual(textOf(["Check the back door"], ["Check the back door", "--enter"]), { text: "Check the back door\n", said: null });
+  assert.deepEqual(textOf(["Check\n"], ["Check\n", "--enter"]), { text: "Check\n", said: null });
+  assert.deepEqual(textOf(["plain"], ["plain"]), { text: "plain", said: null });
+});
+
+test("a backslash and an n at the end, as a shell passes \"text\\n\" in double quotes, are typed and said", () => {
+  const { text, said } = textOf(["Check the back door\\n"], ["Check the back door\\n"]);
+  assert.equal(text, "Check the back door\\n");
+  assert.match(said, /`--enter` presses Return/);
+});
+
+test("delete and backspace are the same Android key", () => {
+  assert.equal(ANDROID_KEYS.delete, "67");
+  assert.equal(ANDROID_KEYS.backspace, "67");
 });
