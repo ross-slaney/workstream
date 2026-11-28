@@ -80,6 +80,18 @@ test("the agent is told in one line what came back", () => {
   assert.match(line, /reran 1 command .*`npm run dev` in \/home\/work\/work\/app/);
   assert.match(line, /reopened 1 page in the browser \(http:\/\/localhost:3000\/\)/);
   assert.match(line, /opened VS Code on \/home\/work\/work\/app with 1 file/);
+  assert.match(line, /Any other program you started is gone/);
+});
+
+test("an agent stopped in the middle of a conversation is told, whatever came back", () => {
+  assert.equal(restoredLine(null, "/w", false), null);
+  const nothing = restoredLine(null, "/w", true);
+  assert.equal(nothing.split("\n").length, 1);
+  assert.match(nothing, /stopped and started again, which ends every program and empties \/tmp/);
+  assert.match(nothing, /nothing you started is running\. Start again what the work needs/);
+  const pagesOnly = restoredLine(restorePlan({ tabs: ["http://localhost:3000/"] }), "/w", true);
+  assert.match(pagesOnly, /reopened 1 page/);
+  assert.match(pagesOnly, /kept no command of yours to run again, so every program you started is gone/);
 });
 
 test("the restored terminal runs each command in its folder, in the background, and stays open", () => {

@@ -57,7 +57,8 @@ const saveState = () => writeFile(stateFile, JSON.stringify(state));
  * What to bring back: only on the first start of the machine after a stop, when this desktop was already
  * prepared once. The agent starting again on a running desktop finds the programs still there.
  */
-const restoring = machineStarted(process.env.WORKSTREAM_MACHINE_MARK ?? "/dev/shm/workstream-agent") && state.prepared ? restorePlan(state) : null;
+const restarted = machineStarted(process.env.WORKSTREAM_MACHINE_MARK ?? "/dev/shm/workstream-agent") && state.prepared;
+const restoring = restarted ? restorePlan(state) : null;
 
 /** The conversation as this desktop has seen it, for the agent's window. */
 const conversation = existsSync(conversationFile)
@@ -587,7 +588,8 @@ preparing = false;
 const { startHarness } = await harnessLoading;
 harness = startHarness({
   setup, key, workspace, state, saveState, say, prompts, log,
-  restored: restoredLine(restoring, workspace),
+  // A desktop that stopped in the middle of a conversation says so, whatever it could bring back.
+  restored: restoredLine(restoring, workspace, restarted && Boolean(state.sessionId)),
   setupResult: state.setupResult ?? null,
   setWorking: (value) => {
     working = value;
