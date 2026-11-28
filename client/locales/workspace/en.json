@@ -99,7 +99,7 @@
   },
   "chat": {
     "label": "Conversation with the agent",
-    "empty": "Tell the agent what to do. It works on the desktop beside this, where you can watch.",
+    "empty": "Work on the desktop yourself, or tell the agent here what to do. It works on the same desktop, where you can watch.",
     "placeholder": "Message the agent",
     "send": "Send",
     "working": "The agent is working",
@@ -142,7 +142,9 @@
     "environmentHint": "What the desktop comes with. Change these under Environments.",
     "start": "Start task",
     "noEnvironments": "Add an environment first.",
-    "teamLabel": "Team"
+    "teamLabel": "Team",
+    "open": "Open desktop",
+    "openHint": "Or open the desktop with nothing asked and work on it yourself. OpenCode is ready in its terminal, and the agent is here whenever you write to it."
   },
   "createTeam": {
     "title": "Create a team",

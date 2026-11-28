@@ -10,12 +10,14 @@ export default function UsageRoute() {
   const t = useT("settings");
   const { teamId } = useTeamShell();
   const usage = useOnlineRead(() => workstream.usage(teamId), `usage:${teamId}`, 30_000);
+  // Who and what used the models: the whole team's for an administrator, the reader's own for anyone else.
+  const report = useOnlineRead(() => workstream.modelReport(teamId), `model-report:${teamId}`, 30_000);
   return (
     <>
       <Head>
         <title>{t("usage.metaTitle")}</title>
       </Head>
-      <UsageScreen usage={usage} onRetry={usage.reload} />
+      <UsageScreen usage={usage} report={report} onRetry={usage.reload} />
     </>
   );
 }

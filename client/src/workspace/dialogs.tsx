@@ -11,12 +11,18 @@ export type NewTaskDialogProps = {
   busy: boolean;
   /** Why the task could not be started, in the server's words: a limit reached, most often. */
   error: string | null;
+  /** A task: the agent starts on what was asked. */
   onStart: (prompt: string, environmentId: string) => void;
+  /** A desktop with nothing asked of the agent: the person works on it themselves, and the agent is there when they write to it. */
+  onOpen: (environmentId: string) => void;
   onClose: () => void;
 };
 
-/** Starting a task: what the agent should do, and the environment its desktop comes from. */
-export function NewTaskDialog({ environments, busy, error, onStart, onClose }: NewTaskDialogProps) {
+/**
+ * Starting work on a new desktop, one of two ways from the same form: a task, where the agent starts on what
+ * the person wrote, or the desktop alone, opened for the person to work on.
+ */
+export function NewTaskDialog({ environments, busy, error, onStart, onOpen, onClose }: NewTaskDialogProps) {
   const t = useT("workspace");
   const common = useT("common");
   const [prompt, setPrompt] = useState("");
@@ -25,6 +31,8 @@ export function NewTaskDialog({ environments, busy, error, onStart, onClose }: N
   const start = () => {
     if (ready) onStart(prompt.trim(), environmentId);
   };
+  // Which of the two buttons was pressed, so only that one shows it is working.
+  const [opening, setOpening] = useState(false);
   return (
     <Dialog
       title={t("newTask.title")}
@@ -33,7 +41,25 @@ export function NewTaskDialog({ environments, busy, error, onStart, onClose }: N
       footer={
         <>
           <Button label={common("actions.cancel")} onClick={onClose} />
-          <Button label={t("newTask.start")} tone="primary" busy={busy} disabled={!ready} onClick={start} />
+          <Button
+            label={t("newTask.open")}
+            busy={busy && opening}
+            disabled={environmentId.length === 0 || (busy && !opening)}
+            onClick={() => {
+              setOpening(true);
+              onOpen(environmentId);
+            }}
+          />
+          <Button
+            label={t("newTask.start")}
+            tone="primary"
+            busy={busy && !opening}
+            disabled={!ready || (busy && opening)}
+            onClick={() => {
+              setOpening(false);
+              start();
+            }}
+          />
         </>
       }
     >
@@ -48,6 +74,7 @@ export function NewTaskDialog({ environments, busy, error, onStart, onClose }: N
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) start();
         }}
       />
+      <p className="text-[13px] leading-relaxed text-muted-foreground">{t("newTask.openHint")}</p>
       {environments.length === 0 ? (
         <ErrorNote message={t("newTask.noEnvironments")} />
       ) : (

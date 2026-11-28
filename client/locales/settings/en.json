@@ -164,9 +164,9 @@
     "title": "Usage",
     "subtitle": "What this team has used since {date}.",
     "models": {
-      "title": "Models",
+      "title": "AI allowance",
       "spent": "{spent} of {allowance} used",
-      "body": "What the team's agents have spent on AI models this month. When the allowance is used up, agents stop until next month or until it is raised.",
+      "body": "What the team has spent on AI models this month, by Workstream's agent and by any tool on a desktop. When the allowance is used up, they stop until next month or until it is raised.",
       "left": "{left} left"
     },
     "desktops": {
@@ -212,6 +212,67 @@
       "title": "iPhone builds",
       "minutes": "{minutes, plural, one {# minute on a Mac} other {# minutes on a Mac}}",
       "body": "An iPhone app is built on a Mac, which a desktop asks for when its native code has changed. A change to JavaScript alone uses the build your team already has."
+    },
+    "calls": "{count, plural, one {# call} other {# calls}}",
+    "days": {
+      "title": "AI use day by day",
+      "total": "{cost} in {calls, plural, one {# call} other {# calls}}",
+      "day": "{date}: {cost} in {calls, plural, one {# call} other {# calls}}",
+      "empty": "No AI model has been used this month.",
+      "bodyEveryone": "Every call to an AI model from one of the team's desktops, whichever tool made it. Workstream keeps each call's size and cost, and never what was sent or answered. Days are counted in UTC.",
+      "bodyOwn": "Every call to an AI model from a desktop of a task you started. Workstream keeps each call's size and cost, and never what was sent or answered. A team administrator sees everyone's."
+    },
+    "people": {
+      "title": "People",
+      "titleOwn": "Your use",
+      "person": "Person",
+      "tasks": "Tasks",
+      "hours": "Desktop time",
+      "calls": "AI calls",
+      "cost": "AI cost",
+      "taskCount": "{count, plural, one {# task} other {# tasks}}",
+      "unknown": "Not known",
+      "empty": "Nobody has used a desktop this month.",
+      "body": "A desktop's time and its AI calls count to the person who started the task, whoever else used the desktop.",
+      "bodyOwn": "The tasks you started this month: their desktops' time and their AI calls."
+    },
+    "tools": {
+      "title": "Tools",
+      "tool": "Tool",
+      "calls": "Calls",
+      "cost": "Cost",
+      "names": {
+        "workstream": "Workstream agent",
+        "opencode": "OpenCode",
+        "claude-cli": "Claude Code",
+        "other": "Another tool"
+      },
+      "about": {
+        "workstream": "The agent you write to beside a desktop.",
+        "opencode": "OpenCode in a desktop's terminal.",
+        "claude-cli": "Claude Code in a desktop's terminal.",
+        "other": "A program on a desktop that called the team's models."
+      },
+      "body": "Which program made the calls. Every tool on a desktop reaches the same models through Workstream, so they are counted the same way."
+    },
+    "modelsUsed": {
+      "title": "Models",
+      "model": "Model",
+      "sent": "Sent",
+      "answered": "Answered",
+      "calls": "Calls",
+      "cost": "Cost",
+      "tokens": "{amount} tokens",
+      "body": "Sent is everything a call gave the model, most of it read from the cache at a lower price. Answered is what the model wrote."
+    },
+    "tasks": {
+      "title": "Tasks that used most",
+      "task": "Task",
+      "calls": "Calls",
+      "cost": "Cost",
+      "by": "Started by {name}",
+      "deleted": "A deleted task",
+      "body": "The ten tasks whose AI calls cost most this month."
     }
   }
 }

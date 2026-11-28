@@ -132,6 +132,16 @@ export function TeamShellController({ teamId, children }: { teamId: string; chil
               show(withTask(place === "tasks" ? open : [], task.id, null));
             })
           }
+          onOpen={(environmentId) =>
+            void starting.run(async () => {
+              // A desktop with nothing asked of its agent, named for what it comes with until the person renames it.
+              const title = environments.value.find((environment) => environment.id === environmentId)?.name;
+              const task = await workstream.startTask(teamId, { id: newId(), environmentId, title });
+              setDialog(null);
+              tasks.refresh();
+              show(withTask(place === "tasks" ? open : [], task.id, null));
+            })
+          }
         />
       ) : null}
       {dialog === "team" ? (
