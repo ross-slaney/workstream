@@ -9,7 +9,9 @@ This document defines who can do what to what. It is written in SqlOS terms firs
 | Word | Meaning |
 | --- | --- |
 | Team | A group of people who share tasks and environments. A person who signs up gets a team of their own. Someone who creates their account from an invitation joins that team and gets none of their own. Anyone can create another. |
-| Environment | What a desktop comes with: its apps and, optionally, a repository, a setup script, variables and instructions for the agent. |
+| Environment | What a desktop comes with: its surfaces and applications and, optionally, a repository, a setup script, variables and instructions for the agent. |
+| Surface | Where the product being worked on runs, and where the person and the agent see it and use it: the browser, an Android phone, an iPhone. |
+| Application | What the person and the agent work with on a desktop: the editor, a terminal, the file manager, the office programs. |
 | Saved setup | An environment's repository cloned and setup script run once, on a machine made only for that, whose disk is kept. A task's desktop starts from it with the setup already done. |
 | Task | One piece of work. It has a desktop and a conversation with the agent on that desktop. |
 | Desktop | The task's cloud computer: a Linux virtual machine with a graphical desktop. |
@@ -20,7 +22,7 @@ This document defines who can do what to what. It is written in SqlOS terms firs
 | Build | A project's iPhone app, built on a Mac because a desktop cannot build one. A desktop asks for the build of the native code it has, and the team keeps one build for each. |
 | Message | One entry in a task's conversation, written by a person or by the agent. |
 | Share | One task given to a person outside its team: to watch it, to write to its agent too, or to use its desktop as well, for a while or until it is taken back. |
-| workstream.yml | A file at the root of an environment's repository that holds the environment's size, apps, setup script, variable names and instructions. An environment filled from it, or saved to it, follows it. |
+| workstream.yml | A file at the root of an environment's repository that holds the environment's size, surfaces, applications, setup script, variable names and instructions. An environment filled from it, or saved to it, follows it. |
 
 ## Principals: who
 
@@ -168,7 +170,7 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | Table | Holds | Why it is app data |
 | --- | --- | --- |
 | `Teams` | The node, the month's model allowance, the limit on running desktops, and when the team's desktops are paused (minutes without use) and archived (days paused). | Limits and settings are numbers, not access. |
-| `Environments` | Name, apps, size, repository, setup script, instructions, protected variables, and `SetupInputs`: a SHA-256 of the repository, branch, script, variables, apps and size, written where the environment is written, because that is the one place the variables are readable. `FromFile`: its settings are its repository's workstream.yml. `ChangedBy`: who last saved its settings (a principal id, a fact), whose GitHub token the machine preparing it uses. | Configuration. |
+| `Environments` | Name, `Apps` (the ids of its surfaces and applications in one list, surfaces first; which of the two an id is comes from the catalog, `desktop/apps.json`), size, repository, setup script, instructions, protected variables, and `SetupInputs`: a SHA-256 of the repository, branch, script, variables, surfaces and applications, and size, written where the environment is written, because that is the one place the variables are readable. `FromFile`: its settings are its repository's workstream.yml. `ChangedBy`: who last saved its settings (a principal id, a fact), whose GitHub token the machine preparing it uses. | Configuration. |
 | `EnvironmentSetups` | An environment's saved setup (the snapshot's name, the inputs and image version it was made for, its commit, its size, when it was made and last used) and the attempt to prepare it in progress or how the last one failed. One row an environment, deleted with it. | The operator's stock and a lifecycle, like `Spares`: nobody is granted on it, and seeing it is seeing the environment. |
 | `Tasks` | Title, environment, who created it (a principal id, a fact), the desktop's state and address, when it was last used, how much is on its disk, the disk it is paused on once its machine is given up (`Disk`), its archive's name and size (`Archive`, `ArchiveBytes`) while it has one, when it last emailed its people. | The desktop's lifecycle. |
 | `TaskSetups` | The environment's setup script as it ran on a task's own desktop: running, done, failed or stopped for running too long, its exit code, the last lines it wrote, when, and the limit it ran under. One row a task that ran one, deleted with it. | A lifecycle and content of the task's, like its desktop's state: it is read with the task's conversation after `TASK_VIEW`, and written only by the task's own desktop (`TASK_RUN_AGENT`). |
@@ -231,7 +233,7 @@ The limits are settings (`Workstream:Desktops:Spares`): one spare a team, so man
 
 ### Prepare an environment
 
-Cloning a repository and running a setup script can take minutes on every new desktop. An environment with a repository, a setup script or the iPhone among its apps (whose simulator takes twenty minutes to install) is prepared instead: the setup is done once, on a machine of its own, and that machine's disk is saved for the environment's tasks to start from.
+Cloning a repository and running a setup script can take minutes on every new desktop. An environment with a repository, a setup script or the iPhone among its surfaces (whose simulator takes twenty minutes to install) is prepared instead: the setup is done once, on a machine of its own, and that machine's disk is saved for the environment's tasks to start from.
 
 1. Something asks for it: the environment is added with a setup, or its setup inputs change; someone presses "Prepare again" (`POST /api/environments/{id}/setup`, `ENVIRONMENT_EDIT`); or a task starts and finds no save it can use (it is not asked again for settings whose last attempt failed), or finds one older than a week (the task uses the old one, and the new one is made behind it).
 2. The operator (`ENVIRONMENT_OPERATE_SETUP` on the environment) makes a machine when the limits allow (`Workstream:Desktops:Saves`: one preparing at once, four hours of preparing a day, each attempt as long as the setup script may run and half an hour more). The machine is told the API's address and a new key for the environment's preparing account, which holds `environment_setup` on the environment and nothing else. Its time is a `DesktopRun` with the purpose `prepare`.
@@ -337,7 +339,9 @@ Picking a repository reads its workstream.yml on the branch (below), which fills
 
 ### workstream.yml
 
-An environment can live in its repository as `workstream.yml` at the root of its branch: `size`, `setup`, `apps`, `variables` (names only) and `instructions`, each optional (`api/Domain/WorkstreamFile.cs`). It is read strictly: an unknown setting, size or app, a variable name a shell cannot read, or YAML that does not parse is an error with its line, and nothing is taken from it.
+An environment can live in its repository as `workstream.yml` at the root of its branch: `size`, `setup`, `surfaces`, `apps`, `variables` (names only) and `instructions`, each optional (`api/Domain/WorkstreamFile.cs`). It is read strictly: an unknown setting, size, surface or application, an application listed under `surfaces`, a variable name a shell cannot read, or YAML that does not parse is an error with its line, and nothing is taken from it.
+
+`surfaces` lists where the product runs (`chrome`, `android`, `iphone`) and `apps` lists what the person and the agent work with. The catalog (`desktop/apps.json`) says which each id is, and the environment keeps both in its one list, surfaces first. A list the file leaves out is its default: `chrome` for `surfaces`, and the default applications for `apps`. An empty list is none. A file written before the two were told apart names its surfaces under `apps`, where they still count as surfaces, so it gives the same desktop as before. The file Workstream writes always has both lists.
 
 - **Reading.** `GET /api/github/repositories/{owner}/{name}/workstream-file?branch=` answers whether it is there and its settings or errors. A form filled from it saves the environment with `FromFile`.
 - **Following.** Each task's start on an environment with `FromFile` reads the file again from GitHub, as the person starting the task, for up to eight seconds. What it says now becomes the environment's size, apps, setup script and instructions before anything is decided from them (a spare, a saved setup), so the repository stays where the environment is defined. Its variables stay as they are, since their values live here. When the person has no token, GitHub does not answer, or the file is gone or not valid, the task starts with what the environment holds. A person who changes in the form what the file decides turns `FromFile` off.
