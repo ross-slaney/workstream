@@ -386,3 +386,70 @@ test("a reading that cannot be relied on is not read again to look for a field b
   assert.equal(phone.looks(), 0);
   assert.ok(Date.now() - started < 2000);
 });
+
+test("a phone that can say no field has the keyboard is asked first, and nothing is typed when none has", async () => {
+  const phone = pretend({ needsField: true });
+  let asked = 0;
+  phone.device.takes = () => (asked++, false);
+  const { status, text } = await printed(() => typeText(phone.device, "Wipe the counters\n"));
+  assert.equal(status, 1);
+  assert.deepEqual(phone.sent, []);
+  assert.ok(asked > 1, "asked again before it is believed");
+  assert.match(text, /No field on the pretend phone has the keyboard, so nothing was typed\./);
+  assert.match(text, /one reloads the app, which looks like a freeze/);
+});
+
+test("the keyboard that comes up a moment after the tap is waited for", async () => {
+  const phone = pretend({ needsField: true });
+  let asked = 0;
+  phone.device.takes = () => ++asked >= 3;
+  const { status } = await printed(() => typeText(phone.device, "Wipe the counters"));
+  assert.equal(status, 0);
+  assert.deepEqual(phone.sent, [["type", "Wipe the counters"]]);
+});
+
+test("an app that is not answering is not typed into blind when no field takes the text", async () => {
+  const phone = pretend({ fields: [], needsField: true });
+  const look = phone.device.look;
+  phone.device.look = () => ({ ...look(), screen: "app pretend (not answering yet: starting or busy; snapshot again in a moment)", unread: "the app in front is not answering it: it is starting, or busy" });
+  phone.device.picture = () => null;
+  phone.device.takes = () => false;
+  const { status, text } = await printed(() => typeText(phone.device, "counters"));
+  assert.equal(status, 1);
+  assert.deepEqual(phone.sent, []);
+  assert.match(text, /has the keyboard, or the app is not answering, so nothing was typed/);
+});
+
+test("fill presses delete once to learn whether grey words are the field's own, and then no more", async () => {
+  const phone = pretend({ fields: [{ ref: "e2", role: "textfield", label: "Work email", value: "you@company.com", x: 10, y: 10, frame: [0, 0, 20, 20] }], needsField: true });
+  const erased = [];
+  phone.device.tapAt = () => 0;
+  phone.device.erase = (count) => (erased.push(count), 0);
+  phone.device.takes = () => true;
+  const { status } = await printed(() => fill(phone.device, ["Work email"], "ada@example.test"));
+  assert.equal(status, 0);
+  assert.deepEqual(erased, [1]);
+  assert.deepEqual(phone.sent, [["type", "ada@example.test"]]);
+});
+
+test("fill deletes typed text with one press and then exactly as many as the letters left", async () => {
+  const phone = pretend({ fields: [{ ref: "e2", role: "textfield", label: "Name", value: "Grace", x: 10, y: 10, frame: [0, 0, 20, 20] }], needsField: true });
+  let value = "Grace";
+  const erased = [];
+  const look = phone.device.look;
+  phone.device.look = () => {
+    const seen = look();
+    return { ...seen, fields: seen.fields.map((field) => ({ ...field, value: phone.sent.length ? field.value : value })) };
+  };
+  phone.device.tapAt = () => 0;
+  phone.device.erase = (count) => {
+    erased.push(count);
+    value = value.slice(0, Math.max(0, value.length - count)) || "Name";
+    return 0;
+  };
+  phone.device.takes = () => true;
+  const { status } = await printed(() => fill(phone.device, ["Name"], "Ada"));
+  assert.equal(status, 0);
+  assert.deepEqual(erased, [1, 4]);
+  assert.deepEqual(phone.sent, [["type", "Ada"]]);
+});
