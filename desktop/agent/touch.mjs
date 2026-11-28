@@ -89,6 +89,13 @@ export function iphone(env) {
     tap: (words) => shown(["tap", ...words]),
     tapAt: (x, y) => sim(["tap", String(Math.round(x)), String(Math.round(y))]).status ?? 1,
     type: (text) => sim(["type", text]).status ?? 1,
+    // Whether a field would take text typed now. agent-sim puts text into the field that has the keyboard, and
+    // when no field has it, or the app is not answering, it presses the letters as keys instead and says so.
+    // Typing nothing asks the same question without pressing a key.
+    takes: () => {
+      const asked = sim(["type", ""]);
+      return asked.status === 0 && !/as key presses/i.test(`${asked.stdout ?? ""}${asked.stderr ?? ""}`);
+    },
     // Return as a key of its own. Sent in the same call as text, agent-sim types the whole text as key presses.
     enter: () => sim(["type", "--keys", "\n"]).status ?? 1,
     erase: (count) => sim(["type", "--keys", BACKSPACE.repeat(count)]).status ?? 1,
@@ -424,9 +431,27 @@ export async function lookFor(device, wanted, { patience = device.patience ?? 50
   return seen;
 }
 
+/** Whether a field takes text now, asked for up to three seconds. */
+async function taken(device, { limit = device.patience ?? 3000 } = {}) {
+  const started = Date.now();
+  for (;;) {
+    if (device.takes()) return true;
+    if (Date.now() - started >= limit) return false;
+    await sleep(device.every);
+  }
+}
+
 export async function typeText(device, text, first = device.look(), { exact = false } = {}) {
   const body = text.replace(/\n+$/, "");
   const sends = body !== text;
+  // A phone that can say whether a field would take the text is asked first. The keyboard comes up a moment
+  // after a tap, so it is asked for a few seconds before the answer is believed.
+  if (body && device.takes && !(await taken(device))) {
+    out(`No field on the ${device.name} has the keyboard${first.unread ? ", or the app is not answering" : ""}, so nothing was typed. Text typed now would reach the app as key presses, and a development build takes some letters as shortcuts: one reloads the app, which looks like a freeze. Tap the field, then type again.`);
+    const why = doubt(first);
+    if (why) await pictured(device, why);
+    return 1;
+  }
   // No field in the reading may be a reading taken too soon: look again before believing it.
   // (A reading that cannot be relied on is not waited on: it is not going to list the field.)
   if (device.needsField && body && first.fields.length === 0 && !doubt(first)) first = await lookFor(device, (seen) => seen.fields.length > 0);
@@ -519,11 +544,14 @@ export async function fill(device, words, text) {
   seen = await lookFor(device, (read) => read.fields.length > 0);
   // Delete what it holds until a reading says it holds nothing. Words that do not go when they are deleted
   // are the field's own, shown while it is empty (screen.mjs, held).
+  // One press first: grey words that stay are the field's own, and the field was empty all along. Then as many
+  // presses as there are letters and no more. In one app a press on an empty field closed the field, and the
+  // text that followed had no field to go to.
   let own = false;
-  for (let round = 0; round < 4 && !own && here() && held(here()); round++) {
+  for (let round = 0; round < 5 && !own && here() && held(here()); round++) {
     const value = held(here());
     if (round > 0) tapEnd();
-    device.erase([...value].length + 2);
+    device.erase(round === 0 ? 1 : [...value].length);
     const erased = await settle(async () => {
       seen = device.look();
       return here() ? held(here()) : "";
