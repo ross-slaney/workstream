@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Workstream.Api;
 using Workstream.Api.Desktops;
+using Workstream.Api.Domain;
 
 namespace Workstream.Tests;
 
@@ -70,6 +71,44 @@ public sealed class TaskJourneys
 
         await ada.PostAsync($"/api/tasks/{task.Id}/messages", new Say("  ", Guid.NewGuid().ToString("D"))).IsAsync(HttpStatusCode.BadRequest);
         Assert.AreEqual("Heading check", (await ada.PutAsync<TaskDto>($"/api/tasks/{task.Id}", new RenameTask("Heading check"))).Title);
+    }
+
+    [TestMethod]
+    public async Task The_task_says_which_command_the_agent_is_running_and_since_when()
+    {
+        var (ada, team, environment) = await TeamAsync();
+        var task = await StartAsync(ada, team.Id, environment);
+        using var desktop = await Desktop.StartAsync(task.Id);
+        await desktop.ExchangeAsync(working: true);
+        Assert.IsNull((await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running);
+
+        // A build that has run for ten minutes: the start is counted back from the API's clock.
+        var before = DateTimeOffset.UtcNow;
+        await desktop.ExchangeRunningAsync("./gradlew assembleDebug", 600);
+        var running = (await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running!;
+        Assert.AreEqual("./gradlew assembleDebug", running.Text);
+        Assert.IsTrue((before - running.Since - TimeSpan.FromSeconds(600)).Duration() < TimeSpan.FromSeconds(5), $"Started {running.Since}, asked at {before}.");
+
+        // The same command a moment later keeps its start; a count that has moved away replaces it.
+        await desktop.ExchangeRunningAsync("./gradlew assembleDebug", 602);
+        Assert.AreEqual(running.Since, (await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running!.Since);
+        await desktop.ExchangeRunningAsync("./gradlew assembleDebug", 30);
+        Assert.IsTrue((await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running!.Since > running.Since.AddMinutes(5));
+
+        // A long command is cut to what the row holds, and a teammate reads the same.
+        await desktop.ExchangeRunningAsync(new string('x', 500), 1);
+        Assert.AreEqual(WorkTask.MaxRunningLength, (await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running!.Text.Length);
+
+        // Between commands, and when the agent has finished, nothing is said to be running.
+        await desktop.ExchangeAsync(working: true);
+        Assert.IsNull((await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running);
+        await desktop.ExchangeRunningAsync("npm test", 3);
+        await desktop.ExchangeRunningAsync("npm test", 4, working: false);
+        Assert.IsNull((await ada.GetAsync<TaskDto>($"/api/tasks/{task.Id}")).Running);
+
+        // A stranger reads none of it.
+        var (grace, _) = await Person.WithTeamAsync("Grace Hopper");
+        await grace.GetAsync($"/api/tasks/{task.Id}").IsAsync(HttpStatusCode.NotFound);
     }
 
     [TestMethod]

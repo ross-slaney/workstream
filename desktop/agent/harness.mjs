@@ -10,6 +10,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, spoken } from "./describe.mjs";
 import { newTurn, note, owed } from "./handover.mjs";
 import { noteBackground, noteFile } from "./restore.mjs";
+import { ended, longest, newRunning, started } from "./running.mjs";
 import { noSetup, projectTools, projectWork, setupEnded } from "./instructions.mjs";
 import { front } from "./surfaces.mjs";
 import { desktopTools } from "./tools.mjs";
@@ -69,12 +70,14 @@ const longCommands = { BASH_DEFAULT_TIMEOUT_MS: String(10 * 60_000), BASH_MAX_TI
  * @param {{ take(signal: AbortSignal): Promise<string>, size: number }} with.prompts
  * @param {() => Promise<void>} with.browserReady  Resolves when the desktop's browser can be driven.
  * @param {(...args: unknown[]) => void} with.log
- * @returns {{ interrupt(): void }}
+ * @returns {{ interrupt(): void, running(): { text: string, seconds: number } | null }}
  */
 export function startHarness({ setup, key, workspace, state, saveState, say, setWorking, prompts, browserReady, log, restored = null, setupResult = null }) {
   let current = null;
   // Which surfaces this turn used and has not shown the person yet (handover.mjs).
   let turn = newTurn();
+  // The tool calls under way, for whoever watches to see what is running and for how long (running.mjs).
+  const running = newRunning();
 
   // gh's wrapper first on the PATH (shims/gh), so the agent's gh signs itself in.
   const environment = { ...process.env, PATH: `${path.join(here, "shims")}:${process.env.PATH}`, ...setup.variables, ...modelEnvironment(setup, key), ...longCommands };
@@ -100,9 +103,10 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     hooks: {
       // What the agent is working in is what the person sees: the browser comes to the front when the agent
       // uses it, and a file the agent changes opens in the editor.
-      PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [showBrowser] }],
+      PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [showBrowser] }, { hooks: [callStarted] }],
       // And what is left running, and open, is kept to bring back after a stop (restore.mjs).
-      PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }, { matcher: "Bash", hooks: [keepBackground] }],
+      PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [showInEditor] }, { matcher: "Bash", hooks: [keepBackground] }, { hooks: [callEnded] }],
+      PostToolUseFailure: [{ hooks: [callEnded] }],
       // And a turn that used a surface ends with a picture of each in the conversation.
       Stop: [{ hooks: [handOver] }],
     },
@@ -136,6 +140,17 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     return {};
   }
 
+  /** A tool call starts, and ends: what is under way is what the watcher is told is running. */
+  async function callStarted(input, toolUseId) {
+    started(running, toolUseId ?? input.tool_use_id, input.tool_name, input.tool_input);
+    return {};
+  }
+
+  async function callEnded(input, toolUseId) {
+    ended(running, toolUseId ?? input.tool_use_id);
+    return {};
+  }
+
   /**
    * When the agent goes to stop: if it used a surface and has not shown the surfaces since, it is asked to,
    * once a turn. `stop_hook_active` says this stop already follows such an ask.
@@ -162,6 +177,7 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
       for await (const message of current) await heard(message);
     } finally {
       current = null;
+      running.clear();
       // Whatever prompt the stream was waiting for goes back to the queue for the next session.
       ending.abort();
       setWorking(false);
@@ -193,6 +209,8 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
         break;
       case "result":
         if (message.subtype !== "success") say("text", "I had to stop before finishing. Tell me to continue, or what to do instead.");
+        // A turn that was stopped may never say its calls ended.
+        running.clear();
         setWorking(prompts.size > 0);
         break;
     }
@@ -214,5 +232,6 @@ export function startHarness({ setup, key, workspace, state, saveState, say, set
     interrupt() {
       current?.interrupt().catch((error) => log("Interrupt failed:", error));
     },
+    running: () => longest(running),
   };
 }

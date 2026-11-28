@@ -156,6 +156,8 @@ export type Task = {
   size: DesktopSize;
   agentWorking: boolean;
   stateChangedAt: string;
+  /** The command the agent is in the middle of (its first line) and when it started. Null between commands. */
+  running?: { text: string; since: string } | null;
 };
 
 /**

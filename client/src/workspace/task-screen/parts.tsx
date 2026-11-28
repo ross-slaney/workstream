@@ -202,10 +202,13 @@ export function Chat(p: TaskScreenProps) {
       {p.github?.signInNeeded && task ? <GitHubNote github={p.github} onSignIn={p.onSignInWithGitHub} /> : null}
       {p.setup && task ? <SetupNote setup={p.setup} running={settingUp} /> : null}
       {working ? (
-        <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">
-          <Spinner label={t("chat.working")} className="size-3" />
-          <span className="flex-1">{t("chat.working")}</span>
-          {prompts ? <Button label={t("chat.stop")} size="small" tone="quiet" icon={<Square size={11} color={colors.foreground} fill={colors.foreground} />} onClick={p.onInterrupt} /> : null}
+        <div className="flex flex-col gap-0.5 border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Spinner label={t("chat.working")} className="size-3" />
+            <span className="flex-1">{t("chat.working")}</span>
+            {prompts ? <Button label={t("chat.stop")} size="small" tone="quiet" icon={<Square size={11} color={colors.foreground} fill={colors.foreground} />} onClick={p.onInterrupt} /> : null}
+          </div>
+          {task.running ? <RunningNote running={task.running} /> : null}
         </div>
       ) : note ? (
         <p className="border-t border-border px-3 py-1.5 text-[12.5px] text-muted-foreground">{note}</p>
@@ -326,6 +329,36 @@ function SetupNote({ setup, running }: { setup: TaskSetup; running: boolean }) {
       </div>
     </div>
   );
+}
+
+/** A command shows once it has run this long: anything shorter is over before its name could be read. */
+const RUNNING_SHOWS_AFTER = 5;
+
+/**
+ * The command the agent is in the middle of and how long it has run, under "The agent is working". A build
+ * or a first start runs for minutes and may print nothing, and this is what says it is still going.
+ */
+function RunningNote({ running }: { running: { text: string; since: string } }) {
+  const t = useT("workspace");
+  const seconds = useSecondsSince(running.since);
+  if (seconds < RUNNING_SHOWS_AFTER) return null;
+  const elapsed = elapsedOf(seconds);
+  const time = t(elapsed.key, elapsed.values);
+  return (
+    <p aria-label={t("chat.running", { command: running.text, time })} className="flex min-w-0 items-baseline gap-2 pl-5">
+      <code title={running.text} className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{running.text}</code>
+      <span className="shrink-0 tabular-nums">{time}</span>
+    </p>
+  );
+}
+
+/** How long something has run, as a person reads it: seconds under a minute, then minutes, then hours and minutes. */
+export function elapsedOf(seconds: number) {
+  if (seconds < 60) return { key: "chat.runningSeconds", values: { seconds } } as const;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60
+    ? ({ key: "chat.runningMinutes", values: { minutes } } as const)
+    : ({ key: "chat.runningHours", values: { hours: Math.floor(minutes / 60), minutes: minutes % 60 } } as const);
 }
 
 /**
