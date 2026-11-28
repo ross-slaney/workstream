@@ -74,6 +74,88 @@ export function ChartCard({ overview }: { overview: AdminOverview }) {
 const cell = "px-3 py-2 text-sm text-foreground";
 const head = "px-3 py-2 text-left text-[12.5px] font-medium text-muted-foreground";
 
+const TOOL: Record<string, string> = { workstream: "Workstream agent", opencode: "OpenCode", "claude-cli": "Claude Code", other: "Another tool" };
+
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+/**
+ * Every team's model calls this month: by the tool that made them, by the model that answered, and the
+ * people whose calls cost most. Workstream pays for every call, so this is where it watches them. Narrow
+ * enough for a phone, so both surfaces draw it the same.
+ */
+export function ModelsCard({ overview }: { overview: AdminOverview }) {
+  const models = overview.models;
+  if (!models) return null;
+  return (
+    <Card title="AI use" note={`${models.calls.toLocaleString("en-US")} ${models.calls === 1 ? "call" : "calls"} this month, ${dollars(overview.modelSpentUsd)}`}>
+      {models.calls === 0 ? (
+        <p className="py-2 text-sm text-muted-foreground">No model has been called this month.</p>
+      ) : (
+        <>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-border">
+                <th scope="col" className={head}>Tool</th>
+                <th scope="col" className={`${head} text-right`}>Calls</th>
+                <th scope="col" className={`${head} text-right`}>Cost</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {models.tools.map((line) => (
+                <tr key={line.tool}>
+                  <td className={cell}>{TOOL[line.tool] ?? line.tool}</td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{line.calls.toLocaleString("en-US")}</td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{dollars(line.costUsd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-border">
+                <th scope="col" className={head}>Model</th>
+                <th scope="col" className={`${head} text-right`}>Tokens sent</th>
+                <th scope="col" className={`${head} text-right`}>Answered</th>
+                <th scope="col" className={`${head} text-right`}>Cost</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {models.models.map((line) => (
+                <tr key={line.model}>
+                  <td className={cell}>{line.model}</td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{compact.format(line.inputTokens)}</td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{compact.format(line.outputTokens)}</td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{dollars(line.costUsd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-border">
+                <th scope="col" className={head}>People who used most</th>
+                <th scope="col" className={`${head} text-right`}>Calls</th>
+                <th scope="col" className={`${head} text-right`}>Cost</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {models.people.map((line, index) => (
+                <tr key={index}>
+                  <td className={cell}>
+                    {line.name || "Not known"}, <span className="text-muted-foreground">{line.teamName}</span>
+                  </td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{line.calls.toLocaleString("en-US")}</td>
+                  <td className={`${cell} whitespace-nowrap text-right tabular-nums`}>{dollars(line.costUsd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </Card>
+  );
+}
+
 const PURPOSE: Record<string, string> = { task: "Tasks' desktops", spare: "Spares", prepare: "Preparing environments" };
 const KIND: Record<string, string> = { disk: "Desktops' disks", archive: "Archived tasks", setup: "Saved setups" };
 

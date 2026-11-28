@@ -71,7 +71,8 @@ Each permission is checked on a node of its own type. Creates check the parent.
 | --- | --- | --- |
 | `ADMIN_VIEW` | root | The system administrator's dashboard, and changing a team's limits. |
 | `TEAM_VIEW` | team | See the team, its people and its limits. |
-| `TEAM_VIEW_USAGE` | team | See what the team used this month: models, desktop hours by size, storage by kind. |
+| `TEAM_VIEW_USAGE` | team | See what the team used this month: models, desktop hours by size, storage by kind. And one's own model use and desktop time. |
+| `TEAM_VIEW_PEOPLE_USAGE` | team | See what each person in the team used this month: their tasks, desktop hours and model calls. |
 | `TEAM_MANAGE_MEMBERS` | team | Invite, remove and change people. |
 | `TEAM_MANAGE_SETTINGS` | team | Rename the team; change when its desktops are paused and archived. |
 | `TEAM_CREATE_ENVIRONMENT` | team | Add an environment. |
@@ -105,11 +106,11 @@ A scope is the client's ceiling, not a decision about a node: a token without a 
 
 | Role | Granted on | To | Carries |
 | --- | --- | --- | --- |
-| `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits. Nothing inside a team. |
+| `system_admin` | root | `group::system_admins` | `ADMIN_VIEW`: the dashboard's numbers and every team's limits, and what every team's model calls cost by tool, by model and by person, because Workstream pays for them. Nothing else inside a team. |
 | `desktop_operator` | root | `agent::desktop-operator` | `TASK_OPERATE_DESKTOP`, `TEAM_OPERATE_SPARE`, `ENVIRONMENT_OPERATE_SETUP`, `TEAM_OPERATE_BUILD` |
 | `task_notifier` | root | `agent::task-notifier` | `TASK_NOTIFY` |
 | `team_member` | team | the team's group | `TEAM_VIEW`, `TEAM_VIEW_USAGE`, `TEAM_CREATE_ENVIRONMENT`, `TEAM_CREATE_TASK`, `ENVIRONMENT_VIEW`, `ENVIRONMENT_EDIT`, `TASK_VIEW`, `TASK_PROMPT`, `TASK_DRIVE`, `TASK_MANAGE` |
-| `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS` |
+| `team_admin` | team | whoever created the team, and anyone an administrator promotes | `TEAM_MANAGE_MEMBERS`, `TEAM_MANAGE_SETTINGS`, `TEAM_VIEW_PEOPLE_USAGE` |
 | `task_desktop` | task | the desktop that works on the task | `TASK_RUN_AGENT` |
 | `environment_setup` | environment | the environment's preparing account | `ENVIRONMENT_RUN_SETUP` |
 | `app_builder` | root | the Mac that builds iPhone apps | `TEAM_RUN_BUILD`: the source of any team's build while it is being built, and nothing else of any team. |
@@ -176,10 +177,10 @@ A team's people and its pending invitations are SqlOS's own rows, read after one
 | `TaskSetups` | The environment's setup script as it ran on a task's own desktop: running, done, failed or stopped for running too long, its exit code, the last lines it wrote, when, and the limit it ran under. One row a task that ran one, deleted with it. | A lifecycle and content of the task's, like its desktop's state: it is read with the task's conversation after `TASK_VIEW`, and written only by the task's own desktop (`TASK_RUN_AGENT`). |
 | `TaskMessages` | The conversation: what was said, what the agent did, and the pictures its desktop took. | Content. A picture's bytes are a file kept beside the builds' files (`IBuildFiles`, `pictures/{taskId}/{key}.jpg`), deleted with its message. |
 | `TaskInvitations` | A task shared with an address that has no account yet: the address, the role and end it will be granted with, who shared it, the hash of the link's token, and when the link stops working (a week, or sooner if the access ends sooner). | There is no principal to grant yet. SqlOS's invitations are memberships of an organization, and this person is not joining the team, so the grant waits here until they take the link; then it is a grant and the row is gone. If SqlOS gains an invitation to a role on a node, this table goes. |
-| `DesktopRuns` | When each machine ran, at which size, what for (a task's desktop, a spare, a machine preparing an environment), what a task's start began from (the image, a saved setup, a spare, its own paused machine, its archive), and when each step of it happened. | Usage, cost, and how long starts take. |
+| `DesktopRuns` | When each machine ran, at which size, what for (a task's desktop, a spare, a machine preparing an environment), for a task's desktop who started the task (`UserId`, a fact, so desktop hours by person outlive the task), what a task's start began from (the image, a saved setup, a spare, its own paused machine, its archive), and when each step of it happened. | Usage, cost, and how long starts take. |
 | `StorageRuns` | Each stretch of a team keeping something at one size: the kind (`disk`, `archive`, `setup`), the task or environment it belongs to, the gigabytes, and when it began and ended. | Usage and cost, like `DesktopRuns`. It relates a team to an amount, not a principal to a node, and is derived: a job makes the open rows agree with what the tasks and environments say is kept, so nothing else writes them. |
 | `Spares` | A team's spare: the machine, its size, when someone last wanted it. | The operator's stock, which nobody is granted on. It relates a team to a machine, not a principal to a node. |
-| `ModelUsage` | Tokens and cost of each model call an agent makes. | Usage. |
+| `ModelUsage` | Tokens and cost of each model call made from a task's desktop, with the model, the tool that made it (`workstream` for Workstream's agent, otherwise what a tool on the desktop called itself, such as `opencode`), the task, and `UserId`: the person who started the task, a fact written with the call so that usage by person outlives the task. Never a request's or an answer's words. | Usage. `UserId` is who did it, a principal id, and grants nothing. |
 | `PersonSettings` | A person's own settings, one row by their user id: whether task emails reach them. No row is every default. | A preference, not access. It relates the person to nothing in the tree; it is read and changed only by the person it belongs to, found by the id in their token, so there is nothing to check. |
 | `TaskWatchers` | When each person last had a task's desktop on screen, one row a person a task. Removed with the task. | A fact about what someone did, like `Tasks.CreatedBy`, and never a permission: whether they may watch is `TASK_VIEW`. It is read only to keep from emailing someone about the task they are looking at. |
 | `Builds` | A team's builds of its iPhone apps: the hash of the native code it is a build of, the app's folder inside the source, the task whose desktop asked first (a fact), where it stands (waiting for its source, queued, building, done, failed), why it failed, the app's bundle identifier and size, when it was asked for, taken and ended, how long the Mac had it, and when a desktop last took the app. One row a team a hash. | A lifecycle and usage, like `EnvironmentSetups` and `DesktopRuns`. Nobody is granted on a build: it relates a team to an app, and a desktop reaches it through the one task it holds `task_desktop` on. The source, the app and the log are files in the deployment's own storage, under the team's id. |
@@ -213,7 +214,7 @@ The system administrator is the one address the deployment names (`Workstream:Ad
 
 ### Start a task
 
-1. The person picks a team and an environment and writes what they want done.
+1. The person picks a team and an environment and writes what they want done. Or they write nothing and open the desktop to work on it themselves: the same task with no first message, named for its environment, whose agent waits until someone writes to it.
 2. The API checks `TEAM_CREATE_TASK` on the team and `ENVIRONMENT_VIEW` on the environment, and refuses if the team already runs as many desktops as its limit allows.
 3. It saves the task (desktop state `starting`) and the first message, and queues the start job.
 4. The job, as `agent::desktop-operator`, provisions the desktop's service account, grants it `task_desktop`, and asks the desktop host for a machine carrying two values: the API's address and the desktop's key.
@@ -351,7 +352,7 @@ An environment can live in its repository as `workstream.yml` at the root of its
 
 A team has a model allowance for the calendar month and a limit on desktops running at once; a paused or archived desktop is not running, and resuming one counts against the limit like starting one. People on the team see what was used this month (`GET /api/teams/{id}/usage`, `TEAM_VIEW_USAGE`), in the units a bill would use:
 
-- **Models**: dollars spent against the allowance, from `ModelUsage`.
+- **Models**: dollars spent against the allowance, from `ModelUsage`. Who and what used them is a second read (`GET /api/teams/{id}/usage/models`, `TEAM_VIEW_USAGE`): by day, by person with their tasks and desktop hours, by tool, by model, and the ten tasks that cost most. It is the whole team's for someone who holds `TEAM_VIEW_PEOPLE_USAGE` on the team, and the caller's own for anyone else, where a call is a person's by its `UserId` (for a call from before that was kept, by who started its task).
 - **Desktop time**: hours for each size the team's tasks ran on (small, standard, large), from `DesktopRuns` with the purpose `task`. A spare and a machine preparing an environment are Workstream's cost, not the team's. How many are running now is shown beside the limit.
 - **Storage**: GB-months for each kind the team kept, from `StorageRuns`, with the gigabytes kept now.
 - **iPhone builds**: minutes a Mac had the team's builds, from `Builds` (each build's time from when the Mac took its source until it said it was done, counted in the month it ended, whether or not it worked). A team that has had none built does not see the line.

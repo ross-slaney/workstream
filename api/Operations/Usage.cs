@@ -88,11 +88,20 @@ public sealed record MachineCosts(IReadOnlyList<MachineCost> ThisMonth, IReadOnl
 /// <summary>What the Mac that builds iPhone apps cost this month over every team: how many builds ended, their minutes, and those at a Mac minute's price.</summary>
 public sealed record MacCost(int Builds, double Minutes, decimal Usd);
 
+/// <summary>One person's model calls this month, over every team they made them in, with the team.</summary>
+public sealed record AdminPersonUse(string Name, string TeamName, decimal CostUsd, int Calls);
+
+/// <summary>
+/// Every team's model calls this month, as whoever runs Workstream watches them: how many, by which tool and
+/// which model, and the twenty people whose calls cost most. Sizes and costs only: no call's words are kept.
+/// </summary>
+public sealed record AdminModels(int Calls, IReadOnlyList<ToolUse> Tools, IReadOnlyList<ModelUse> Models, IReadOnlyList<AdminPersonUse> People);
+
 /// <summary>The system administrator's page: what is running now, the last day's curve, each team's month, what the desktops cost and how long they take to start.</summary>
 public sealed record AdminOverview(
     int RunningDesktops, int Teams, int People, int Tasks, decimal ModelSpentUsd, double DesktopHours,
     IReadOnlyList<RunningPoint> Running, IReadOnlyList<RunningDesktop> Desktops, IReadOnlyList<TeamNumbers> TeamNumbers,
-    MachineCosts Machines, IReadOnlyList<StartTimes> Starts);
+    MachineCosts Machines, IReadOnlyList<StartTimes> Starts, AdminModels? Models = null);
 
 public static partial class Operations
 {
@@ -248,6 +257,26 @@ public static partial class Operations
             running.Count(x => x.TeamId == team.Id), team.MaxRunningDesktops, spent.GetValueOrDefault(team.Id), team.ModelAllowanceUsd,
             Math.Round(HoursOf(runs.Where(x => x.TeamId == team.Id).Select(x => (x.StartedAt, x.EndedAt)), since, now), 2))).ToList();
 
+        // The models, by tool, by model and by person: Workstream pays for every call, so it watches all of them.
+        var calls = await (
+            from use in db.ModelUsage.AsNoTracking().Where(x => x.At >= since)
+            join task in db.Tasks.AsNoTracking() on use.TaskId equals task.Id into found
+            from task in found.DefaultIfEmpty()
+            group use by new { use.TeamId, UserId = use.UserId ?? task.CreatedBy, use.Tool, use.Model } into line
+            select new
+            {
+                line.Key.TeamId, line.Key.UserId, line.Key.Tool, line.Key.Model, Cost = line.Sum(x => x.CostUsd), Calls = line.Count(),
+                Input = line.Sum(x => x.InputTokens + x.CacheReadTokens + x.CacheWriteTokens), Output = line.Sum(x => x.OutputTokens),
+            }).ToListAsync(ct);
+        var callers = await NamesAsync(db, calls.Where(x => x.UserId is not null).Select(x => x.UserId!), ct);
+        var models = new AdminModels(
+            calls.Sum(x => x.Calls),
+            [.. calls.GroupBy(x => x.Tool).Select(x => new ToolUse(x.Key, x.Sum(y => y.Cost), x.Sum(y => y.Calls))).OrderByDescending(x => x.CostUsd).ThenBy(x => x.Tool)],
+            [.. calls.GroupBy(x => x.Model).Select(x => new ModelUse(x.Key, x.Sum(y => y.Cost), x.Sum(y => y.Calls), x.Sum(y => y.Input), x.Sum(y => y.Output))).OrderByDescending(x => x.CostUsd).ThenBy(x => x.Model)],
+            [.. calls.GroupBy(x => (x.TeamId, x.UserId)).Select(x => new AdminPersonUse(
+                    x.Key.UserId is { } userId && callers.TryGetValue(userId, out var caller) ? caller : "", names.GetValueOrDefault(x.Key.TeamId, "Team"), x.Sum(y => y.Cost), x.Sum(y => y.Calls)))
+                .OrderByDescending(x => x.CostUsd).ThenBy(x => x.Name).Take(20)]);
+
         // What the machines cost: every run's hours this month, by what it ran for and at which size, at the size's hourly price.
         var costs = everyRun.GroupBy(x => (x.Purpose, x.Size))
             .Select(line => (line.Key.Purpose, line.Key.Size, Hours: HoursOf(line.Select(x => (x.StartedAt, x.EndedAt)), since, now)))
@@ -292,7 +321,7 @@ public static partial class Operations
             numbers,
             new MachineCosts(costs, storage,
                 [.. spares.Select(x => new SpareNow(x.TeamId, names.GetValueOrDefault(x.TeamId, "Team"), x.Size, x.State.ToString().ToLowerInvariant(), x.CreatedAt))], mac),
-            starts));
+            starts, models));
     }
 
     /// <summary>A system administrator changes what a team may use: its model allowance and its desktops at once.</summary>

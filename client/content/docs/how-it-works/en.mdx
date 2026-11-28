@@ -2,7 +2,7 @@
 title: "How Workstream works"
 description: "A task gets its own cloud desktop with an agent working on it. You watch it live, write to the agent, and take over when you want."
 order: 1
-updated: 2026-11-21
+updated: 2026-11-28
 ---
 
 <Flow>
@@ -18,6 +18,12 @@ A task is one piece of work. To start one you press New task, write what the age
 
 Every task has two things: a desktop, and a conversation with the agent on that desktop. They sit side by side on screen, the conversation on the left and the desktop on the right.
 
+## Or open the desktop and work on it yourself
+
+New task has a second button, Open desktop. It starts the same desktop with nothing asked of the agent: the repository is cloned, the setup has run, git and `gh` are signed in to GitHub as you, and a terminal is open in the project. You work in the browser the way you would on your own computer, without installing anything on it.
+
+The agent is still there. Write to it in the conversation whenever you want it to take something on. [OpenCode](/docs/ai#opencode) is ready in the terminal too, if you would rather work with an agent there.
+
 ## The desktop
 
 Each task gets a desktop of its own, a Linux virtual machine with a graphical desktop, a browser, VS Code and a terminal. Tasks never share one, so two tasks cannot get in each other's way. [Desktops](/docs/desktops) lists what is installed and the sizes.
@@ -28,7 +34,7 @@ The desktop's screen appears in your browser about half a minute after you start
 
 The agent is a program on the desktop, built on the Claude Agent SDK. It works where you can see it: it drives the same browser window you can use, files it edits open in VS Code, and commands run in a terminal. On a project it follows the repository's own `CLAUDE.md` and `AGENTS.md` and uses its skills, as it would on a developer's laptop.
 
-Every model call the agent makes goes through Workstream and counts against the team's monthly allowance. See [Usage and limits](/docs/usage-and-limits).
+Every model call from a desktop goes through Workstream and counts against the team's monthly allowance, whether the agent made it or a tool you ran yourself. See [AI on a desktop](/docs/ai) and [Usage and limits](/docs/usage-and-limits).
 
 ## Watching, writing and taking over
 

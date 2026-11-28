@@ -14,7 +14,7 @@ I built Workstream over a weekend in November 2026. It's open source now in case
 
 - Each task gets its own desktop, with Chrome, VS Code, a terminal and a file manager. Up to four tasks fit on your screen at once.
 - The agent is built on the Claude Agent SDK. You can see everything it does on the desktop.
-- An environment decides what a desktop starts with: which apps, a repository, a setup script and some instructions for the agent. You can keep it in the repository as a `workstream.yml` file.
+- An environment decides what a desktop starts with: which surfaces and apps, a repository, a setup script and some instructions for the agent. You can keep it in the repository as a `workstream.yml` file.
 - If you sign in with GitHub, the agent works on a branch and opens a pull request as you.
 - A team shares its tasks and environments. You can also share one task with someone outside the team, by email, so they can watch it, talk to the agent or use the desktop.
 - A desktop pauses when nobody has used it for half an hour and picks up where it left off when you come back.

@@ -181,6 +181,13 @@ public sealed class ModelJourneys
         await stranger.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.NotFound);
         using var administrator = await Person.SignInAsync(Stack.AdministratorEmail, Stack.AdministratorPassword);
         await administrator.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.NotFound);
+        // Whoever runs Workstream pays for every call, and sees every team's by tool, by model and by person.
+        var watched = (await administrator.GetAsync<AdminOverview>("/api/admin/overview")).Models!;
+        Assert.IsTrue(watched.Calls >= 3);
+        Assert.IsTrue(watched.Tools.Single(x => x.Tool == "opencode").Calls >= 1);
+        Assert.IsTrue(watched.Models.Single(x => x.Model == "claude-sonnet-5-5").InputTokens >= 1000);
+        Assert.IsTrue(watched.People.All(x => x.TeamName.Length > 0));
+        await ada.GetAsync("/api/admin/overview").IsAsync(HttpStatusCode.Forbidden);
         using var keyed = new HttpClient { BaseAddress = Stack.Origin };
         keyed.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adas.Key);
         await keyed.GetAsync($"/api/teams/{team.Id}/usage/models").IsAsync(HttpStatusCode.Unauthorized);

@@ -271,6 +271,12 @@ export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; s
 /** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`, `archive`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
 
+/** One person's model calls this month, with the team they made them in. */
+export type AdminPersonUse = { name: string; teamName: string; costUsd: number; calls: number };
+
+/** Every team's model calls this month: how many, by tool, by model, and the people whose calls cost most. */
+export type AdminModels = { calls: number; tools: ToolUse[]; models: ModelUse[]; people: AdminPersonUse[] };
+
 export type AdminOverview = {
   runningDesktops: number;
   teams: number;
@@ -283,6 +289,7 @@ export type AdminOverview = {
   teamNumbers: TeamNumbers[];
   machines: MachineCosts;
   starts: StartTimes[];
+  models: AdminModels | null;
 };
 
 const id = encodeURIComponent;
