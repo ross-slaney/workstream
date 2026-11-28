@@ -31,6 +31,7 @@ const pages = [
   "/docs",
   "/docs/how-it-works",
   "/docs/desktops",
+  "/docs/ai",
   "/docs/running-paused-archived",
   "/docs/environments",
   "/docs/github",

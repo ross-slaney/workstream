@@ -536,6 +536,12 @@ public sealed class DesktopRun
     public string TaskId { get; private set; } = "";
     public string TeamId { get; private set; } = "";
     public string Size { get; private set; } = "";
+    /// <summary>
+    /// Whose desktop time this is: the person who started the task, written down when the run begins so that
+    /// the team's usage by person still adds up after the task is deleted. Null for a spare's run, a preparing
+    /// machine's, and runs from before this was kept.
+    /// </summary>
+    public string? UserId { get; private set; }
     /// <summary>One of <see cref="MachinePurpose"/>.</summary>
     public string Purpose { get; private set; } = MachinePurpose.Task;
     /// <summary>One of <see cref="StartSource"/>. A spare's own run started from the image.</summary>
@@ -551,7 +557,7 @@ public sealed class DesktopRun
 
     public static DesktopRun Begin(WorkTask task, DateTimeOffset now, string source = StartSource.Image) => new()
     {
-        Id = Guid.NewGuid().ToString("D"), TaskId = task.Id, TeamId = task.TeamId, Size = task.Size, StartedAt = now, Source = source,
+        Id = Guid.NewGuid().ToString("D"), TaskId = task.Id, TeamId = task.TeamId, UserId = task.CreatedBy, Size = task.Size, StartedAt = now, Source = source,
     };
 
     /// <summary>A preparing machine's time, from when it is asked for until its disk is saved or the attempt fails.</summary>
@@ -582,9 +588,16 @@ public sealed class DesktopRun
     public void End(DateTimeOffset now) => EndedAt ??= now;
 }
 
-/// <summary>One model call an agent made through the gateway: what it used and what that costs (Model/ModelGateway.cs).</summary>
+/// <summary>
+/// One model call made from a task's desktop through the gateway: what it used, what that costs, whose it is
+/// and which tool made it (Model/ModelGateway.cs). A request's and an answer's words are never kept.
+/// </summary>
 public sealed class ModelUsage
 {
+    /// <summary>The tool of a call that names none: Workstream's own agent, the one caller that reaches the gateway directly.</summary>
+    public const string WorkstreamAgent = "workstream";
+    public const int MaxToolLength = 40;
+
     /// <summary>For EF Core.</summary>
     ModelUsage()
     {
@@ -593,6 +606,18 @@ public sealed class ModelUsage
     public long Id { get; private set; }
     public string TeamId { get; private set; } = "";
     public string TaskId { get; private set; } = "";
+    /// <summary>
+    /// Whose call this is: the person who started the task the desktop belongs to. A fact written with the call,
+    /// so that the team's usage by person still adds up after the task is deleted. Null on rows from before
+    /// this was kept, which are counted to their task's starter while the task exists.
+    /// </summary>
+    public string? UserId { get; private set; }
+    /// <summary>
+    /// The program that made the call, in lower case: <see cref="WorkstreamAgent"/>, or what a tool on the
+    /// desktop called itself to the desktop's model address (desktop/agent/model.mjs), such as <c>opencode</c>.
+    /// The desktop says it, so it is a label for the team's reports and decides nothing.
+    /// </summary>
+    public string Tool { get; private set; } = WorkstreamAgent;
     public string Model { get; private set; } = "";
     public long InputTokens { get; private set; }
     public long OutputTokens { get; private set; }
@@ -601,9 +626,21 @@ public sealed class ModelUsage
     public decimal CostUsd { get; private set; }
     public DateTimeOffset At { get; private set; }
 
-    public static ModelUsage Record(string teamId, string taskId, string model, long input, long output, long cacheRead, long cacheWrite, decimal costUsd, DateTimeOffset now) => new()
+    public static ModelUsage Record(WorkTask task, string? tool, string model, long input, long output, long cacheRead, long cacheWrite, decimal costUsd, DateTimeOffset now) => new()
     {
-        TeamId = teamId, TaskId = taskId, Model = model.Length <= 100 ? model : model[..100],
+        TeamId = task.TeamId, TaskId = task.Id, UserId = task.CreatedBy, Tool = ToolNamed(tool), Model = model.Length <= 100 ? model : model[..100],
         InputTokens = input, OutputTokens = output, CacheReadTokens = cacheRead, CacheWriteTokens = cacheWrite, CostUsd = costUsd, At = now,
     };
+
+    /// <summary>
+    /// A tool's name as it is kept: the first word of what it called itself, before any version, in lower case,
+    /// with only letters, digits, dots, dashes and underscores. Nothing usable is <see cref="WorkstreamAgent"/>.
+    /// </summary>
+    public static string ToolNamed(string? said)
+    {
+        var word = (said ?? "").Trim().Split([' ', '/', '(', ';', ','], 2)[0].ToLowerInvariant();
+        var kept = new string([.. word.Where(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '-' or '_')]);
+        if (kept.Length > MaxToolLength) kept = kept[..MaxToolLength];
+        return kept.Length == 0 ? WorkstreamAgent : kept;
+    }
 }

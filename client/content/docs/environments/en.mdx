@@ -1,20 +1,21 @@
 ---
 title: "Environments"
-description: "What a task's desktop starts with: a repository, a setup script, variables, apps and a size, set in Workstream or kept in the repository as workstream.yml."
-order: 4
-updated: 2026-11-24
+description: "What a task's desktop starts with: a repository, a setup script, variables, surfaces, apps and a size, set in Workstream or kept in the repository as workstream.yml."
+order: 5
+updated: 2026-11-27
 ---
 
 An environment is what a task's desktop starts with. A team sets its project up once as an environment, and every task started from it gets the same desktop. Everyone on the team can start tasks from the team's environments and edit them, on the Environments page.
 
-A new team has one environment, Standard desktop, with the default apps, the Standard size and nothing else. That is enough for a task that needs only a browser and a terminal.
+A new team has one environment, Standard desktop, with the default surfaces and applications, the Standard size and nothing else. That is enough for a task that needs only a browser and a terminal.
 
 ## What an environment holds
 
 | Setting | What it does |
 | --- | --- |
 | Name | How the environment appears when you start a task. |
-| Apps | Which apps get a button on the desktop's panel. See [Desktops](/docs/desktops#apps). |
+| Surfaces | Where your product runs: the browser and the phones. See [Surfaces and applications](#surfaces-and-applications). |
+| Applications | What you and the agent work with, such as the editor and a terminal. See [Desktops](/docs/desktops#apps). |
 | Size | Small, Standard or Large. See [Desktops](/docs/desktops#sizes). |
 | Repository and branch | The repository cloned onto the desktop, and the branch it starts on. |
 | Setup script | Commands run once on a new desktop. |
@@ -22,6 +23,16 @@ A new team has one environment, Standard desktop, with the default apps, the Sta
 | Instructions | Text added to what the agent is told on every desktop made from the environment. |
 
 The setup script, variables and instructions are under Advanced when you edit an environment.
+
+## Surfaces and applications
+
+What a desktop comes with is two lists.
+
+Surfaces are where your product runs. You and the agent see the product there and use it there. They are `chrome`, `android` and `iphone`. The last two are [phones](/docs/desktops#phones), and `iphone` needs the Large size. A project with nothing to look at, such as a library, needs none.
+
+Applications are what you and the agent work with. They are `vscode`, `terminal`, `files`, `writer`, `calc` and `impress`.
+
+Each surface and each application gets a button on the desktop's panel. A new environment has the `chrome` surface and the `vscode`, `terminal` and `files` applications.
 
 ## Repository and branch
 
@@ -45,19 +56,24 @@ size: large                 # small | standard | large
 setup: |                    # the setup script
   npm ci
   npx playwright install --with-deps
-apps: [chrome, vscode, terminal]
+surfaces: [chrome, android] # where your product runs
+apps: [vscode, terminal]    # what you and the agent work with
 variables: [DATABASE_URL]   # names only; the values are set in Workstream
 instructions: |             # extra instructions for the agent
   Run npm test before you say you are done.
 ```
 
-Every setting is optional. One the file leaves out is what a new environment has: the Standard size, the default apps, and no setup script, variables or instructions. The apps are `chrome`, `vscode`, `terminal`, `files`, `writer`, `calc`, `impress`, `android` and `iphone`. The last two are [phones](/docs/desktops#phones), and `iphone` needs the Large size.
+Every setting is optional. One the file leaves out is what a new environment has: the Standard size, the default surfaces, the default applications, and no setup script, variables or instructions. To have no surfaces, write `surfaces: []`.
 
-The file is read strictly. A setting Workstream does not know, a size or app it does not have, a variable name a shell cannot read, or YAML that does not parse is named in the form with its line, and nothing is filled from the file until it is fixed.
+`surfaces` takes `chrome`, `android` and `iphone`. `apps` takes `vscode`, `terminal`, `files`, `writer`, `calc` and `impress`. See [Surfaces and applications](#surfaces-and-applications).
+
+A file written before surfaces had a list of their own names them under `apps`. It still works: a surface listed under `apps` counts as a surface.
+
+The file is read strictly. A setting Workstream does not know, a size, surface or application it does not have, an application listed under `surfaces`, a variable name a shell cannot read, or YAML that does not parse is named in the form with its line, and nothing is filled from the file until it is fixed.
 
 ### Workstream reads the file when each task starts
 
-An environment filled from `workstream.yml` follows it. Each time someone starts a task from it, Workstream reads the file again from GitHub, as the person starting the task, and uses what it says now for the size, apps, setup script and instructions. So to change the environment, change the file. If GitHub cannot be reached in a few seconds, the file is gone or has a mistake, or the person starting the task did not sign in with GitHub, the task starts with what the environment last held.
+An environment filled from `workstream.yml` follows it. Each time someone starts a task from it, Workstream reads the file again from GitHub, as the person starting the task, and uses what it says now for the size, surfaces, applications, setup script and instructions. So to change the environment, change the file. If GitHub cannot be reached in a few seconds, the file is gone or has a mistake, or the person starting the task did not sign in with GitHub, the task starts with what the environment last held.
 
 The variables' names in the file are only for filling the form. Their values, and which variables the environment has, stay as they are set in Workstream.
 
@@ -104,7 +120,7 @@ The environment's page shows where its saved setup stands:
 | Prepared, out of date | The setup changed, or desktops were updated, since it was prepared. Each task runs the setup itself until it is prepared again. |
 | Preparing failed | The setup script did not finish. Tasks still work: each one runs the setup itself. |
 
-Workstream prepares an environment when it is added with a setup, when its repository, branch, setup script, variables, apps or size change (also when a task's start finds `workstream.yml` changed them), and when a task starts and the saved setup is more than a week old. In that last case the task uses the old one and a new one is made behind it. You can also press Prepare again on the environment's page.
+Workstream prepares an environment when it is added with a setup, when its repository, branch, setup script, variables, surfaces, applications or size change (also when a task's start finds `workstream.yml` changed them), and when a task starts and the saved setup is more than a week old. In that last case the task uses the old one and a new one is made behind it. You can also press Prepare again on the environment's page.
 
 What to know about a saved setup:
 

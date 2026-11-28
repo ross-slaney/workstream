@@ -1,15 +1,15 @@
 ---
 title: "Usage and limits"
 description: "What a team uses and what limits it: a monthly model allowance, desktop time counted per size, storage, and how many desktops run at once."
-order: 7
-updated: 2026-11-24
+order: 8
+updated: 2026-11-28
 ---
 
 Usage is counted per team. Everyone on the team can see it on the Usage page. Workstream has no prices and takes no payment yet, so these are limits, not a bill.
 
 | What | How it is counted | The limit |
 | --- | --- | --- |
-| Models | The cost of every model call the team's agents make, in dollars | An allowance per team per calendar month |
+| Models | The cost of every model call from the team's desktops, in dollars | An allowance per team per calendar month |
 | Desktop time | Hours a desktop is running, counted separately for each size | None of its own; the limit is on how many run at once |
 | Storage | The disks of paused desktops, archived desktops and saved setups | None today |
 | iPhone builds | Minutes a Mac spends building the team's iPhone apps | 30 builds asked for in a day |
@@ -17,9 +17,19 @@ Usage is counted per team. Everyone on the team can see it on the Usage page. Wo
 
 ## Models
 
-Every model call an agent makes goes through Workstream, which counts the call's tokens and charges their cost in dollars against the team's allowance for the calendar month. The Usage page shows how much of the allowance is used and how much is left.
+Every model call from a desktop goes through Workstream: the agent's, and those of a tool you run on the desktop yourself, such as [OpenCode](/docs/ai#opencode). Workstream counts the call's tokens and charges their cost in dollars against the team's allowance for the calendar month. The Usage page shows how much of the allowance is used and how much is left.
 
-When the allowance is used up, the team's agents stop until the next month starts or the allowance is raised. Desktops keep running and you can still use them yourself. There is no bring-your-own-key: a team cannot use a model key of its own.
+Under that, the page shows who and what used the models this month:
+
+- **Day by day**: what each day cost.
+- **People**: each person's tasks, desktop time, calls and cost. A desktop's calls count to the person who started the task.
+- **Tools**: the Workstream agent, OpenCode, and any other tool that called the models.
+- **Models**: how much was sent to each model and how much it answered.
+- **Tasks**: the ten tasks that cost most.
+
+A team administrator sees everyone's. Anyone else sees their own use, and the team's total. Workstream keeps each call's size and cost and never what was sent or answered.
+
+When the allowance is used up, the agent and the tools stop until the next month starts or the allowance is raised. Desktops keep running and you can still use them yourself. There is no bring-your-own-key: a team cannot use a model key of its own.
 
 ## Desktop time
 

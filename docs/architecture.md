@@ -19,7 +19,7 @@ a person's browser
                                  └── calls the API at its public address, with its own key
 ```
 
-- **The web app** has no secrets and no database. Public pages (the landing page, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session. Its `/auth/callback` page is where SqlOS sends the browser, with a code, after someone signs in with GitHub.
+- **The web app** has no secrets and no database. Public pages (the landing page, a page for each feature, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session. Its `/auth/callback` page is where SqlOS sends the browser, with a code, after someone signs in with GitHub.
 - **The API** is one process: the REST API with SqlOS for sign-in and authorization, the relay that carries a desktop's display to the people watching it, the gateway every agent's model calls go through, and the background jobs (Hangfire, in the app's own database) that make, stop and delete desktops.
 - **The Mac** is not a machine Workstream keeps: it is a run of one workflow in Workstream's own repository on GitHub's Mac runners, started by the API when a desktop needs an iPhone app built ("Phones on a desktop").
 - **A desktop** is a Debian virtual machine with the XFCE desktop on a TigerVNC display, made from one image. A machine made from the image starts as it is: nothing provisions it, and it learns what it is for from its user data. In development it is a Docker container built from the same two scripts.
@@ -136,6 +136,18 @@ The agent has its own window on the desktop, the Agent button on the panel, whic
 
 Another harness would replace `harness.mjs` and nothing else: the rest of the agent only hands it prompts and takes what it said and did.
 
+### A desktop a person opens
+
+A task started with nothing asked of its agent is a desktop someone opened to work on themselves ("Open desktop" on the New task form; the API takes a task with no prompt, and names it for its environment). It is a task like any other: the same machine, the same repository and setup, the same pausing, and the agent beside it whenever someone writes to it. The desktop is told so in its setup (`opened`, true until the task has a message), and opens a terminal in the working folder that says what is ready.
+
+What is ready is the same on every desktop, opened or not:
+
+- **git and gh** reach GitHub as the person who started the task ("GitHub" below).
+- **OpenCode** (opencode.ai, an open-source coding agent for the terminal) is in the image at a pinned version (`image/install.sh`). The agent writes its settings when the desktop starts (`agent/opencode.mjs`, to `~/.workstream/opencode.json`, which every shell finds through `OPENCODE_CONFIG`): Workstream's models and no others, no updating itself, no sharing of sessions. A person types `opencode` and works. It asks for no account.
+- **The desktop's model address**, `http://127.0.0.1:7317` (`agent/model.mjs`, `WORKSTREAM_MODEL_URL` in every shell), is what OpenCode is pointed at. It is Anthropic's Messages API with no key asked: each call goes on to the gateway with the desktop's key added and the tool's name, read from its User-Agent. Any other tool that speaks that API works the same way when it is pointed there. The key stays in the agent's process, so no tool's settings and no saved disk carry it.
+
+The person and the Workstream agent can work on the same desktop at once, and the agent is told so. What OpenCode does is not in the task's conversation: that holds what people and the Workstream agent wrote.
+
 ### After a stop
 
 A paused desktop keeps its disk and loses every program (unless it was hibernated, "Hibernating a paused desktop" above), and so does one brought back from its archive, whose disk is a copy of the one it had. So the agent keeps, in `~/.workstream/state.json`, what it would need to bring them back (`desktop/agent/restore.mjs`): the long-running commands the agent started (the harness notes every Bash call made with `run_in_background`, or ending in a lone `&`) with the folder each ran in, the pages open in the browser (read from Chromium's debugging port every fifteen seconds), and the files the agent opened in VS Code.
@@ -212,7 +224,7 @@ A desktop made before the change keeps its Standard SSD until its task is delete
 
 ## Phones on a desktop
 
-An environment can give its desktops two more apps (`desktop/apps.json`): `android`, the Android phone above in a window of its own, and `iphone`, an iPhone simulator. Each has a button on the panel, comes up with the desktop, and is there for the person to click and type on. The agent uses them the way a person does: it opens the app, reads the screen and taps through what it changed, and is told to check a change on every surface the desktop has (`agent/phones.mjs`).
+An environment can give its desktops two more surfaces (`desktop/apps.json`): `android`, the Android phone above in a window of its own, and `iphone`, an iPhone simulator. Each has a button on the panel, comes up with the desktop, and is there for the person to click and type on. The agent uses them the way a person does: it opens the app, reads the screen and taps through what it changed, and is told to check a change on every surface the desktop has (`agent/phones.mjs`).
 
 One command is the same for the agent, a terminal and the panel's buttons (`agent/phone.mjs`, on the PATH as `phone`):
 
@@ -332,7 +344,13 @@ The system administrator's page multiplies each line by its rate. A team's Usage
 
 ## Models
 
-The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.
+Every model call from a desktop is Workstream's own Foundry answering: a team brings no key, and nobody signs in to a model. The harness calls models the way it calls Microsoft Foundry, at `…/api/model/anthropic` on the API, with the desktop's key. The gateway (`api/Model/ModelGateway.cs`) checks the key and the team's allowance, swaps in Workstream's own Foundry key, passes the request and the answer through as they are, and reads the token counts off the answer. Each call is saved as a `ModelUsage` row with its cost in dollars. What a team has left this month is its allowance less the sum of those rows; the gateway remembers it for a few seconds between calls.
+
+A row also says whose call it was and which tool made it. Whose: the person who started the desktop's task, written with the call so the sum by person survives the task. Which tool: Workstream's own agent calls the gateway directly and is `workstream`; every other tool reaches it through the desktop's model address ("A desktop a person opens" above), which names the tool in `x-workstream-tool`, so OpenCode's calls are `opencode`. The desktop says the name, so it is a label for reports and decides nothing. A request's and an answer's words are never kept: a row is sizes, a cost, a model, a tool, a task and a person.
+
+A call that used a model also marks its task as used, at most once a minute, so a desktop whose person left a tool working in a terminal is not paused under it.
+
+The team's Usage page reads the rows two ways. `GET /api/teams/{id}/usage` is the month's total beside the allowance. `GET /api/teams/{id}/usage/models` is who and what used them: by day, by person (with each person's desktop hours and tasks), by tool, by model, and the ten tasks that cost most. Someone with `TEAM_VIEW_PEOPLE_USAGE` (a team's administrators) gets the whole team's; anyone else on the team gets their own. The system administrator's page has the same sums over every team: by tool, by model, and the twenty people whose calls cost most.
 
 The prices are a table in `ModelOptions`, with the two things that make a call cost more than its plain rate: a cache write kept for an hour, and Haiku's higher rate for a prompt over 100,000 tokens. They are what Workstream pays; `Markup` is 1 until there is billing.
 
@@ -349,7 +367,8 @@ On the desktop, git's credential helper for `https://github.com` is `desktop/age
 A desktop runs whatever its agent is asked to, so it is treated as untrusted:
 
 - It holds one credential, its key. The key reaches `/api/desktop/*` and `/api/model/*` for its own task. It is not a person's token and opens no other route. The key is in the machine's user data, which Azure serves to that machine alone, and is never written to its disk: a copy of a desktop's disk carries nobody's key.
-- It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted.
+- It never holds a model key. A leaked desktop key is worth what is left of one team's monthly allowance, until the task is deleted. The gateway takes the key from anywhere: it does not yet check that a call comes from a desktop's own network, so a person who copied their desktop's key could call models with it from another computer until the task is deleted. Those calls are counted to them like any other.
+- Any program on it can call the team's models through the desktop's model address, which adds the key for it. That is no more than the program could do by asking for the key itself, where the agent does.
 - It can ask for the GitHub token of the person who started its task, which reaches what their GitHub account reaches. It is never written to the desktop's disk, but it is in the desktop's memory while git or gh uses it. A leaked desktop key is also worth that person's GitHub access until the task is deleted.
 - It has no public address. Its subnet admits the API's relay to the display and refuses everything else on the network, other desktops included. It reaches the internet through one NAT gateway.
 - It has no Azure identity.

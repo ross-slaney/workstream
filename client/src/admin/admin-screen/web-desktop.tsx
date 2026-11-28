@@ -1,5 +1,5 @@
 import { Button } from "@/components/kit/button";
-import { AdminBody, Card, ChartCard, CostsCard, Numbers, StartsCard, agentState, desktopState, desktopsOf, hoursOf, modelsOf } from "./parts";
+import { AdminBody, Card, ChartCard, CostsCard, ModelsCard, Numbers, StartsCard, agentState, desktopState, desktopsOf, hoursOf, modelsOf } from "./parts";
 import { since } from "../format";
 import type { AdminScreenProps } from "./props";
 
@@ -16,6 +16,7 @@ export function AdminScreen(p: AdminScreenProps) {
           <Numbers overview={overview} />
           <ChartCard overview={overview} />
           <CostsCard overview={overview} now={now} />
+          <ModelsCard overview={overview} />
           <StartsCard overview={overview} />
           <Card title="Running now" note={`${overview.desktops.length} ${overview.desktops.length === 1 ? "desktop" : "desktops"}`}>
             {overview.desktops.length === 0 ? (

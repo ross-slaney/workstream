@@ -1,0 +1,60 @@
+---
+title: "AI on a desktop"
+description: "The Workstream agent and OpenCode are ready on every desktop, with no sign-in and no key. Every call is counted to your team."
+order: 3
+updated: 2026-11-28
+---
+
+Every desktop comes with AI that already works. Nobody on the team signs in to a model, pastes a key or sets anything up. There are two ways to use it, on the same desktop, and you can use both.
+
+| | The Workstream agent | OpenCode |
+| --- | --- | --- |
+| Where | The conversation beside the desktop | A terminal on the desktop |
+| How you start it | Write a message | Type `opencode` |
+| Good for | Work you hand over and watch, or check on later | Working in the terminal yourself, with an agent beside you |
+| What it can use | The browser, the phones, the editor and the terminal | The terminal and the project's files |
+
+## The Workstream agent
+
+The agent is the one you write to in the conversation. It works where you can watch: in the browser, on the phones, in the editor and in a terminal. It follows the repository's own instructions and skills, finishes work as a branch and a pull request, and shows a picture of each screen it used when it hands over. [How Workstream works](/docs/how-it-works) has the rest.
+
+## OpenCode
+
+[OpenCode](https://opencode.ai) is an open-source coding agent that runs in a terminal. It is installed on every desktop. Open a terminal, go to the project and type:
+
+```bash
+opencode
+```
+
+It starts connected. It does not ask you to sign in, and it has no key to lose. It offers the same models the Workstream agent uses, and you choose between them with `/models`. It does not update itself, so the whole team has the version Workstream tried, and it never sends a session to OpenCode's sharing service.
+
+Your own OpenCode settings in `~/.config/opencode` still apply, and so does a repository's `opencode.json`.
+
+## Using both
+
+The two work on the same desktop at the same time. A common way to work:
+
+- Open a desktop and start a change yourself with OpenCode. When the rest is routine, write to the Workstream agent to finish it, test it on the phones and open the pull request.
+- Or start a task, and when the agent has done the bulk of it, take the desktop and finish the last part by hand.
+
+What OpenCode does is not in the task's conversation. The conversation holds what people and the Workstream agent wrote.
+
+## No sign-in, and why
+
+Every model call from a desktop goes through Workstream, which adds the credential on its side. The desktop holds no model key. On the desktop, tools reach the models at a local address:
+
+```text
+http://127.0.0.1:7317
+```
+
+It speaks Anthropic's Messages API and asks for no key. OpenCode is already pointed at it. Any other tool that speaks that API works when you point it there; the address is in `WORKSTREAM_MODEL_URL` in every terminal.
+
+## What is counted
+
+Each call is counted to your team's monthly allowance, whichever tool made it. Workstream keeps the call's size, its cost, the model, the tool, the task and the person who started the task. It never keeps what was sent or answered.
+
+The [Usage page](/docs/usage-and-limits#models) shows the month by day, by person, by tool, by model and by task. An administrator sees the whole team. Everyone else sees their own.
+
+## A tool left working
+
+A desktop nobody is using is paused by itself. A model call counts as use, so a desktop where you left OpenCode working is not paused while it works.

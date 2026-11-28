@@ -70,13 +70,21 @@ public sealed class ModelOptions
 /// The model gateway: <c>/api/model/anthropic/…</c> is Anthropic's Messages API as Foundry serves it, for one
 /// kind of caller, a task's desktop with its key. Each call is checked (<c>TASK_RUN_AGENT</c> on the task, the
 /// team's allowance for the month), forwarded to Foundry with the real key in place of the desktop's, streamed
-/// back as it arrives, and its token counts recorded as <see cref="ModelUsage"/>. The agent on the desktop
-/// never holds a credential that works anywhere but here.
+/// back as it arrives, and its token counts recorded as <see cref="ModelUsage"/> with whose call it is and
+/// which tool made it. Nothing on the desktop ever holds a credential that works anywhere but here.
+///
+/// Two kinds of program call it. Workstream's own agent calls it directly. Any other tool on the desktop, such
+/// as OpenCode in a terminal, calls the desktop's own model address (desktop/agent/model.mjs), which adds the
+/// desktop's key and says which tool it is in <see cref="ToolHeader"/>. A call without that header is the
+/// agent's. A call that used a model also counts as use of the desktop, so a desktop whose person left a
+/// tool working is not paused under it.
 /// </summary>
 public static class ModelGateway
 {
     public const string Path = "/api/model/anthropic";
     public const string ClientName = "model";
+    /// <summary>Which tool on the desktop made the call, as the desktop's model address read it from the tool's User-Agent.</summary>
+    public const string ToolHeader = "x-workstream-tool";
     const long MaxRequestBytes = 64 * 1024 * 1024;
     static readonly TimeSpan AllowanceFor = TimeSpan.FromSeconds(15);
 
@@ -87,7 +95,7 @@ public static class ModelGateway
     static readonly HashSet<string> NotForwarded = new(StringComparer.OrdinalIgnoreCase)
     {
         "Host", "Authorization", "x-api-key", "api-key", "Content-Length", "Content-Type", "Connection", "Transfer-Encoding", "Accept-Encoding", "Cookie",
-        "Keep-Alive", "Upgrade", "Proxy-Authorization", "Proxy-Connection", "TE", "Trailer", "Origin", "Referer",
+        "Keep-Alive", "Upgrade", "Proxy-Authorization", "Proxy-Connection", "TE", "Trailer", "Origin", "Referer", ToolHeader,
     };
     static readonly HashSet<string> NotReturned = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -221,8 +229,14 @@ public static class ModelGateway
             var record = scope.ServiceProvider.GetRequiredService<WorkstreamDbContext>();
             var model = usage.Model ?? options.Main;
             var cost = options.CostOf(model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite, usage.CacheWriteHour);
-            record.ModelUsage.Add(ModelUsage.Record(task.TeamId, task.Id, model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite, cost, clock.GetUtcNow()));
+            var now = clock.GetUtcNow();
+            var tool = http.Request.Headers.TryGetValue(ToolHeader, out var said) ? said.ToString() : null;
+            record.ModelUsage.Add(ModelUsage.Record(task, tool, model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite, cost, now));
             await record.SaveChangesAsync(CancellationToken.None);
+            // A model at work for the desktop is the desktop in use, whichever tool asked. Written at most once a
+            // minute for a task, since an agent calls many times in one.
+            var stale = now.AddMinutes(-1);
+            await record.Tasks.Where(x => x.Id == task.Id && x.ActiveAt < stale).ExecuteUpdateAsync(set => set.SetProperty(x => x.ActiveAt, now), CancellationToken.None);
             if (cache.TryGetValue(AllowanceKey(task.TeamId), out decimal left)) cache.Set(AllowanceKey(task.TeamId), left - cost, AllowanceFor);
         }
     }

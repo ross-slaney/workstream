@@ -50,10 +50,12 @@ public sealed record DesktopModel(string BaseUrl, string Main, string Sonnet, st
 /// <see cref="Prepare"/>s is doing an environment's setup to be saved: it has no task (<see cref="TaskId"/> is
 /// empty), no instructions and no model, and <see cref="Title"/> is the environment's name.
 /// <see cref="SetupMinutes"/> is how long the setup script may run before the desktop stops it.
+/// <see cref="Opened"/> says the task is a desktop someone opened to work on themselves: nobody has written to
+/// its agent yet, so the desktop opens a terminal for the person where an agent's task would wait for its first message.
 /// </summary>
 public sealed record DesktopSetup(
     string TaskId, string Title, IReadOnlyList<string> Apps, DesktopRepository? Repository, string? SetupScript,
-    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false, int SetupMinutes = 45);
+    IReadOnlyDictionary<string, string> Variables, string? Instructions, DesktopModel? Model, bool Prepare = false, int SetupMinutes = 45, bool Opened = false);
 
 public static partial class Operations
 {
@@ -323,7 +325,8 @@ public static partial class Operations
             task.Id, task.Title, environment.Apps,
             environment.RepositoryUrl is { } url ? new DesktopRepository(url, environment.RepositoryBranch) : null,
             environment.SetupScript, VariablesOf(environment, protection), environment.Instructions,
-            new DesktopModel($"{desktops.ApiUrl.TrimEnd('/')}{ModelGateway.Path}", model.Main, model.Sonnet, model.Small), SetupMinutes: desktops.SetupMinutes));
+            new DesktopModel($"{desktops.ApiUrl.TrimEnd('/')}{ModelGateway.Path}", model.Main, model.Sonnet, model.Small), SetupMinutes: desktops.SetupMinutes,
+            Opened: !await db.TaskMessages.AsNoTracking().AnyAsync(x => x.TaskId == task.Id, ct)));
     }
 
     /// <summary>

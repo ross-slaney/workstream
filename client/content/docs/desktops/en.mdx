@@ -1,33 +1,41 @@
 ---
 title: "Desktops"
-description: "What is installed on a Workstream desktop, the three sizes, and how long a desktop takes to start."
+description: "The surfaces, apps and developer tools on a Workstream desktop, the three sizes, and how long a desktop takes to start."
 order: 2
-updated: 2026-11-24
+updated: 2026-11-28
 ---
 
 A desktop is a Debian Linux virtual machine with the XFCE graphical desktop. Each task has its own. The person on the desktop can use `sudo` without a password and can run Docker, and so can the agent.
 
+## Surfaces
+
+A surface is where the product you are building runs: the place you and the agent look at it and use it. An environment chooses which surfaces its desktops have.
+
+| Surface | What it is | On by default |
+| --- | --- | --- |
+| Chrome | The web browser (Chromium). The agent uses it where you can watch. | Yes |
+| Android phone | An Android phone in its own window. | No |
+| iPhone | An iPhone simulator in its own window. Needs a Large desktop. | No |
+
 ## Apps
 
-An environment chooses which apps get a button on the desktop's panel.
+An application is what you and the agent work with. An environment chooses which ones get a button on the desktop's panel.
 
 | App | What it is | On by default |
 | --- | --- | --- |
-| Chrome | The web browser (Chromium). The agent uses it where you can watch. | Yes |
 | VS Code | The code editor. Files the agent changes open here. | Yes |
 | Terminal | A command line. | Yes |
 | Files | The file manager. | Yes |
 | Writer | Documents (LibreOffice). | No |
 | Calc | Spreadsheets (LibreOffice). | No |
 | Impress | Slides (LibreOffice). | No |
-| Android phone | An Android phone in its own window. | No |
-| iPhone | An iPhone simulator in its own window. Needs a Large desktop. | No |
 
 ## Developer tools
 
 These are installed on every desktop, whatever the environment:
 
-- git, Git LFS and the GitHub CLI (`gh`)
+- git, Git LFS and the GitHub CLI (`gh`), signed in to GitHub as you
+- OpenCode, an AI coding agent for the terminal, connected with no sign-in. See [AI on a desktop](/docs/ai)
 - Node.js 22
 - Python 3 with pip and venv
 - The .NET 10 SDK
@@ -41,7 +49,7 @@ Anything else a project needs goes in the environment's [setup script](/docs/env
 
 ## Phones
 
-A desktop can have an Android phone and an iPhone on it, each in its own window beside the browser. Add `android` or `iphone` to the environment's apps. You can click and type on a phone as you do on the rest of the desktop, and the agent uses it the same way: it opens the app, reads the screen, taps through what it changed and says what it saw.
+A desktop can have an Android phone and an iPhone on it, each in its own window beside the browser. Add `android` or `iphone` to the environment's surfaces. You can click and type on a phone as you do on the rest of the desktop, and the agent uses it the same way: it opens the app, reads the screen, taps through what it changed and says what it saw.
 
 **Android.** The emulator runs on every size, and best on Standard or Large. The agent builds the Android app on the desktop, with the project's own tools.
 

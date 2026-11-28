@@ -48,7 +48,7 @@ export function nameOf(fullName: string) {
 
 /**
  * Whether the draft says anything a workstream.yml would hold beyond what a new environment has anyway: a
- * size other than Standard, other apps, a setup script, variables or instructions. A file of only defaults
+ * size other than Standard, other surfaces or apps, a setup script, variables or instructions. A file of only defaults
  * says nothing, so it is not offered.
  */
 export function hasFileSettings(draft: EnvironmentDraft, defaultApps: string[]) {
@@ -57,7 +57,7 @@ export function hasFileSettings(draft: EnvironmentDraft, defaultApps: string[]) 
 }
 
 /**
- * Whether a change to the draft changed what workstream.yml decides: its size, apps, setup script or
+ * Whether a change to the draft changed what workstream.yml decides: its size, surfaces, apps, setup script or
  * instructions. A draft that did no longer follows the file, since each task's start would put it back.
  */
 export function changesFileSettings(before: EnvironmentDraft, after: EnvironmentDraft) {

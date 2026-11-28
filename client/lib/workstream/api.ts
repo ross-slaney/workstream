@@ -44,6 +44,37 @@ export type TeamUsage = {
   macBuildMinutes: number;
 };
 
+/** What one person used this month. `name` is empty when nobody is known for it. */
+export type PersonUse = { userId: string; name: string; costUsd: number; calls: number; tasks: number; desktopHours: number };
+
+/** What one tool's model calls cost this month: `workstream` is Workstream's own agent, any other a tool on a desktop, such as `opencode`. */
+export type ToolUse = { tool: string; costUsd: number; calls: number };
+
+/** What one model was used for this month. `inputTokens` is everything sent, cached or not. */
+export type ModelUse = { model: string; costUsd: number; calls: number; inputTokens: number; outputTokens: number };
+
+/** One day (UTC) of the month, as `2026-11-27`. */
+export type DayUse = { day: string; costUsd: number; calls: number };
+
+/** One task's model calls this month. A deleted task has no title. */
+export type TaskUse = { taskId: string; title: string | null; userName: string; costUsd: number; calls: number };
+
+/**
+ * Who and what used the team's models this month. `everyone`: it is the whole team's use, which a team
+ * administrator sees; otherwise it is the reader's own.
+ */
+export type ModelReport = {
+  since: string;
+  everyone: boolean;
+  costUsd: number;
+  calls: number;
+  people: PersonUse[];
+  tools: ToolUse[];
+  models: ModelUse[];
+  days: DayUse[];
+  tasks: TaskUse[];
+};
+
 /**
  * A repository the person can reach on GitHub, with the token GitHub gave them at sign-in. `url` is what an
  * environment clones.
@@ -71,7 +102,11 @@ export type SavedRepositoryFile = { kind: "commit" | "pull_request"; url: string
 /** Whether a task's desktop reaches GitHub as the person who started it. */
 export type TaskGitHub = { signInNeeded: boolean; startedByYou: boolean; startedByName: string | null };
 
-export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean };
+/**
+ * Something a desktop can come with. A surface is where the product being worked on runs and is seen and used
+ * (the browser, a phone); an app is what the person and the agent work with (the editor, a terminal).
+ */
+export type DesktopApp = { id: string; name: string; description: string; launcher: string; default: boolean; kind: "surface" | "app" };
 
 export type DesktopSize = "small" | "standard" | "large";
 
@@ -236,6 +271,12 @@ export type MachineCosts = { thisMonth: MachineCost[]; storage: StorageCost[]; s
 /** Starts over the last seven days from one source (`image`, `save`, `spare`, `stopped`, `archive`): how many, and the middle one's seconds to a screen and to the agent. */
 export type StartTimes = { source: string; starts: number; screenSeconds: number | null; agentSeconds: number | null };
 
+/** One person's model calls this month, with the team they made them in. */
+export type AdminPersonUse = { name: string; teamName: string; costUsd: number; calls: number };
+
+/** Every team's model calls this month: how many, by tool, by model, and the people whose calls cost most. */
+export type AdminModels = { calls: number; tools: ToolUse[]; models: ModelUse[]; people: AdminPersonUse[] };
+
 export type AdminOverview = {
   runningDesktops: number;
   teams: number;
@@ -248,6 +289,7 @@ export type AdminOverview = {
   teamNumbers: TeamNumbers[];
   machines: MachineCosts;
   starts: StartTimes[];
+  models: AdminModels | null;
 };
 
 const id = encodeURIComponent;
@@ -267,6 +309,7 @@ export const workstream = {
   setDesktopTimes: (teamId: string, pauseAfterMinutes: number, archiveAfterDays: number) =>
     apiSend<Team>("PUT", `/api/teams/${id(teamId)}/desktop-times`, { pauseAfterMinutes, archiveAfterDays }),
   usage: (teamId: string) => apiJson<TeamUsage>(`/api/teams/${id(teamId)}/usage`),
+  modelReport: (teamId: string) => apiJson<ModelReport>(`/api/teams/${id(teamId)}/usage/models`),
 
   people: (teamId: string) => apiJson<TeamPerson[]>(`/api/teams/${id(teamId)}/people`),
   setAdmin: (teamId: string, userId: string, admin: boolean) => apiSend<void>("PUT", `/api/teams/${id(teamId)}/people/${id(userId)}/admin`, { admin }),
@@ -298,7 +341,8 @@ export const workstream = {
    * start, so it starts at once. Nothing comes back, and whether one is made is the API's decision.
    */
   wantSpare: (teamId: string, environmentId?: string) => apiSend<void>("POST", `/api/teams/${id(teamId)}/spare`, { environmentId: environmentId ?? null }),
-  startTask: (teamId: string, body: { id: string; environmentId: string; prompt: string; promptKey: string }) =>
+  /** With a prompt, a task the agent starts on. Without one, a desktop opened for the person to work on, with the title they see. */
+  startTask: (teamId: string, body: { id: string; environmentId: string; prompt?: string; promptKey?: string; title?: string }) =>
     apiSend<Task>("POST", `/api/teams/${id(teamId)}/tasks`, body),
   renameTask: (taskId: string, title: string) => apiSend<Task>("PUT", `/api/tasks/${id(taskId)}`, { title }),
   deleteTask: (taskId: string) => apiSend<void>("DELETE", `/api/tasks/${id(taskId)}`),

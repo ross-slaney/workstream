@@ -4,11 +4,14 @@ import { publicOrigin } from "../site";
 import { publicPaths, robotsTxt, sitemapXml } from "../sitemap";
 
 describe("the sitemap", () => {
-  it("lists the landing page and every docs page, once each, as full addresses", () => {
+  it("lists the landing page, every feature's page and every docs page, once each, as full addresses", () => {
     const paths = publicPaths();
-    expect(paths.slice(0, 3)).toEqual(["/", "/docs", "/docs/how-it-works"]);
+    expect(paths.slice(0, 3)).toEqual(["/", "/features", "/features/open-desktop"]);
+    expect(paths).toContain("/features/usage");
+    expect(paths).toContain("/docs/how-it-works");
+    expect(paths).toContain("/docs/ai");
     expect(paths).toContain("/docs/security");
-    expect(paths).toHaveLength(11);
+    expect(paths).toHaveLength(18);
     expect(new Set(paths).size).toBe(paths.length);
 
     const xml = sitemapXml("https://workstream.example");

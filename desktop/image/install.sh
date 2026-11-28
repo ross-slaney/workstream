@@ -35,6 +35,11 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y --no-install-recommends nodejs
 apt-get clean
 
+# OpenCode, an open-source coding agent for the terminal, at the version Workstream tried. A person who opens
+# a desktop types `opencode` and works: the desktop's agent points it at the team's models when the desktop
+# starts (agent/opencode.mjs), so it asks for no sign-in and holds no key.
+npm install -g opencode-ai@1.19.6
+
 # VS Code, from Microsoft's repository.
 curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
 echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list

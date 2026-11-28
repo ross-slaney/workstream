@@ -95,6 +95,6 @@ Production ships only from a published GitHub release. Merging to `main` deploys
 
 ## Models
 
-Every model call an agent makes goes through the API's gateway (`api/Model/ModelGateway.cs`). A desktop never holds a model key. It holds only its own key, which reaches its own task and nothing else. The gateway sends each call on to the model endpoint you set, counts its tokens, and charges them in dollars against the team's monthly allowance. When the allowance is used up, the team's agents stop until a system administrator raises it.
+Every model call from a desktop goes through the API's gateway (`api/Model/ModelGateway.cs`): Workstream's own agent's, and those of any tool a person runs on the desktop, such as OpenCode, which every desktop has ready with no sign-in. A desktop never holds a model key. It holds only its own key, which reaches its own task and nothing else. The gateway sends each call on to the model endpoint you set, counts its tokens, and charges them in dollars against the team's monthly allowance, with the person and the tool it counts to. When the allowance is used up, the team's agents and tools stop until a system administrator raises it.
 
 The endpoint is either Anthropic's API (`https://api.anthropic.com` and an Anthropic API key) or Claude deployed in Microsoft Foundry ([infra/README.md](../infra/README.md#models)). Both take the same requests. With Foundry, `./scripts/dev-env.sh` writes its endpoint and key into `.env` for your computer. There is no payment in Workstream yet, so an allowance is a limit, not a bill.

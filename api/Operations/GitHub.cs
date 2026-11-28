@@ -188,7 +188,7 @@ public static partial class Operations
     /// <summary>
     /// A task is starting on an environment that came from its repository's <c>workstream.yml</c>: the file is
     /// read again from GitHub, as the person starting it, so the repository stays where the environment is
-    /// defined. What it says now becomes the environment's size, apps, setup script and instructions (its
+    /// defined. What it says now becomes the environment's size, surfaces, apps, setup script and instructions (its
     /// variables stay as they are, since their values live here). When GitHub cannot be reached in a few
     /// seconds, the person has no GitHub token, or the file is gone or not valid, the task starts with what the
     /// environment already holds.
@@ -212,7 +212,9 @@ public static partial class Operations
             return;
         }
         if (settings is null) return;
-        if (settings.Size == environment.Size && settings.Apps.SequenceEqual(environment.Apps) && settings.Setup == environment.SetupScript && settings.Instructions == environment.Instructions) return;
+        // The order of the list says nothing: an environment saved before surfaces came first holds the same ones in another order.
+        var sameApps = settings.Apps.Order(StringComparer.Ordinal).SequenceEqual(environment.Apps.Order(StringComparer.Ordinal));
+        if (settings.Size == environment.Size && sameApps && settings.Setup == environment.SetupScript && settings.Instructions == environment.Instructions) return;
         var before = environment.SetupInputs;
         environment.Change(new EnvironmentSettings(environment.Name, settings.Apps, settings.Size, environment.RepositoryUrl, environment.RepositoryBranch,
             settings.Setup, settings.Instructions, FromFile: true), environment.ChangedBy, DateTimeOffset.UtcNow);

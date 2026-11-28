@@ -309,6 +309,9 @@ public sealed class GitHubJourneys
         Assert.IsFalse(text.Contains("postgres://secret"));
         var read = WorkstreamFile.Read(text);
         Assert.AreEqual("small", read.Settings!.Size);
+        // Its surfaces and its apps each under their own setting.
+        StringAssert.Contains(text, "surfaces: [chrome]\n");
+        StringAssert.Contains(text, "apps: [vscode, terminal]\n");
         Assert.AreEqual("npm ci\nnpm test", read.Settings.Setup);
         CollectionAssert.AreEqual(new[] { "DATABASE_URL" }, read.Settings.Variables.ToArray());
         Assert.IsTrue((await LoadAsync(environment)).FromFile);
@@ -372,7 +375,7 @@ public sealed class GitHubJourneys
         Assert.IsTrue((await LoadAsync(environment)).FromFile);
 
         // Someone changes the file in the repository: the next task is set up from what it says now.
-        repository.With("workstream.yml", "size: large\napps: [chrome, terminal]\nsetup: |\n  pnpm install\ninstructions: Run pnpm test.\n");
+        repository.With("workstream.yml", "size: large\nsurfaces: [chrome]\napps: [terminal]\nsetup: |\n  pnpm install\ninstructions: Run pnpm test.\n");
         var task = await StartAsync(ada, team.Id, environment);
         Assert.AreEqual("large", task.Size);
         using (var desktop = await Desktop.StartAsync(task.Id))

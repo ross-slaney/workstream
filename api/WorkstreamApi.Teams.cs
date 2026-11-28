@@ -58,6 +58,7 @@ public static partial class WorkstreamApi
         api.MapPut("/teams/{teamId}", RenameTeam).WithName("rename_team").WithTags("Teams").Produces<TeamDto>().ProducesProblem(403);
         api.MapPut("/teams/{teamId}/desktop-times", SetTeamDesktopTimes).WithName("set_team_desktop_times").WithTags("Teams").Produces<TeamDto>().ProducesProblem(400).ProducesProblem(403);
         api.MapGet("/teams/{teamId}/usage", GetUsage).WithName("get_team_usage").WithTags("Teams").Produces<TeamUsage>();
+        api.MapGet("/teams/{teamId}/usage/models", GetModelReport).WithName("get_team_model_report").WithTags("Teams").Produces<ModelReport>();
 
         api.MapGet("/teams/{teamId}/people", ListPeople).WithName("list_people").WithTags("People").Produces<IReadOnlyList<TeamPerson>>();
         api.MapPut("/teams/{teamId}/people/{userId}/admin", SetPersonAdmin).WithName("set_person_admin").WithTags("People").ProducesProblem(400).ProducesProblem(403);
@@ -135,6 +136,12 @@ public static partial class WorkstreamApi
     static async Task<IResult> GetUsage(string teamId, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, TimeProvider clock, CancellationToken ct)
     {
         var outcome = await Operations.UsageAsync(CallerOf(http), teamId, db, fga, clock, ct);
+        return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
+    }
+
+    static async Task<IResult> GetModelReport(string teamId, HttpContext http, WorkstreamDbContext db, ISqlOSFgaAuthService fga, TimeProvider clock, CancellationToken ct)
+    {
+        var outcome = await Operations.ModelReportAsync(CallerOf(http), teamId, db, fga, clock, ct);
         return outcome.IsOk ? Results.Ok(outcome.Value) : ToResult(outcome);
     }
 
