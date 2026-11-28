@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fill, thin, typeText } from "./touch.mjs";
+import { fill, MOST_PRESSES, press, thin, typeText } from "./touch.mjs";
 
 /** A pretend phone with one field, which records what was sent to it. */
 function pretend({ fields = [{ ref: "e2", role: "textfield", label: "New step", value: "New step", x: 10, y: 10, frame: [0, 0, 20, 20] }], needsField = false } = {}) {
@@ -100,4 +100,46 @@ test("fill types into a field the reading leaves out for a moment after the tap"
   assert.equal(status, 0, text);
   assert.deepEqual(sent, ["Ivo Phone"]);
   assert.match(text, /"Full name" holds "Ivo Phone"/);
+});
+
+/** A pretend phone whose screen changes when a key is pressed, and which records the presses. */
+function keyed() {
+  const sent = [];
+  return {
+    sent,
+    device: {
+      name: "pretend phone", command: "phone pretend", quiet: 1, every: 1,
+      keys: { delete: "<", enter: "!" },
+      look: () => ({ screen: `app pretend\n@e1 textfield "Name" value="${"x".repeat(Math.max(0, 50 - sent.length * 45))}"\n@e2 button "Next"`, fields: [] }),
+      press: (key, times) => {
+        sent.push([key, times]);
+        return 0;
+      },
+    },
+  };
+}
+
+test("a key pressed many times is sent to the phone in one go, and the screen is printed once after it", async () => {
+  const phone = keyed();
+  const { status, text } = await printed(() => press(phone.device, "Delete", { times: 45 }));
+  assert.equal(status, 0);
+  assert.deepEqual(phone.sent, [["<", 45]]);
+  assert.equal(text.match(/screen now:/g).length, 1);
+  assert.match(text, /value="xxxxx"/);
+});
+
+test("a key the phone does not have is left to the caller, and nothing is pressed", async () => {
+  const phone = keyed();
+  assert.equal(await press(phone.device, "home"), null);
+  assert.deepEqual(phone.sent, []);
+});
+
+test("--times outside what one command presses is refused before anything is pressed", async () => {
+  const phone = keyed();
+  for (const times of [0, 2.5, MOST_PRESSES + 1, Number.NaN]) {
+    const { status, text } = await printed(() => press(phone.device, "delete", { times }));
+    assert.equal(status, 2);
+    assert.match(text, /--times is a whole number/);
+  }
+  assert.deepEqual(phone.sent, []);
 });

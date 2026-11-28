@@ -13,11 +13,11 @@
 //
 //   phone <ios|android> snapshot                 what is on the screen, one line each, with a reference
 //   phone <ios|android> tap @e3 | "words" | X Y   tap, wait until the screen is still, and print it
-//   phone <ios|android> type "text"              type into the focused field and say what it holds
+//   phone <ios|android> type "text" [--enter]    type into the focused field and say what it holds
 //   phone <ios|android> fill @e3 "text"          tap a field, empty it, type, and say what it holds
 //   phone <ios|android> scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone]
 //   phone <ios|android> screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
-//   phone <ios|android> press enter              the Return key (Android also: back, home, delete, tab)
+//   phone <ios|android> press enter | delete     a key, with --times 20 that many times (Android also: back, home, tab)
 //   phone android back | home;  phone ios press home | lock
 //   phone ios <anything else>                    agent-sim's own command
 //
@@ -37,7 +37,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { answerOf, api } from "./api.mjs";
-import { acted, android, fill, iphone, readAndroid, typeText, waitFor } from "./touch.mjs";
+import { acted, android, ANDROID_KEYS, fill, iphone, press, readAndroid, typeText, waitFor } from "./touch.mjs";
 import { linesOf } from "./screen.mjs";
 import { front } from "./surfaces.mjs";
 
@@ -319,6 +319,10 @@ async function startIphone() {
   return 0;
 }
 
+/** The app `phone ios run` last installed here, which `phone ios launch` opens when no app is named. */
+const lastRunFile = path.join(dir, "iphone-app");
+const lastRun = () => (existsSync(lastRunFile) ? readFileSync(lastRunFile, "utf8").trim() || null : null);
+
 async function runIphone(folder, options) {
   requireSimulator();
   const built = await build(folder, options);
@@ -330,9 +334,12 @@ async function runIphone(folder, options) {
     say("Installed. Start it from its icon, or with `phone ios launch <bundle id>`.");
     return 0;
   }
+  writeFileSync(lastRunFile, built.bundleId);
   const launched = simulator(["launch", built.bundleId]);
-  say(`Opened ${built.bundleId} on the iPhone.`);
-  return launched.status ?? 0;
+  // The phone can take longer to answer than agent-sim waits, with the app opening all the same.
+  if ((launched.status ?? 0) === 0) say(`Opened ${built.bundleId} on the iPhone.`);
+  else say(`Installed ${built.bundleId}. The iPhone did not answer when asked to open it, and it may be opening all the same: \`phone ios wait "words its first screen shows"\` waits for it, and \`phone ios launch\` asks again.`);
+  return 0;
 }
 
 // ── The Android phone ───────────────────────────────────────────────────────────────────────────────────
@@ -367,8 +374,25 @@ function androidSize() {
   return size ? [Number(size[1]), Number(size[2])] : [1080, 2400];
 }
 
-/** The keys `phone android press` knows, as Android numbers them. */
-export const ANDROID_KEYS = { enter: "66", return: "66", back: "4", home: "3", delete: "67", tab: "61" };
+export { ANDROID_KEYS };
+
+/** The flags that take a value, which is not one of the command's words. */
+const VALUED = ["-o", "--timeout", "--ms", "--times", "--amount"];
+
+/** A command's words: what was given that is neither a flag nor a flag's value. */
+export const wordsOf = (rest) => rest.filter((argument, index) => !argument.startsWith("--") && argument !== "-o" && !VALUED.includes(rest[index - 1]));
+
+/**
+ * The text to type, from the command's words. `--enter` presses Return after it. A shell passes `"text\n"` in
+ * double quotes as a backslash and an n, which are typed as they are: `said` is what to tell whoever did that.
+ */
+export function textOf(words, rest) {
+  const text = words.join(" ");
+  const enter = rest.includes("--enter");
+  return { text: enter ? `${text.replace(/\n+$/, "")}\n` : text, said: !enter && /\\n$/.test(text) ? "The text ended in a backslash and an n, and they were typed as they are. `--enter` presses Return after the text." : null };
+}
+
+const timesOf = (rest) => (rest.includes("--times") ? Number(rest[rest.indexOf("--times") + 1]) : 1);
 
 /**
  * A reading with something in it. Right after an app opens there is a moment when the screen is drawn and
@@ -384,31 +408,39 @@ async function listed(read, { seconds = 6 } = {}) {
   return screen;
 }
 
+/** `type`: the text into the field that has the keyboard, with what to know about how it was written. */
+async function typed(phone, words, rest) {
+  const { text, said } = textOf(words, rest);
+  const status = await typeText(phone, text);
+  if (said) process.stdout.write(`\n${said}\n`);
+  return status;
+}
+
 /** The commands for using the Android phone, in the iPhone's words. */
 async function useAndroid(command, rest, { wait }) {
   if (!androidBooted()) throw new Error("The Android phone is not on. Start it with `phone android start`.");
   const phone = android();
   front("android");
   const flags = rest.filter((argument) => argument.startsWith("--") || argument === "-o");
-  const words = rest.filter((argument, index) => !argument.startsWith("--") && argument !== "-o" && rest[index - 1] !== "-o" && rest[index - 1] !== "--timeout" && rest[index - 1] !== "--ms");
+  const words = wordsOf(rest);
   const valueOf = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
   switch (command) {
     case "snapshot":
       process.stdout.write((await listed(() => linesOf(readAndroid()))) + "\n");
       return 0;
     case "press": {
-      const key = ANDROID_KEYS[(words[0] ?? "").toLowerCase()];
-      if (!key) throw new Error(`Say the key: ${Object.keys(ANDROID_KEYS).join(", ")}.`);
-      return acted(phone, () => adbShell("input", "keyevent", key), { wait });
+      const status = await press(phone, words[0], { times: timesOf(rest), wait });
+      if (status === null) throw new Error(`Say the key: ${Object.keys(ANDROID_KEYS).join(", ")}.`);
+      return status;
     }
     case "tap":
       if (!words.length) throw new Error("Say what to tap: a reference (@e3), words on the screen, or a point (X Y).");
       return acted(phone, () => phone.tap(words), { wait });
     case "type":
-      return typeText(phone, words.join(" "));
+      return typed(phone, words, rest);
     case "fill":
       if (words.length < 2) throw new Error('Say the field and the text: `phone android fill @e3 "text"`.');
-      return fill(phone, words.slice(0, -1), words.at(-1));
+      return fill(phone, words.slice(0, -1), textOf(words.slice(-1), rest).text);
     case "scroll": {
       const [width, height] = androidSize();
       const up = words[0] === "up";
@@ -456,7 +488,7 @@ async function useIphone(command, rest, { wait }) {
   requireSimulator();
   const phone = iphone(simulatorEnvironment());
   front("iphone");
-  const words = rest.filter((argument, index) => !argument.startsWith("--") && rest[index - 1] !== "--timeout");
+  const words = wordsOf(rest);
   const valueOf = (flag) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
   switch (command) {
     case "snapshot":
@@ -465,23 +497,29 @@ async function useIphone(command, rest, { wait }) {
       return 0;
     case "wait":
       return waitFor(phone, words.join(" "), { gone: rest.includes("--gone"), seconds: Number(valueOf("--timeout") ?? 20) });
-    case "press":
-      // Return is a key, which agent-sim types; its own `press` is for the phone's buttons.
-      if (/^(enter|return)$/i.test(words[0] ?? "")) return acted(phone, () => phone.enter(), { wait });
-      return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
+    case "press": {
+      // Return and delete are keys, which agent-sim types; its own `press` is for the phone's buttons.
+      const status = await press(phone, words[0], { times: timesOf(rest), wait });
+      return status ?? acted(phone, () => simulator([command, ...words]).status ?? 1, { wait });
+    }
+    case "launch": {
+      // With no app named, the project's own: the one `phone ios run` installed.
+      const app = words[0] ?? lastRun();
+      if (!app) throw new Error("Say the app's bundle identifier, such as com.example.app. `phone ios run <the app's folder>` installs the project's app and opens it.");
+      return acted(phone, () => simulator([command, app, ...rest.filter((argument) => argument !== words[0])]).status ?? 1, { wait });
+    }
     case "tap":
     case "scroll":
     case "swipe":
     case "open":
-    case "launch":
       return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
     case "type":
       // Key presses are for apps that watch each one; they are sent as they are, and the screen is waited for.
       if (rest.includes("--keys")) return acted(phone, () => simulator([command, ...rest]).status ?? 1, { wait });
-      return typeText(phone, words.join(" "));
+      return typed(phone, words, rest);
     case "fill":
       if (words.length < 2) throw new Error('Say the field and the text: `phone ios fill @e3 "text"`.');
-      return fill(phone, words.slice(0, -1), words.at(-1));
+      return fill(phone, words.slice(0, -1), textOf(words.slice(-1), rest).text);
     default:
       return simulator([command, ...rest]).status ?? 1;
   }
@@ -498,11 +536,11 @@ const USAGE = `Use:
   On either phone (phone ios …, phone android …):
   snapshot                              what is on the screen, one line each, with a reference
   tap @e3 | "words" | X Y               tap, wait until the screen is still, and print it
-  type "text"                           type into the focused field and say what it holds
-  fill @e3 "text"                       tap a field, empty it, type, and say what it holds
+  type "text" [--enter]                 type into the focused field and say what it holds; --enter presses Return after
+  fill @e3 "text" [--enter]             tap a field, empty it, type, and say what it holds
   scroll up|down, swipe X1 Y1 X2 Y2, open <link>, wait "words" [--gone] [--timeout 20]
-  screenshot [-o file], launch <app>, terminate <app>, logs <app>, install <file>
-  press enter                           the Return key (Android also: back, home, delete, tab)
+  screenshot [-o file], launch [app], terminate <app>, logs <app>, install <file>
+  press enter | delete [--times 20]     a key, once or many times (Android also: back, home, tab)
   phone android back | home; phone ios press home | lock
   --no-wait                             return as soon as the tap is sent (with build: as soon as it is asked for)`;
 

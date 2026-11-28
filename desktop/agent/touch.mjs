@@ -52,6 +52,10 @@ export function iphone(env) {
     // Return as a key of its own. Sent in the same call as text, agent-sim types the whole text as key presses.
     enter: () => sim(["type", "--keys", "\n"]).status ?? 1,
     erase: (count) => sim(["type", "--keys", BACKSPACE.repeat(count)]).status ?? 1,
+    // The keys `press` knows here. The phone's buttons (home, lock) are agent-sim's own `press`.
+    keys: { enter: "\n", return: "\n", delete: BACKSPACE, backspace: BACKSPACE },
+    // All the presses in one call: sent one call each, 45 of them took longer than a command may run.
+    press: (key, times) => sim(["type", "--keys", key.repeat(times)]).status ?? 1,
     // With no field to take them, typed letters reach the app as key presses, and a development build takes
     // some of those as shortcuts: "d" opens its developer menu and "r" reloads it.
     needsField: true,
@@ -90,8 +94,18 @@ function rememberedAndroid() {
 
 const adb = (...args) => run("adb", ["shell", ...args]).status ?? 1;
 
+/** The keys `phone android press` knows, as Android numbers them. */
+export const ANDROID_KEYS = { enter: "66", return: "66", back: "4", home: "3", delete: "67", backspace: "67", tab: "61" };
+
 export function android() {
   const tapAt = (x, y) => adb("input", "tap", String(Math.round(x)), String(Math.round(y)));
+  // Many presses of one key go forty to a call, which Android takes at once.
+  const press = (key, times) => {
+    for (let left = times; left > 0; left -= 40) {
+      if (adb("input", "keyevent", ...Array(Math.min(left, 40)).fill(key)) !== 0) return 1;
+    }
+    return 0;
+  };
   return {
     name: "Android phone",
     command: "phone android",
@@ -124,14 +138,10 @@ export function android() {
       return 0;
     },
     enter: () => adb("input", "keyevent", "66"),
-    erase: (count) => {
-      // To the end of the text first, then back over it.
-      if (adb("input", "keyevent", "123") !== 0) return 1;
-      for (let left = count; left > 0; left -= 40) {
-        if (adb("input", "keyevent", ...Array(Math.min(left, 40)).fill("67")) !== 0) return 1;
-      }
-      return 0;
-    },
+    // To the end of the text first, then back over it.
+    erase: (count) => (adb("input", "keyevent", "123") !== 0 ? 1 : press("67", count)),
+    keys: ANDROID_KEYS,
+    press,
   };
 }
 
@@ -170,6 +180,23 @@ export async function acted(device, action, { wait = true } = {}) {
   if (status !== 0 || !wait) return status;
   await after(device, before);
   return 0;
+}
+
+/** The most times one command presses a key. */
+export const MOST_PRESSES = 200;
+
+/**
+ * Press one of the phone's keys, once or `times` times in one go, then wait for the screen and print it.
+ * Null when the phone has no key of that name, so the caller can try what else the word may mean.
+ */
+export async function press(device, name, { times = 1, wait = true } = {}) {
+  const key = device.keys?.[String(name ?? "").toLowerCase()];
+  if (!key) return null;
+  if (!Number.isInteger(times) || times < 1 || times > MOST_PRESSES) {
+    out(`--times is a whole number from 1 to ${MOST_PRESSES}.`);
+    return 2;
+  }
+  return acted(device, () => device.press(key, times), { wait });
 }
 
 const quoted = (field) => (field.label ? `The field ${JSON.stringify(field.label)}` : "The field");
