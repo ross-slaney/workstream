@@ -41,6 +41,8 @@ export function openCodeSettings(model, address = modelAddress()) {
     enabled_providers: ["anthropic"],
     provider: {
       anthropic: {
+        // Said beside the model's name, so a person sees whose models these are.
+        name: "Workstream",
         options: { baseURL: `${address}/v1`, apiKey: "workstream" },
         // The deployment's own models and no others: OpenCode's list of Claude models is longer than what Workstream has.
         whitelist: ids,

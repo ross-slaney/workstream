@@ -1,76 +1,302 @@
 {
   "meta": {
-    "title": "Workstream · A cloud desktop for every task",
-    "description": "Give each task its own cloud desktop with an AI agent working on it. Watch it live, take over when you want, and keep several going at once."
+    "title": "Workstream · A cloud dev desktop for you and your agents",
+    "description": "Describe your project's desktop in workstream.yml, sign in with GitHub and open it in a browser with AI already connected. Work on it yourself or hand a task to an agent."
   },
   "nav": {
+    "features": "Features",
     "docs": "Docs",
     "signIn": "Sign in",
     "start": "Get started"
   },
   "hero": {
-    "title": "A cloud desktop for every task",
-    "body": "Workstream gives each piece of work its own computer in the cloud, with an AI agent on it. You watch the screen live, talk to the agent beside it, and take the mouse whenever you want. Your own computer stays free.",
-    "cta": "Start a task",
+    "title": "A cloud dev desktop for you and your agents",
+    "body": "Describe the project's desktop once, in a file in the repository. After that, anyone on the team signs in with GitHub and has it open in a browser about a minute later, with the code cloned, the setup done and AI already connected. Work on it yourself, or start a task and an agent works on a desktop of its own.",
+    "cta": "Get started",
     "secondary": "See how it works",
-    "pictureAlt": "The Workstream workspace with two tasks open at once. Each has its conversation with the agent on the left and its live desktop on the right: one shows a web page the agent built, the other a script and its passing tests."
+    "pictureAlt": "A Workstream desktop open in a browser. On the left, the Workstream agent reports that the tests pass and the page is open. On the right is the live desktop: VS Code with the project, Chrome showing the page, and a terminal where OpenCode made the change."
   },
-  "how": {
-    "title": "How it works",
+  "start": {
+    "title": "Three steps to a working desktop",
     "steps": {
-      "ask": {
-        "title": "Say what you want done",
-        "body": "Write the task in plain words and choose the environment it starts from. A desktop is ready in a minute or two."
+      "file": {
+        "title": "Describe the desktop in workstream.yml",
+        "body": "One file at the root of the repository says what the desktop comes with: its size, the surfaces your product runs on, the applications you work with and the setup script. Every person's desktop is made from it, and every agent's."
       },
-      "watch": {
-        "title": "Watch it happen",
-        "body": "The agent opens the browser, edits files and runs commands on a real desktop that you see live. Nothing happens off screen."
+      "github": {
+        "title": "Sign in with GitHub",
+        "body": "It is the only sign-in. The desktop clones the repository, pushes branches and opens pull requests as you, and AI is connected with no key."
       },
-      "takeOver": {
-        "title": "Step in when it matters",
-        "body": "Click into the desktop and it is yours. Fix what the agent got wrong, sign in to a site yourself, then hand it back."
+      "work": {
+        "title": "Open a desktop or start a task",
+        "body": "Open a desktop to work on it yourself. Or write what you want done, and an agent starts on a desktop of its own. Each is a separate computer, so several run at once."
       }
-    }
+    },
+    "fileName": "workstream.yml",
+    "fileExample": "size: large\nsurfaces: [chrome, iphone, android]\napps: [vscode, terminal]\nvariables: [DATABASE_URL]\nsetup: |-\n  npm ci\n  npm run build",
+    "fileCaption": "The whole environment for a project that runs in the browser and on both phones."
   },
-  "solo": {
-    "eyebrow": "On your own",
-    "title": "Run several things at once without a slower laptop",
+  "ways": {
+    "eyebrow": "Two ways to work",
+    "title": "Work on it yourself, hand it to an agent, or do both on one desktop",
     "points": {
+      "open": {
+        "title": "Open desktop",
+        "body": "You get the project's desktop in a browser tab, with a terminal open in the repository. Nothing is installed on your own computer, and the desktop pauses itself when you stop using it."
+      },
+      "task": {
+        "title": "Start a task",
+        "body": "Write what you want done. An agent works on its own desktop, where you watch it use the browser, the phones and the editor. It finishes with a pull request and a picture of each screen."
+      },
+      "both": {
+        "title": "Take over, or hand over",
+        "body": "Click into an agent's desktop and the mouse and keyboard are yours. Write to the agent on a desktop you opened and it picks the work up there."
+      }
+    },
+    "pictureAlt": "The New task form. A box asks what the agent should do, with a line under it about opening the desktop to work on it yourself, and three buttons: Cancel, Open desktop and Start task."
+  },
+  "ai": {
+    "eyebrow": "AI included",
+    "title": "AI is already connected, and you choose the agent",
+    "body": "Every desktop reaches the same models through Workstream. Nobody pastes a key, and nobody signs in to a model.",
+    "points": {
+      "agent": {
+        "title": "The Workstream agent",
+        "body": "The agent you write to beside the desktop. It works in the browser, on the phones and in the editor, where you can watch."
+      },
+      "opencode": {
+        "title": "OpenCode",
+        "body": "An open-source coding agent in the terminal. Type opencode and it is connected, on every desktop."
+      },
+      "counted": {
+        "title": "One allowance",
+        "body": "Both are counted to the same monthly allowance, and the Usage page shows the cost by person, tool and task."
+      }
+    },
+    "pictureAlt": "A Workstream desktop: VS Code with the file that changed, beside a terminal where OpenCode reports what it added and shows Workstream as its model provider."
+  },
+  "surfaces": {
+    "eyebrow": "Surfaces and applications",
+    "title": "Every surface your product runs on, on one screen",
+    "body": "A surface is where your product runs: Chrome, an iPhone and an Android phone. The file says which ones the project needs, and every desktop has them set up. You and the agent look at the same screens, so what the agent says it tested is what you can see. Applications are what you work with, such as VS Code and a terminal.",
+    "pictureAlt": "One Workstream desktop with three windows side by side: the app in Chrome, the same app on an Android phone and on an iPhone, each showing the same checklist.",
+    "pictureCaption": "One desktop from a real task: the same app in Chrome, on an Android phone and on an iPhone."
+  },
+  "team": {
+    "eyebrow": "For a team",
+    "title": "The same desktop for everyone on the team",
+    "points": {
+      "file": {
+        "title": "One file, changed by pull request",
+        "body": "The desktop is defined in the repository and reviewed like code. A new teammate has the same working setup on their first day as everyone else, and so does every agent."
+      },
+      "versions": {
+        "title": "The same tools and models",
+        "body": "Everyone has the same versions of the simulators, the SDKs and the AI tools, and the same models. An upgrade is one change for the whole team."
+      },
+      "usage": {
+        "title": "Usage in one place",
+        "body": "The Usage page shows what AI cost this month by day, person, tool, model and task, beside desktop time. An administrator sees the team, and everyone sees their own."
+      }
+    },
+    "pictureAlt": "The Usage page: the month's AI cost as a bar for each day, then a table of three people with their tasks, desktop time, AI calls and AI cost."
+  },
+  "free": {
+    "eyebrow": "On your own computer",
+    "title": "Your own computer stays free",
+    "points": {
+      "install": {
+        "title": "Nothing to install",
+        "body": "Builds, simulators, containers and test runs happen on the desktop. Your laptop needs a browser."
+      },
       "parallel": {
-        "title": "Up to four tasks on one screen",
-        "body": "Drag tasks side by side and follow them together. Each has its own desktop, so they never get in each other's way."
+        "title": "Several at once",
+        "body": "Up to four desktops sit side by side on one screen. Each is its own computer, so one piece of work never waits for another's build."
       },
-      "free": {
-        "title": "Nothing runs on your machine",
-        "body": "Builds, browsers, containers and test runs happen on the task's desktop. Close your laptop and the work continues."
-      },
-      "ready": {
-        "title": "A desktop that already has what you use",
-        "body": "Chrome, VS Code, a terminal, Docker, Node, Python and .NET are installed. Save a repository, a setup script and your keys as an environment, and every task starts ready."
+      "pause": {
+        "title": "It pauses and comes back",
+        "body": "A desktop nobody is using is paused by itself. When you return, it comes back with its commands, pages and files."
       }
     }
   },
-  "teams": {
-    "eyebrow": "With a team",
-    "title": "One setup for everyone, and every task in the open",
-    "points": {
-      "shared": {
-        "title": "Shared environments",
-        "body": "Set up the project once. A new teammate, or a new agent, starts from the same desktop in minutes instead of a day."
+  "features": {
+    "title": "What is in Workstream",
+    "more": "Read more",
+    "how": "How to use it",
+    "docs": "Read the docs",
+    "all": "All features",
+    "notFound": "There is no page at this address.",
+    "list": {
+      "open-desktop": {
+        "name": "Open desktop",
+        "summary": "The project's dev environment in a browser tab, ready when it opens.",
+        "metaTitle": "Open desktop · Workstream",
+        "title": "Open desktop gives you the project's dev environment in a browser tab",
+        "lead": "Press New task, choose the project and press Open desktop. About a minute later you are on a Linux desktop with the repository cloned, the setup done, a terminal open in the project and git signed in as you. It is the same desktop an agent gets.",
+        "pictureAlt": "A desktop a person opened, in the browser. The conversation says to work on the desktop yourself or tell the agent what to do. The desktop shows VS Code with the project and a terminal where OpenCode has finished a change.",
+        "points": {
+          "ready": {
+            "title": "Ready when it opens",
+            "body": "The setup script ran when the environment was prepared, so the packages are installed and the app is built before you arrive."
+          },
+          "github": {
+            "title": "GitHub with no tokens",
+            "body": "You signed in with GitHub, so git and gh push and open pull requests as you. Nothing is pasted, and no token is kept on the desktop."
+          },
+          "ai": {
+            "title": "AI with no keys",
+            "body": "Type opencode in the terminal, or write to the Workstream agent beside the desktop. Both are connected."
+          },
+          "pause": {
+            "title": "It pauses when you stop",
+            "body": "A desktop nobody is using is paused after 30 minutes and comes back with its commands, pages and files. Your laptop runs none of it."
+          }
+        },
+        "steps": {
+          "one": "Press New task.",
+          "two": "Choose the project's environment.",
+          "three": "Press Open desktop.",
+          "four": "Work in the browser tab. Write to the agent when you want it to take something on."
+        },
+        "docsHref": "/docs/how-it-works"
       },
-      "visible": {
-        "title": "See and join any task",
-        "body": "Everyone on the team can open a running task, read what the agent did, and take over its desktop. Reviews start before the pull request."
+      "tasks": {
+        "name": "Tasks",
+        "summary": "Hand a piece of work to an agent on a desktop of its own, and take over when you want.",
+        "metaTitle": "Tasks · Workstream",
+        "title": "Tasks hand a piece of work to an agent on a desktop of its own",
+        "lead": "Write what you want done. The agent works on a separate cloud desktop, in the browser, on the phones and in the editor, where you can watch every step. It finishes with a branch, a pull request and a picture of each screen it used.",
+        "pictureAlt": "The Workstream workspace with two tasks open at once. Each has its conversation with the agent on the left and its live desktop on the right.",
+        "points": {
+          "watch": {
+            "title": "You see all of it",
+            "body": "The desktop in your browser is the real screen, live. The task also shows which command the agent is running and for how long."
+          },
+          "takeOver": {
+            "title": "Take over at any point",
+            "body": "Click into the desktop and the mouse and keyboard are yours. Fix something or sign in to a site yourself, then write to the agent to hand the work back."
+          },
+          "parallel": {
+            "title": "Several at once",
+            "body": "Each task has its own computer. Up to four fit side by side on one screen, and none of them slows your laptop."
+          },
+          "done": {
+            "title": "It tells you when it is done",
+            "body": "When the agent finishes or has a question, Workstream emails the people on the task. The work keeps going with your laptop closed."
+          }
+        },
+        "steps": {
+          "one": "Press New task and write what you want done.",
+          "two": "Choose the project's environment and press Start task.",
+          "three": "Watch, or go and do something else. Write to the agent at any time.",
+          "four": "Review the pull request and the pictures when it hands over."
+        },
+        "docsHref": "/docs/how-it-works"
       },
-      "control": {
-        "title": "Limits, and usage everyone can see",
-        "body": "Each task runs on its own isolated machine. A team has a limit on how many run at once and a monthly allowance for AI models, and anyone on the team can see what has been used."
+      "ai": {
+        "name": "AI included",
+        "summary": "The Workstream agent and OpenCode on every desktop, with no key and no sign-in.",
+        "metaTitle": "AI included · Workstream",
+        "title": "AI included means every desktop has an agent that already works",
+        "lead": "There are two agents on every desktop, and you use whichever you prefer. The Workstream agent is the one you write to beside the desktop. OpenCode is an open-source coding agent in the terminal. Neither asks you to sign in, and neither holds a key.",
+        "pictureAlt": "A Workstream desktop: VS Code with the file that changed, beside a terminal where OpenCode reports what it added and shows Workstream as its model provider.",
+        "points": {
+          "agent": {
+            "title": "The Workstream agent",
+            "body": "Write to it in the conversation. It works in the browser, on the phones and in the editor, and hands over with a pull request and pictures."
+          },
+          "opencode": {
+            "title": "OpenCode",
+            "body": "Open a terminal and type opencode. It starts connected to the same models, at the version the whole team has."
+          },
+          "keys": {
+            "title": "No keys on the desktop",
+            "body": "Every model call goes through Workstream, which adds the credential on its side. There is no key for anyone to paste, lose or rotate."
+          },
+          "counted": {
+            "title": "Counted the same way",
+            "body": "Both agents use the team's one monthly allowance. Workstream keeps each call's size and cost, and never what was sent or answered."
+          }
+        },
+        "steps": {
+          "one": "To use the Workstream agent, write a message beside the desktop.",
+          "two": "To use OpenCode, open a terminal on the desktop and type opencode.",
+          "three": "Use both on one desktop when that suits the work.",
+          "four": "See what each cost on the Usage page."
+        },
+        "docsHref": "/docs/ai"
+      },
+      "environments": {
+        "name": "Environments",
+        "summary": "One workstream.yml says what every desktop for the project comes with.",
+        "metaTitle": "Environments · Workstream",
+        "title": "Environments describe the project's desktop in one file",
+        "lead": "An environment is what a desktop starts with. Keep it in the repository as workstream.yml, and every person's desktop and every agent's is made from the same file. Change the file by pull request and everyone has the change.",
+        "pictureAlt": "The New environment form: a repository, then Surfaces with Chrome, Android phone and iPhone ticked, then Applications with VS Code and Terminal ticked.",
+        "points": {
+          "surfaces": {
+            "title": "Surfaces",
+            "body": "Where your product runs: Chrome, an iPhone and an Android phone. Each is a window on the desktop that you and the agent both use."
+          },
+          "apps": {
+            "title": "Applications",
+            "body": "What you work with: VS Code, a terminal, the file manager and the office apps. Each gets a button on the desktop's panel."
+          },
+          "setup": {
+            "title": "Setup done once",
+            "body": "The setup script runs once on a machine of its own, and its disk is saved. Desktops start from the save, with the packages installed and the app built."
+          },
+          "variables": {
+            "title": "Variables kept out of the repository",
+            "body": "The file lists the names. The values are set in Workstream, stored protected, and given only to desktops made from the environment."
+          }
+        },
+        "steps": {
+          "one": "Add an environment and pick the repository.",
+          "two": "Fill in the form, or add workstream.yml to the repository and let it fill the form.",
+          "three": "Set the variables' values in Workstream.",
+          "four": "Start tasks and open desktops from it."
+        },
+        "docsHref": "/docs/environments"
+      },
+      "usage": {
+        "name": "Usage",
+        "summary": "What AI and desktops cost this month, by day, person, tool, model and task.",
+        "metaTitle": "Usage · Workstream",
+        "title": "Usage shows what AI and desktops cost, by person, tool and task",
+        "lead": "Every model call from a desktop goes through Workstream, so all of it is counted in one place, whichever agent made it. The Usage page shows the month beside the team's allowance, and who and what used it.",
+        "pictureAlt": "The Usage page: the month's AI cost as a bar for each day, then a table of three people with their tasks, desktop time, AI calls and AI cost.",
+        "points": {
+          "people": {
+            "title": "By person",
+            "body": "Each person's tasks, desktop time, AI calls and cost. An administrator sees the whole team, and everyone else sees their own."
+          },
+          "tools": {
+            "title": "By tool and model",
+            "body": "How much the Workstream agent used, how much OpenCode used, and which models answered."
+          },
+          "tasks": {
+            "title": "By task",
+            "body": "The ten tasks that cost most this month, with who started each."
+          },
+          "private": {
+            "title": "Sizes and costs only",
+            "body": "Workstream keeps each call's size, cost, model, tool, task and person. It never keeps what was sent to a model or what it answered."
+          }
+        },
+        "steps": {
+          "one": "Open Usage in the sidebar.",
+          "two": "Read the month's cost day by day.",
+          "three": "Look at People, Tools, Models and Tasks to see where it went.",
+          "four": "Ask whoever runs Workstream to change the team's allowance."
+        },
+        "docsHref": "/docs/usage-and-limits"
       }
     }
   },
   "closing": {
-    "title": "Start your first task",
-    "body": "Sign up, write what you want done, and watch a desktop do it.",
+    "title": "Open your first desktop",
+    "body": "Sign in with GitHub, pick a repository and start working.",
     "cta": "Get started"
   },
   "footer": {

@@ -373,9 +373,22 @@ async function prepareWindows(setup, workspace) {
   if (!(await browserAnswers())) start("chromium", ["about:blank"], setup.variables);
   if (setup.apps.includes("vscode")) start("code", [workspace], setup.variables);
   startPhones(setup);
-  // Opened by a person to work on, with nothing asked of the agent: their terminal is waiting for them.
-  if (setup.opened) openTerminal(workspace, setup.variables);
+  // Opened by a person to work on, with nothing asked of the agent: their terminal is waiting for them, in
+  // front. The editor takes a few seconds to draw its window and would cover a terminal opened before it.
+  if (setup.opened) {
+    if (setup.apps.includes("vscode")) await windowUp("Visual Studio Code", 30);
+    openTerminal(workspace, setup.variables);
+  }
   watchTabs();
+}
+
+/** Wait for a window whose title holds these words, for at most this many seconds. */
+async function windowUp(words, seconds) {
+  for (let waited = 0; waited < seconds * 2; waited++) {
+    const listed = await run("wmctrl", ["-l"], { timeout: 2000 }).then((result) => result.stdout, () => "");
+    if (listed.includes(words)) return;
+    await sleep(500);
+  }
 }
 
 /** The environment's phones come up with the desktop, each in its own window (phone.mjs), so they are there to watch and to touch. */

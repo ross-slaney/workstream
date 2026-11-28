@@ -1,16 +1,17 @@
+import { FEATURES, featureHref, featuresHref } from "@/src/landing/features";
 import { docsPaths } from "./docs/page";
 
 /*
  * What search engines are told about the public website, and where that list is (robots.txt). The public
- * pages are the landing page and the docs. The signed-in app renders in the browser and has nothing to index,
+ * pages are the landing page, the features' pages and the docs. The signed-in app renders in the browser and has nothing to index,
  * so robots.txt keeps crawlers out of it. Server only: the docs pages are read from disk.
  */
 
 export const sitemapPath = "/sitemap.xml";
 
-/** Every public page's path: the landing page, then the docs. */
+/** Every public page's path: the landing page, the features, then the docs. */
 export function publicPaths(): string[] {
-  return ["/", ...docsPaths()];
+  return ["/", featuresHref, ...FEATURES.map(featureHref), ...docsPaths()];
 }
 
 const escapeXml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

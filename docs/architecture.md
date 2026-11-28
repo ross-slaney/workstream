@@ -19,7 +19,7 @@ a person's browser
                                  └── calls the API at its public address, with its own key
 ```
 
-- **The web app** has no secrets and no database. Public pages (the landing page, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session. Its `/auth/callback` page is where SqlOS sends the browser, with a code, after someone signs in with GitHub.
+- **The web app** has no secrets and no database. Public pages (the landing page, a page for each feature, the docs, sign-in, an invitation) render on the server; everything signed-in renders in the browser, which holds the session. Its `/auth/callback` page is where SqlOS sends the browser, with a code, after someone signs in with GitHub.
 - **The API** is one process: the REST API with SqlOS for sign-in and authorization, the relay that carries a desktop's display to the people watching it, the gateway every agent's model calls go through, and the background jobs (Hangfire, in the app's own database) that make, stop and delete desktops.
 - **The Mac** is not a machine Workstream keeps: it is a run of one workflow in Workstream's own repository on GitHub's Mac runners, started by the API when a desktop needs an iPhone app built ("Phones on a desktop").
 - **A desktop** is a Debian virtual machine with the XFCE desktop on a TigerVNC display, made from one image. A machine made from the image starts as it is: nothing provisions it, and it learns what it is for from its user data. In development it is a Docker container built from the same two scripts.

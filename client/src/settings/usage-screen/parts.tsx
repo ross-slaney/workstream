@@ -257,7 +257,7 @@ export function LinesTable({ first, headings, lines, empty }: UsageLines) {
             {first}
           </th>
           {headings.map((heading) => (
-            <th key={heading} scope="col" className={cn("py-2 pl-4 text-right text-[12.5px] font-medium text-muted-foreground", headings.length > 2 ? "w-[112px]" : "w-[150px]")}>
+            <th key={heading} scope="col" className={cn("py-2 pl-4 text-right text-[12.5px] font-medium text-muted-foreground", headings.length > 2 ? "w-[124px]" : "w-[150px]")}>
               {heading}
             </th>
           ))}
@@ -272,7 +272,7 @@ export function LinesTable({ first, headings, lines, empty }: UsageLines) {
               <Share share={line.share} />
             </th>
             {line.amounts.map((amount, index) => (
-              <td key={headings[index]} className="py-3 pl-4 text-right align-top text-sm tabular-nums text-foreground">
+              <td key={headings[index]} className="whitespace-nowrap py-3 pl-4 text-right align-top text-sm tabular-nums text-foreground">
                 {amount}
               </td>
             ))}

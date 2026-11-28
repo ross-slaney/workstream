@@ -20,6 +20,7 @@ test("it starts on the model the Workstream agent uses and offers only the deplo
   assert.deepEqual(settings.provider.anthropic.whitelist, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
   assert.deepEqual(Object.keys(settings.provider.anthropic.models), ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
   assert.equal(settings.provider.anthropic.models["claude-opus-5-5"].name, "Claude Opus 5.5");
+  assert.equal(settings.provider.anthropic.name, "Workstream");
 });
 
 test("a deployment with one model for everything lists it once", () => {
