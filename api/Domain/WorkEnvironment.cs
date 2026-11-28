@@ -12,7 +12,7 @@ public sealed record EnvironmentSettings(
     bool FromFile = false);
 
 /// <summary>
-/// An environment: what a desktop comes with. The simple part is its apps; the rest is optional and is what
+/// An environment: what a desktop comes with. The simple part is its surfaces and applications; the rest is optional and is what
 /// makes a desktop ready for a particular project: a repository to clone, a script to run once, variables the
 /// desktop's programs read, and instructions the agent follows. A node under its team. (The class is not named
 /// Environment because System.Environment is.)
@@ -34,7 +34,10 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     public string TeamId { get; private set; } = "";
     public string ResourceId { get; private set; } = "";
     public string Name { get; private set; } = "";
-    /// <summary>Ids from the app catalog (desktop/apps.json): what is on the desktop.</summary>
+    /// <summary>
+    /// Ids from the catalog (desktop/apps.json): the desktop's surfaces and applications in one list, surfaces
+    /// first. Which of the two an id is comes from the catalog (<see cref="AppCatalog.IsSurface"/>).
+    /// </summary>
     public List<string> Apps { get; private set; } = [];
     /// <summary>A key of <see cref="DesktopSizes"/>.</summary>
     public string Size { get; private set; } = DesktopSizes.Default;
@@ -64,7 +67,7 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     public DateTimeOffset UpdatedAt { get; private set; }
     /// <summary>
     /// A fingerprint of everything a prepared setup depends on: the repository, the branch, the setup script,
-    /// the variables with their values, the apps, and the size, whose disk the save is. A saved setup is used only while this is what it was
+    /// the variables with their values, the surfaces and applications, and the size, whose disk the save is. A saved setup is used only while this is what it was
     /// made from (<see cref="EnvironmentSetup"/>). Written by whoever changes the environment, who can read
     /// the variables; null on an environment not changed since this existed, until it is first needed.
     /// </summary>
@@ -92,7 +95,7 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
         return environment;
     }
 
-    /// <summary>The environment every new team starts with: a plain desktop with the usual apps.</summary>
+    /// <summary>The environment every new team starts with: a plain desktop with the usual surfaces and applications.</summary>
     public static WorkEnvironment Standard(Team team, string createdBy, DateTimeOffset now) =>
         Add(Guid.NewGuid().ToString("D"), team, new EnvironmentSettings("Standard desktop", AppCatalog.Defaults, DesktopSizes.Default, null, null, null, null), createdBy, now);
 
@@ -100,8 +103,8 @@ public sealed class WorkEnvironment : ISqlOSResourceEntity
     {
         ChangedBy = Rules.Principal(changedBy, "Whoever changed it");
         Name = Rules.Text(settings.Name, "An environment's name", 100);
-        var apps = settings.Apps.Distinct(StringComparer.Ordinal).ToList();
-        if (apps.FirstOrDefault(app => !AppCatalog.Has(app)) is { } unknown) throw new DomainRuleException($"'{unknown}' is not an app a desktop can come with.");
+        if (settings.Apps.FirstOrDefault(app => !AppCatalog.Has(app)) is { } unknown) throw new DomainRuleException($"'{unknown}' is not a surface or an app a desktop can come with.");
+        var apps = AppCatalog.InOrder(settings.Apps).ToList();
         Apps = apps;
         Size = DesktopSizes.Has(settings.Size) ? settings.Size : throw new DomainRuleException($"A desktop's size is one of {string.Join(", ", DesktopSizes.Keys)}.");
         // The simulator alone takes 9 GB of memory, beside the project's own stack.
@@ -151,14 +154,35 @@ public static class DesktopSizes
     public static bool Has(string? size) => size is not null && Keys.Contains(size);
 }
 
-/// <summary>An app a desktop can come with (desktop/apps.json): the one list the API, the image and the desktop read.</summary>
-public sealed record DesktopApp(string Id, string Name, string Description, string Launcher, bool Default);
+/// <summary>
+/// Something a desktop can come with (desktop/apps.json): the one list the API, the image and the desktop read.
+/// <see cref="Kind"/> says which of two things it is: a surface, where the product being worked on runs and is
+/// seen and used (the browser, a phone), or an application, which the person and the agent work with (the
+/// editor, a terminal).
+/// </summary>
+public sealed record DesktopApp(string Id, string Name, string Description, string Launcher, bool Default, string Kind);
 
 public static class AppCatalog
 {
+    /// <summary>Where the product being worked on runs: <see cref="DesktopApp.Kind"/> of the browser and the phones.</summary>
+    public const string SurfaceKind = "surface";
+    /// <summary>What the person and the agent work with: <see cref="DesktopApp.Kind"/> of everything else.</summary>
+    public const string ApplicationKind = "app";
+
     public static readonly IReadOnlyList<DesktopApp> All = Read();
 
-    public static readonly IReadOnlyList<string> Defaults = [.. All.Where(app => app.Default).Select(app => app.Id)];
+    /// <summary>The surfaces' ids, in the catalog's order.</summary>
+    public static readonly IReadOnlyList<string> Surfaces = [.. All.Where(app => app.Kind == SurfaceKind).Select(app => app.Id)];
+    /// <summary>The applications' ids, in the catalog's order.</summary>
+    public static readonly IReadOnlyList<string> Applications = [.. All.Where(app => app.Kind == ApplicationKind).Select(app => app.Id)];
+
+    /// <summary>The surfaces a desktop has when nothing says otherwise.</summary>
+    public static readonly IReadOnlyList<string> DefaultSurfaces = [.. All.Where(app => app.Default && app.Kind == SurfaceKind).Select(app => app.Id)];
+    /// <summary>The applications a desktop has when nothing says otherwise.</summary>
+    public static readonly IReadOnlyList<string> DefaultApplications = [.. All.Where(app => app.Default && app.Kind == ApplicationKind).Select(app => app.Id)];
+
+    /// <summary>What a new environment comes with: the default surfaces, then the default applications.</summary>
+    public static readonly IReadOnlyList<string> Defaults = [.. DefaultSurfaces, .. DefaultApplications];
 
     /// <summary>The iPhone simulator, which only a Large desktop has room for.</summary>
     public const string Iphone = "iphone";
@@ -167,11 +191,25 @@ public static class AppCatalog
 
     public static bool Has(string id) => All.Any(app => app.Id == id);
 
+    public static bool IsSurface(string id) => Surfaces.Contains(id);
+
+    /// <summary>The ids as an environment keeps them: surfaces first, then applications, each in the order given, each once.</summary>
+    public static IReadOnlyList<string> InOrder(IEnumerable<string> ids)
+    {
+        var once = ids.Distinct(StringComparer.Ordinal).ToList();
+        return [.. once.Where(IsSurface), .. once.Where(id => !IsSurface(id))];
+    }
+
     static IReadOnlyList<DesktopApp> Read()
     {
         using var stream = typeof(AppCatalog).Assembly.GetManifestResourceStream("Workstream.Apps.json")
             ?? throw new InvalidOperationException("desktop/apps.json is not embedded.");
-        return System.Text.Json.JsonSerializer.Deserialize<List<DesktopApp>>(stream, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+        var all = System.Text.Json.JsonSerializer.Deserialize<List<DesktopApp>>(stream, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
             ?? throw new InvalidOperationException("desktop/apps.json is empty.");
+        if (all.FirstOrDefault(app => app.Kind is not (SurfaceKind or ApplicationKind)) is { } unsorted)
+        {
+            throw new InvalidOperationException($"desktop/apps.json: the kind of {unsorted.Id} is {SurfaceKind} or {ApplicationKind}.");
+        }
+        return all;
     }
 }
