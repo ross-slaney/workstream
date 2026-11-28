@@ -212,7 +212,7 @@ A desktop made before the change keeps its Standard SSD until its task is delete
 
 ## Phones on a desktop
 
-An environment can give its desktops two more apps (`desktop/apps.json`): `android`, the Android phone above in a window of its own, and `iphone`, an iPhone simulator. Each has a button on the panel, comes up with the desktop, and is there for the person to click and type on. The agent uses them the way a person does: it opens the app, reads the screen and taps through what it changed, and is told to check a change on every surface the desktop has (`agent/phones.mjs`).
+An environment can give its desktops two more surfaces (`desktop/apps.json`): `android`, the Android phone above in a window of its own, and `iphone`, an iPhone simulator. Each has a button on the panel, comes up with the desktop, and is there for the person to click and type on. The agent uses them the way a person does: it opens the app, reads the screen and taps through what it changed, and is told to check a change on every surface the desktop has (`agent/phones.mjs`).
 
 One command is the same for the agent, a terminal and the panel's buttons (`agent/phone.mjs`, on the PATH as `phone`):
 

@@ -6,8 +6,10 @@ namespace Workstream.Api.Domain;
 
 /// <summary>
 /// What a repository's <c>workstream.yml</c> says a desktop for it comes with. A setting the file leaves out is
-/// what a new environment gets: the standard size, the usual apps, no setup script, no variables, no
-/// instructions. Variables are names only; their values are set in Workstream and never written to the file.
+/// what a new environment gets: the standard size, the usual surfaces and applications, no setup script, no
+/// variables, no instructions. <see cref="Apps"/> is the file's <c>surfaces</c> and <c>apps</c> in one list,
+/// surfaces first, as an environment keeps them. Variables are names only; their values are set in Workstream
+/// and never written to the file.
 /// </summary>
 public sealed record WorkstreamFileSettings(string Size, IReadOnlyList<string> Apps, string? Setup, IReadOnlyList<string> Variables, string? Instructions);
 
@@ -20,8 +22,12 @@ public sealed record WorkstreamFileRead(WorkstreamFileSettings? Settings, IReadO
 /// <summary>
 /// <c>workstream.yml</c> at a repository's root: an environment written down beside the code it is for
 /// (docs/environments). It is read strictly, so a mistake is named rather than half-used: a setting the file
-/// does not know, a size or an app Workstream does not have, a variable's name a shell cannot read, or YAML
-/// that does not parse are each an error with its line.
+/// does not know, a size, a surface or an app Workstream does not have, a variable's name a shell cannot read,
+/// or YAML that does not parse are each an error with its line.
+///
+/// <c>surfaces</c> is where the product runs (the browser, the phones) and <c>apps</c> is what the person and
+/// the agent work with. A file written before the two were told apart lists its surfaces under <c>apps</c>,
+/// and is still read as it was: a surface there counts as a surface.
 /// </summary>
 public static class WorkstreamFile
 {
@@ -29,7 +35,7 @@ public static class WorkstreamFile
     /// <summary>A file larger than this is not read.</summary>
     public const int MaxBytes = 64 * 1024;
 
-    static readonly string[] Keys = ["size", "setup", "apps", "variables", "instructions"];
+    static readonly string[] Keys = ["size", "setup", "surfaces", "apps", "variables", "instructions"];
 
     public static WorkstreamFileRead Read(string text)
     {
@@ -51,7 +57,9 @@ public static class WorkstreamFile
 
         var errors = new List<string>();
         var size = DesktopSizes.Default;
-        IReadOnlyList<string> apps = AppCatalog.Defaults;
+        // Null: the file does not have the key, so the default for it applies.
+        List<string>? surfaces = null;
+        List<string>? apps = null;
         string? setup = null;
         string? instructions = null;
         IReadOnlyList<string> variables = [];
@@ -71,17 +79,33 @@ public static class WorkstreamFile
                 case "instructions":
                     instructions = Text(value, "instructions", WorkEnvironment.MaxInstructionsLength, line, errors);
                     break;
+                case "surfaces":
+                    if (List(value, "surfaces", line, errors) is { } shown)
+                    {
+                        var unknown = shown.Where(surface => !AppCatalog.Has(surface)).ToList();
+                        var applications = shown.Where(surface => AppCatalog.Has(surface) && !AppCatalog.IsSurface(surface)).ToList();
+                        if (unknown.Count > 0)
+                        {
+                            errors.Add($"Line {line}: {string.Join(", ", unknown)} {(unknown.Count == 1 ? "is not a surface" : "are not surfaces")} a desktop can come with. The surfaces are {string.Join(", ", AppCatalog.Surfaces)}.");
+                        }
+                        if (applications.Count > 0)
+                        {
+                            errors.Add($"Line {line}: {string.Join(", ", applications)} {(applications.Count == 1 ? "is an app, not a surface. List it" : "are apps, not surfaces. List them")} under apps.");
+                        }
+                        if (unknown.Count == 0 && applications.Count == 0) surfaces = shown;
+                    }
+                    break;
                 case "apps":
                     if (List(value, "apps", line, errors) is { } listed)
                     {
                         var unknown = listed.Where(app => !AppCatalog.Has(app)).ToList();
                         if (unknown.Count > 0)
                         {
-                            errors.Add($"Line {line}: {string.Join(", ", unknown)} {(unknown.Count == 1 ? "is not an app" : "are not apps")} a desktop can come with. The apps are {string.Join(", ", AppCatalog.All.Select(x => x.Id))}.");
+                            errors.Add($"Line {line}: {string.Join(", ", unknown)} {(unknown.Count == 1 ? "is not an app" : "are not apps")} a desktop can come with. The apps are {string.Join(", ", AppCatalog.Applications)}.");
                         }
                         else
                         {
-                            apps = [.. listed.Distinct(StringComparer.Ordinal)];
+                            apps = listed;
                         }
                     }
                     break;
@@ -99,11 +123,22 @@ public static class WorkstreamFile
                     break;
             }
         }
-        return errors.Count > 0 ? new WorkstreamFileRead(null, errors) : new WorkstreamFileRead(new WorkstreamFileSettings(size, apps, setup, variables, instructions), []);
+        return errors.Count > 0 ? new WorkstreamFileRead(null, errors) : new WorkstreamFileRead(new WorkstreamFileSettings(size, Together(surfaces, apps), setup, variables, instructions), []);
     }
 
     /// <summary>
-    /// The file for an environment's settings, written so that <see cref="Read"/> gives the same settings back.
+    /// The file's two lists as the one an environment keeps. A list the file leaves out is its default. A
+    /// surface under <c>apps</c> is a surface, which is how a file written before <c>surfaces</c> existed lists it.
+    /// </summary>
+    static IReadOnlyList<string> Together(List<string>? surfaces, List<string>? apps) => AppCatalog.InOrder(
+    [
+        .. surfaces ?? AppCatalog.DefaultSurfaces,
+        .. apps ?? AppCatalog.DefaultApplications,
+    ]);
+
+    /// <summary>
+    /// The file for an environment's settings, written so that <see cref="Read"/> gives the same settings back,
+    /// surfaces first. Both lists are always written, so an empty one says "none" and not "the usual ones".
     /// Variables are their names only.
     /// </summary>
     public static string Write(WorkstreamFileSettings settings)
@@ -111,7 +146,10 @@ public static class WorkstreamFile
         var text = new StringBuilder();
         text.Append("# What a Workstream desktop for this repository comes with (Workstream's docs, Environments).\n");
         text.Append("size: ").Append(settings.Size).Append('\n');
-        text.Append("apps: [").Append(string.Join(", ", settings.Apps)).Append("]\n");
+        text.Append("# Where the product runs.\n");
+        text.Append("surfaces: [").Append(string.Join(", ", settings.Apps.Where(AppCatalog.IsSurface))).Append("]\n");
+        text.Append("# What you and the agent work with.\n");
+        text.Append("apps: [").Append(string.Join(", ", settings.Apps.Where(app => !AppCatalog.IsSurface(app)))).Append("]\n");
         if (settings.Variables.Count > 0)
         {
             text.Append("# Names only: their values are set in Workstream.\n");
@@ -160,7 +198,7 @@ public static class WorkstreamFile
         if (node is YamlScalarNode { Value: null or "" or "~" or "null" }) return [];
         if (node is not YamlSequenceNode sequence || sequence.Children.Any(x => x is not YamlScalarNode { Value.Length: > 0 }))
         {
-            errors.Add($"Line {line}: {key} is a list, such as {key}: [{(key == "apps" ? "chrome, vscode, terminal" : "DATABASE_URL")}].");
+            errors.Add($"Line {line}: {key} is a list, such as {key}: [{key switch { "surfaces" => "chrome, android", "apps" => "vscode, terminal", _ => "DATABASE_URL" }}].");
             return null;
         }
         return [.. sequence.Children.Select(x => ((YamlScalarNode)x).Value!.Trim())];

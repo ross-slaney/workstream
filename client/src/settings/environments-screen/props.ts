@@ -4,7 +4,7 @@ import type { DesktopApp, DesktopSize, Environment, EnvironmentSetup, GitHubRepo
 /** A variable in the editor. One that is already saved shows no value; typing one replaces it. */
 export type VariableDraft = { name: string; value: string; saved: boolean };
 
-/** An environment as it is being written. `fromFile`: its settings are the repository's workstream.yml. */
+/** An environment as it is being written. `apps` holds its surfaces and its applications in one list. `fromFile`: its settings are the repository's workstream.yml. */
 export type EnvironmentDraft = {
   name: string;
   apps: string[];
@@ -68,7 +68,7 @@ export type RepositoryFileOffer = { justSaved: boolean; busy: boolean; error: st
  */
 export type EnvironmentsScreenProps = {
   environments: Online<Environment[]>;
-  /** The apps a desktop can come with. */
+  /** What a desktop can come with: the surfaces its product runs on and the applications people work with, each saying which it is. */
   apps: DesktopApp[];
   picker: RepositoryPicker;
   onRetry: () => void;

@@ -1,5 +1,6 @@
 using System.Net;
 using Workstream.Api;
+using Workstream.Api.Domain;
 
 namespace Workstream.Tests;
 
@@ -57,13 +58,36 @@ public sealed class EnvironmentJourneys
         var path = $"/api/teams/{team.Id}/environments";
         string Id() => Guid.NewGuid().ToString("D");
         await ada.PostAsync(path, Draft(Id(), " ")).IsAsync(HttpStatusCode.BadRequest);
-        await ada.PostAsync(path, Draft(Id()) with { Apps = ["chrome", "photoshop"] }).IsAsync(HttpStatusCode.BadRequest);
+        await ada.PostAsync(path, Draft(Id()) with { Apps = ["chrome", "photoshop"] }).IsAsync(HttpStatusCode.BadRequest, "'photoshop' is not a surface or an app a desktop can come with.");
         await ada.PostAsync(path, Draft(Id()) with { Size = "enormous" }).IsAsync(HttpStatusCode.BadRequest);
         await ada.PostAsync(path, Draft(Id()) with { RepositoryUrl = "ftp://example.com/app" }).IsAsync(HttpStatusCode.BadRequest);
         await ada.PostAsync(path, Draft(Id(), "Web", new VariableChange("not a name", "x"))).IsAsync(HttpStatusCode.BadRequest);
         await ada.PostAsync(path, Draft(Id(), "Web", new VariableChange("A", "1"), new VariableChange("A", "2"))).IsAsync(HttpStatusCode.BadRequest, "listed twice");
         // Nothing was kept from any of them.
         Assert.AreEqual(1, (await ada.GetAsync<ListPage<EnvironmentDto>>(path)).Data.Count);
+    }
+
+    [TestMethod]
+    public async Task An_environment_keeps_its_surfaces_before_its_apps_and_the_catalog_says_which_is_which()
+    {
+        var (ada, team) = await Person.WithTeamAsync();
+        // Sent in any order, as a form's checkboxes give them.
+        var id = Guid.NewGuid().ToString("D");
+        var added = await ada.PostAsync<EnvironmentDto>($"/api/teams/{team.Id}/environments", Draft(id) with { Apps = ["terminal", "android", "vscode", "chrome", "android"] });
+        CollectionAssert.AreEqual(new[] { "android", "chrome", "terminal", "vscode" }, added.Apps.ToArray());
+        var changed = await ada.PutAsync<EnvironmentDto>($"/api/environments/{id}", new WriteEnvironment("Web app", ["files", "chrome"], "small", null, null, null, null, []));
+        CollectionAssert.AreEqual(new[] { "chrome", "files" }, changed.Apps.ToArray());
+
+        // The catalog names each one's kind: a surface is where the product runs, an app is what people work with.
+        var catalog = await ada.GetAsync<List<DesktopApp>>("/api/apps");
+        CollectionAssert.AreEqual(new[] { "chrome", "android", "iphone" }, catalog.Where(x => x.Kind == "surface").Select(x => x.Id).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "vscode", "terminal", "files", "writer", "calc", "impress" }, catalog.Where(x => x.Kind == "app").Select(x => x.Id).ToArray());
+        Assert.AreEqual(catalog.Count, catalog.Count(x => x.Kind is "surface" or "app"));
+
+        // A desktop is told the one list, as before.
+        var task = await ada.PostAsync<TaskDto>($"/api/teams/{team.Id}/tasks", new StartTask(Guid.NewGuid().ToString("D"), id, null, "Say hello.", Guid.NewGuid().ToString("D")));
+        using var desktop = await Desktop.StartAsync(task.Id);
+        CollectionAssert.AreEqual(new[] { "chrome", "files" }, (await desktop.SetupAsync()).Apps.ToArray());
     }
 
     [TestMethod]

@@ -34,7 +34,7 @@ const page = (options: {
   renderToStaticMarkup(
     <EnvironmentsPage
       environments={{ kind: "ready", value: [] }}
-      apps={[{ id: "chrome", name: "Chrome", description: "The web browser.", launcher: "chromium.desktop", default: true }]}
+      apps={[{ id: "chrome", name: "Chrome", description: "The web browser.", launcher: "chromium.desktop", default: true, kind: "surface" }]}
       picker={{
         repositories: options.repositories ?? { kind: "ready", value: github() }, branches: options.branches ?? null, moreBranches: options.moreBranches ?? false, reading: options.reading ?? { kind: "none" },
         onPick: nothing, onBranch: nothing, onReadAgain: nothing, onSignInWithGitHub: nothing, onRetry: nothing,
@@ -109,7 +109,8 @@ describe("what Workstream does with the picked repository", () => {
   it("shows how to write the file when the repository has none, and never guesses a setup", () => {
     const drawn = page({ draft: picked, reading: { kind: "noFile", branch: "main" } });
     expect(drawn).toContain("acme/web has no workstream.yml on main.");
-    expect(drawn).toContain("apps: [chrome, vscode, terminal]");
+    expect(drawn).toContain("surfaces: [chrome]");
+    expect(drawn).toContain("apps: [vscode, terminal]");
     expect(drawn).toContain("Or fill in the settings below.");
     expect(drawn).toContain('href="/docs/environments#workstreamyml"');
     expect(drawn).not.toContain("Suggest");
@@ -136,7 +137,7 @@ describe("saving the environment to its repository", () => {
     expect(drawn).toContain("Save as workstream.yml in the repository");
     expect(drawn).toContain(">Done<");
     expect(drawn).not.toContain("Save environment");
-    expect(drawn).not.toContain("Apps on the desktop");
+    expect(drawn).not.toContain("Where your product runs.");
   });
 
   it("says what it made: a commit, or a pull request where the branch is protected", () => {

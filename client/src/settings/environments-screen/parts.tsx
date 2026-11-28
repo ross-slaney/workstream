@@ -6,7 +6,7 @@ import { CheckField, SelectField, TextArea, TextField } from "@/components/kit/f
 import { EmptyState, ErrorNote, ReadState } from "@/components/kit/status";
 import { useTheme } from "@/components/theme/theme";
 import { useT } from "@/lib/i18n";
-import type { DesktopSize, Environment, EnvironmentSetup } from "@/lib/workstream/api";
+import type { DesktopApp, DesktopSize, Environment, EnvironmentSetup } from "@/lib/workstream/api";
 import { SettingsPage } from "../page";
 import type { EnvironmentDraft, EnvironmentsScreenProps } from "./props";
 import { gitHubName } from "./repository";
@@ -30,7 +30,7 @@ export function EnvironmentsPage(p: EnvironmentsScreenProps) {
         <ul className="flex flex-col gap-2">
           {p.environments.value.map((environment) => (
             <li key={environment.id}>
-              <EnvironmentRow environment={environment} onEdit={() => p.onEdit(environment)} />
+              <EnvironmentRow environment={environment} catalog={p.apps} onEdit={() => p.onEdit(environment)} />
             </li>
           ))}
         </ul>
@@ -40,10 +40,19 @@ export function EnvironmentsPage(p: EnvironmentsScreenProps) {
   );
 }
 
-function EnvironmentRow({ environment, onEdit }: { environment: Environment; onEdit: () => void }) {
+/** How many of an environment's ids are surfaces and how many are applications, by the catalog. An id the catalog does not list counts as an application. */
+export function countKinds(ids: string[], catalog: DesktopApp[]) {
+  const surfaces = ids.filter((id) => catalog.some((app) => app.id === id && app.kind === "surface")).length;
+  return { surfaces, apps: ids.length - surfaces };
+}
+
+function EnvironmentRow({ environment, catalog, onEdit }: { environment: Environment; catalog: DesktopApp[]; onEdit: () => void }) {
   const t = useT("settings");
+  const counts = countKinds(environment.apps, catalog);
   const facts = [
-    t("environments.appsCount", { count: environment.apps.length }),
+    // A kind the environment has none of is left out.
+    counts.surfaces > 0 ? t("environments.surfacesCount", { count: counts.surfaces }) : null,
+    counts.apps > 0 ? t("environments.appsCount", { count: counts.apps }) : null,
     environment.repositoryUrl ? t("environments.hasRepository", { repository: environment.repositoryUrl.replace(/^https:\/\/(www\.)?/, "") }) : null,
     environment.setupScript ? t("environments.hasSetup") : null,
     environment.variableNames.length > 0 ? t("environments.variablesCount", { count: environment.variableNames.length }) : null,
@@ -116,21 +125,8 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
 
       <RepositorySection picker={p.picker} draft={draft} onChange={set} />
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium text-foreground">{t("environments.editor.apps")}</legend>
-        <p className="text-[13px] text-muted-foreground">{t("environments.editor.appsHint")}</p>
-        <div className="grid gap-2 md:grid-cols-2">
-          {p.apps.map((app) => (
-            <CheckField
-              key={app.id}
-              label={app.name}
-              description={app.description}
-              checked={draft.apps.includes(app.id)}
-              onChange={(checked) => set({ apps: checked ? [...draft.apps, app.id] : draft.apps.filter((other) => other !== app.id) })}
-            />
-          ))}
-        </div>
-      </fieldset>
+      <AppChoices legend={t("environments.editor.surfaces")} hint={t("environments.editor.surfacesHint")} choices={p.apps.filter((app) => app.kind === "surface")} chosen={draft.apps} onChange={(apps) => set({ apps })} />
+      <AppChoices legend={t("environments.editor.apps")} hint={t("environments.editor.appsHint")} choices={p.apps.filter((app) => app.kind !== "surface")} chosen={draft.apps} onChange={(apps) => set({ apps })} />
 
       <SelectField
         label={t("environments.editor.size")}
@@ -185,6 +181,31 @@ function Editor(p: EnvironmentsScreenProps & { editor: NonNullable<EnvironmentsS
       {p.editor.setup ? <SetupSection setup={p.editor.setup} preparing={p.editor.preparing} error={p.editor.prepareError} onPrepare={p.onPrepare} /> : null}
       <ErrorNote message={error} />
     </Dialog>
+  );
+}
+
+/**
+ * One kind of what a desktop comes with, to tick: its surfaces, or its applications. `chosen` is the
+ * environment's whole list, both kinds together, which a tick adds to or takes from.
+ */
+function AppChoices({ legend, hint, choices, chosen, onChange }: { legend: string; hint: string; choices: DesktopApp[]; chosen: string[]; onChange: (chosen: string[]) => void }) {
+  if (choices.length === 0) return null;
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="text-[13px] font-medium text-foreground">{legend}</legend>
+      <p className="text-[13px] text-muted-foreground">{hint}</p>
+      <div className="grid gap-2 md:grid-cols-2">
+        {choices.map((app) => (
+          <CheckField
+            key={app.id}
+            label={app.name}
+            description={app.description}
+            checked={chosen.includes(app.id)}
+            onChange={(checked) => onChange(checked ? [...chosen, app.id] : chosen.filter((other) => other !== app.id))}
+          />
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
