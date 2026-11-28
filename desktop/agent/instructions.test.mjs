@@ -64,10 +64,13 @@ test("the agent is told to start what is slow first and to keep working while it
   assert.doesNotMatch(projectTools(), /phone ios build/);
 });
 
-test("the agent is told about Return, about what a reading leaves out, and that the surface in use comes to the front", () => {
+test("the agent is told about Return, about a reading that cannot be relied on, and that the surface in use comes to the front", () => {
   const told = projectTools(["chrome", "iphone", "android"]);
   assert.match(told, /`press enter` presses Return/);
-  assert.match(told, /leaves out a system dialog and some overlays/);
+  assert.match(told, /`type "text" --enter` types and then presses it/);
+  assert.match(told, /`press delete --times 20`/);
+  assert.match(told, /means what it meant in the last reading that was printed/);
+  assert.match(told, /names a picture of the screen it has saved: read that picture, tap by position/);
   assert.match(told, /comes to the front of the desktop by itself/);
   assert.match(told, /its developer menu covers the app/);
 });
